@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameApi, Hud, Look, Quality } from "./game/Game";
 import { Controls } from "./ui/Controls";
 import { Glyph, ItemIcon } from "./ui/icons";
+import { Online, PlayerKey, copyText } from "./ui/Online";
+import { Realm } from "./net/realm";
 
 const SKINS = ["#f0d8c0", "#e2c0a0", "#c8a080", "#a07858", "#6e4a32"];
 const HAIRS = ["#2a2118", "#5a3a22", "#8a5a2a", "#b89a6a", "#9a3a22", "#d8d0c4"];
@@ -91,25 +93,77 @@ function Loading({ progress }: { progress: number }) {
   );
 }
 
+const DEFAULT_LOOK: Look = { body: 1, skin: 1, hair: 0, hairColor: 1, coat: 0 };
+
 function Screens({ api, hud }: { api: GameApi; hud: Hud }) {
-  const [screen, setScreen] = useState<"main" | "slots" | "settings">("main");
+  // a ?join=CODE link opens straight into online play
+  const [screen, setScreen] = useState<"main" | "single" | "slots" | "settings" | "online">(() => (new URLSearchParams(location.search).get("join") ? "online" : "main"));
   const [pendingSlot, setPendingSlot] = useState(0);
+  const [creating, setCreating] = useState<"single" | "online">("single");
+  const [createErr, setCreateErr] = useState("");
   if (hud.mode === "loading") return null;
+  const newSingle = (s: number) => {
+    setPendingSlot(s);
+    setCreating("single");
+    api.create(DEFAULT_LOOK);
+  };
   if (hud.mode === "title")
-    return screen === "slots" ? (
-      <Slots hud={hud} api={api} back={() => setScreen("main")} onNew={(s) => { setPendingSlot(s); api.create({ body: 1, skin: 1, hair: 0, hairColor: 1, coat: 0 }); setScreen("main"); }} />
+    return screen === "online" ? (
+      <Online
+        api={api}
+        back={() => setScreen("main")}
+        newCharacter={() => {
+          setCreating("online");
+          setCreateErr("");
+          api.create(DEFAULT_LOOK);
+        }}
+      />
+    ) : screen === "slots" ? (
+      <Slots hud={hud} api={api} back={() => setScreen("single")} onNew={(s) => { newSingle(s); setScreen("single"); }} />
     ) : screen === "settings" ? (
       <Settings hud={hud} api={api} back={() => setScreen("main")} />
+    ) : screen === "single" ? (
+      <Title hud={hud} api={api} toSlots={() => setScreen("slots")} back={() => setScreen("main")} onNew={newSingle} />
     ) : (
-      <Title hud={hud} api={api} toSlots={() => setScreen("slots")} toSettings={() => setScreen("settings")} onNew={(s) => { setPendingSlot(s); api.create({ body: 1, skin: 1, hair: 0, hairColor: 1, coat: 0 }); }} />
+      <Main hud={hud} toOnline={() => setScreen("online")} toSingle={() => setScreen("single")} toSettings={() => setScreen("settings")} />
     );
-  if (hud.mode === "create") return <Creator api={api} slot={pendingSlot} back={() => api.toTitle()} />;
+  if (hud.mode === "create")
+    return creating === "online" ? (
+      <Creator
+        api={api}
+        title="A new character"
+        sub="Your character travels with you between worlds: gear, health and progress."
+        confirm="Create"
+        error={createErr}
+        back={() => {
+          api.toTitle();
+          setScreen("online");
+        }}
+        onConfirm={async (name, look) => {
+          try {
+            const realm = await Realm.open();
+            if (!realm) throw new Error("Online play is not set up on this build.");
+            const c = await realm.createCharacter(name, look);
+            try {
+              localStorage.setItem("veyrmarch.char", c.id);
+            } catch {
+              /* ignore */
+            }
+            api.toTitle();
+            setScreen("online");
+          } catch (e) {
+            setCreateErr(String((e as Error)?.message ?? e));
+          }
+        }}
+      />
+    ) : (
+      <Creator api={api} back={() => api.toTitle()} onConfirm={(name, look) => api.newGame(pendingSlot, name, look)} />
+    );
   return <Play api={api} hud={hud} />;
 }
 
-function Title({ hud, api, toSlots, toSettings, onNew }: { hud: Hud; api: GameApi; toSlots: () => void; toSettings: () => void; onNew: (s: number) => void }) {
+function Main({ hud, toOnline, toSingle, toSettings }: { hud: Hud; toOnline: () => void; toSingle: () => void; toSettings: () => void }) {
   const latest = hud.slots.filter(Boolean).sort((a, b) => (b!.time ?? 0) - (a!.time ?? 0))[0];
-  const free = hud.slots.findIndex((s) => !s);
   const standalone = typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone);
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
   return (
@@ -117,6 +171,35 @@ function Title({ hud, api, toSlots, toSettings, onNew }: { hud: Hud; api: GameAp
       <div className="vm-title-head">
         <div className="vm-wordmark big">VEYRMARCH</div>
         <div className="vm-tagline">The Sealed Continent</div>
+      </div>
+      <div className="vm-menu">
+        <button className="vm-mbtn primary" onClick={toOnline}>
+          Play
+          <small>Your characters and worlds · play with friends</small>
+        </button>
+        <button className="vm-mbtn" onClick={toSingle}>
+          Single Player
+          <small>{latest ? `${latest.name} · ${latest.progress}` : "Offline, saved on this device"}</small>
+        </button>
+        <button className="vm-mbtn" onClick={toSettings}>
+          Settings
+        </button>
+      </div>
+      <div className="vm-title-foot">
+        {ios && !standalone ? "For full screen: Share → Add to Home Screen. Play in landscape." : "Best played in landscape."}
+      </div>
+    </div>
+  );
+}
+
+function Title({ hud, api, toSlots, back, onNew }: { hud: Hud; api: GameApi; toSlots: () => void; back: () => void; onNew: (s: number) => void }) {
+  const latest = hud.slots.filter(Boolean).sort((a, b) => (b!.time ?? 0) - (a!.time ?? 0))[0];
+  const free = hud.slots.findIndex((s) => !s);
+  return (
+    <div className="vm-title">
+      <div className="vm-title-head">
+        <div className="vm-wordmark big">VEYRMARCH</div>
+        <div className="vm-tagline">Single Player</div>
       </div>
       <div className="vm-menu">
         {latest && (
@@ -135,13 +218,11 @@ function Title({ hud, api, toSlots, toSettings, onNew }: { hud: Hud; api: GameAp
             Characters
           </button>
         )}
-        <button className="vm-mbtn" onClick={toSettings}>
-          Settings
+        <button className="vm-mbtn" onClick={back}>
+          Back
         </button>
       </div>
-      <div className="vm-title-foot">
-        {ios && !standalone ? "For full screen: Share → Add to Home Screen. Play in landscape." : "Best played in landscape."}
-      </div>
+      <div className="vm-title-foot">Single player saves live on this device. Online characters live in your worlds.</div>
     </div>
   );
 }
@@ -202,15 +283,16 @@ function Settings({ hud, api, back }: { hud: Hud; api: GameApi; back: () => void
             <Glyph name="close" size={22} />
           </button>
         </div>
-        <SettingsBody hud={hud} api={api} />
+        <SettingsBody hud={hud} api={api} extra={<PlayerKey />} />
       </div>
     </div>
   );
 }
 
-function SettingsBody({ hud, api }: { hud: Hud; api: GameApi }) {
+function SettingsBody({ hud, api, extra }: { hud: Hud; api: GameApi; extra?: React.ReactNode }) {
   return (
     <div className="vm-settings vm-scroll">
+      {extra}
       <div className="vm-field">
         <label>Graphics</label>
         <div className="vm-seg">
@@ -244,8 +326,11 @@ function SettingsBody({ hud, api }: { hud: Hud; api: GameApi }) {
   );
 }
 
-function Creator({ api, slot, back }: { api: GameApi; slot: number; back: () => void }) {
+function Creator({ api, back, onConfirm, title = "The Unmarked", sub = "No class, no mark. The seals do not know you.", confirm = "Wake in Hearthfen", error = "" }: {
+  api: GameApi; back: () => void; onConfirm: (name: string, look: Look) => void | Promise<void>; title?: string; sub?: string; confirm?: string; error?: string;
+}) {
   const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
   const [look, setLook] = useState<Look>({ body: 1, skin: 1, hair: 0, hairColor: 1, coat: 0 });
   const set = (p: Partial<Look>) => {
     const next = { ...look, ...p };
@@ -255,8 +340,8 @@ function Creator({ api, slot, back }: { api: GameApi; slot: number; back: () => 
   return (
     <div className="vm-creator">
       <div className="vm-creator-panel vm-scroll">
-        <h2>The Unmarked</h2>
-        <p className="vm-sub">No class, no mark. The seals do not know you.</p>
+        <h2>{title}</h2>
+        <p className="vm-sub">{sub}</p>
         <div className="vm-field">
           <label>Name</label>
           <input value={name} maxLength={18} placeholder="Walker" onChange={(e) => setName(e.target.value)} />
@@ -306,10 +391,22 @@ function Creator({ api, slot, back }: { api: GameApi; slot: number; back: () => 
           <button className="vm-mbtn" onClick={back}>
             Back
           </button>
-          <button className="vm-mbtn primary" onClick={() => api.newGame(slot, name, look)}>
-            Wake in Hearthfen
+          <button
+            className="vm-mbtn primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onConfirm(name, look);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "…" : confirm}
           </button>
         </div>
+        {error && <p className="vm-err">{error}</p>}
       </div>
     </div>
   );
@@ -398,6 +495,7 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
             <ItemIcon id={hud.weaponId} size={22} />
             <span>{hud.weapon}</span>
           </div>
+          {hud.online && <Party hud={hud} />}
         </div>
         {hud.boss ? (
           <div className="vm-boss">
@@ -464,7 +562,7 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
       {hud.mode === "dead" && (
         <div className="vm-dead">
           <div className="vm-dead-title">You fall</div>
-          <p>The forest keeps what it takes. Not you. Not yet.</p>
+          <p>{hud.online && hud.online.players.some((p) => !p.me && !p.away && !p.dead) ? "A friend can reach you and pull you up. Or wake at the shrine." : "The forest keeps what it takes. Not you. Not yet."}</p>
           <button className="vm-mbtn primary" onClick={() => api.press("wake")}>
             Wake
           </button>
@@ -481,19 +579,60 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
                 <Glyph name="close" size={22} />
               </button>
             </div>
+            {hud.online && <WorldCodeRow hud={hud} />}
             <SettingsBody hud={hud} api={api} />
             <div className="vm-row">
               <button className="vm-mbtn primary" onClick={() => api.press("resume")}>
                 Resume
               </button>
               <button className="vm-mbtn" onClick={() => api.toTitle()}>
-                Save and quit
+                {hud.online ? "Leave world" : "Save and quit"}
               </button>
             </div>
           </div>
         </div>
       )}
     </>
+  );
+}
+
+/** Other players in the world: name, health, where they are. */
+function Party({ hud }: { hud: Hud }) {
+  const o = hud.online!;
+  const others = o.players.filter((p) => !p.me);
+  return (
+    <div className="vm-party">
+      <div className="vm-party-head">
+        <span>{o.world}</span>
+        <em>{o.status === "connected" ? o.code : "Reconnecting…"}</em>
+      </div>
+      {others.length === 0 && <div className="vm-party-empty">Alone here. Share code {o.code}.</div>}
+      {others.map((p, i) => (
+        <div key={i} className={`vm-party-row ${p.dead ? "down" : ""} ${p.away ? "away" : ""}`}>
+          <span>{p.name}</span>
+          <small>{p.away ? "away" : p.dead ? "down" : p.zone}</small>
+          <i>
+            <b style={{ width: `${Math.max(0, Math.min(100, (p.hp / p.max) * 100))}%` }} />
+          </i>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WorldCodeRow({ hud }: { hud: Hud }) {
+  const o = hud.online!;
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="vm-coderow">
+      <div>
+        <label>{o.world} · Day {o.day}</label>
+        <b>{o.code}</b>
+      </div>
+      <button className="vm-mbtn small" onClick={async () => setCopied(await copyText(o.code))}>
+        {copied ? "Copied" : "Copy code"}
+      </button>
+    </div>
   );
 }
 

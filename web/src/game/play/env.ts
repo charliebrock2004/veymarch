@@ -17,15 +17,21 @@ export type PlayerState = {
   shield: boolean;
   dead: boolean;
   inDungeon: boolean;
+  /** connection id of a remote player; undefined for the local one */
+  cid?: string;
 };
 
-export type HurtOpts = { knock?: number; unblockable?: boolean; parryable?: boolean; source?: { stagger: (t: number) => void } };
+export type HurtOpts = { knock?: number; unblockable?: boolean; parryable?: boolean; source?: { stagger: (t: number) => void }; src?: string };
 
 /** Everything an enemy or the boss may touch. They never write player state directly. */
 export interface Env {
   time: number;
   player: PlayerState;
   hurtPlayer: (dmg: number, sx: number, sz: number, o?: HurtOpts) => boolean;
+  /** Every player in the world, the local one first. Single player: just the local one. */
+  players: () => PlayerState[];
+  /** Hurts any player: the local one directly, a remote one by message (their client applies dodge, block and parry). */
+  hurt: (target: PlayerState, dmg: number, sx: number, sz: number, o?: HurtOpts) => boolean;
   dust: Particles;
   sparks: Particles;
   decals: DecalPool;

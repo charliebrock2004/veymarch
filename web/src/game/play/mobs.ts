@@ -4,7 +4,7 @@ import {
   Poser, buildHuman, buildQuad, buildRockingHorse, characterMaterial, poseHorse, poseHuman, poseQuad, type HumanAction, type QuadAction, type Rig,
 } from "../engine/rig";
 import { MOB_LOOT } from "../content";
-import type { Env } from "./env";
+import type { Env, PlayerState } from "./env";
 import { weaponModel } from "./weapons";
 
 /**
@@ -156,6 +156,11 @@ function makeRig(kind: MobKind): { rig: Rig; mat: THREE.MeshLambertMaterial; mou
 
 let nextId = 1;
 
+/** Network order of Mob.state; snapshots send the index. */
+export const MOB_STATES = ["idle", "chase", "tell", "active", "recover", "stagger", "flee", "dead", "return"] as const;
+export const MOB_KINDS: MobKind[] = ["wolf", "goblin", "redcap", "soldier", "mouse", "horse", "deer"];
+export type MobSnap = [key: string, x: number, z: number, yaw: number, st: number, hp: number, atk: number, t: number, kind: number];
+
 export class Mob {
   id = nextId++;
   cfg: Cfg;
@@ -191,6 +196,15 @@ export class Mob {
   wz: number;
   summoned = false;
   idleT = Math.random() * 5;
+  /** stable network key: a spawn key ("w1") or a toy key ("t3") */
+  key = "";
+  /** the player this foe is after (multiplayer: the nearest one, re-picked now and then) */
+  target: PlayerState | null = null;
+  private retargetT = 0;
+  private hitSet = new Set<PlayerState>();
+  /** true on clients that do not run the world: positions and states come from snapshots */
+  puppet = false;
+  private net: { x: number; z: number; yaw: number } | null = null;
 
   constructor(public kind: MobKind, public homeX: number, public homeZ: number, public dungeon: boolean, private env: Env, public respawns = true) {
     this.cfg = MOBS[kind];
@@ -226,6 +240,7 @@ export class Mob {
     this.hp = this.cfg.hp;
     this.alive = true;
     this.state = "idle";
+    this.target = null;
     this.x = this.homeX;
     this.z = this.homeZ;
     this.aggro = false;
@@ -276,7 +291,7 @@ export class Mob {
     this.hp = 0;
     this.state = "dead";
     this.deadT = 0;
-    this.respawnT = this.respawns ? 150 : Infinity;
+    this.respawnT = this.respawns && !this.puppet ? 150 : Infinity;
     this.env.decals.release(this.decal);
     this.decal = null;
     if (this.kind === "wolf") this.env.audio.yelp();
@@ -286,9 +301,139 @@ export class Mob {
     } else this.env.dust.burst(14, this.x, this.y + 0.5, this.z, 2.5, 0x6a5a48, 0.8, 0.22, { up: 1.5 });
   }
 
-  update(dt: number) {
+  /** The nearest player in this foe's zone; sticky, so it does not flip between two people. */
+  private choose(dt: number): PlayerState {
     const env = this.env;
-    const p = env.player;
+    const all = env.players();
+    const ok = (q: PlayerState) => !q.dead && q.inDungeon === this.dungeon;
+    if (this.target && (!ok(this.target) || !all.includes(this.target))) this.target = null;
+    this.retargetT -= dt;
+    if (!this.target || this.retargetT <= 0) {
+      this.retargetT = 0.8;
+      let best = this.target;
+      let bd = best ? this.distTo(best.x, best.z) - 3 : 1e9;
+      for (const q of all)
+        if (ok(q)) {
+          const d = this.distTo(q.x, q.z);
+          if (d < bd) {
+            bd = d;
+            best = q;
+          }
+        }
+      this.target = best;
+    }
+    return this.target ?? env.player;
+  }
+
+  /** Whether a point stands inside this foe's current attack. */
+  private inAttack(atk: Attack, ox: number, oz: number, px: number, pz: number) {
+    const dx = px - ox;
+    const dz = pz - oz;
+    const dd = Math.hypot(dx, dz);
+    if (atk.shape === 0) return dd < atk.size + 0.3;
+    if (atk.shape === 1) {
+      const ang = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - this.yaw), Math.cos(Math.atan2(dx, dz) - this.yaw)));
+      return dd < atk.size * 0.85 + 0.3 && ang < (atk.half ?? 0.6) + 0.3;
+    }
+    const fx = Math.sin(this.yaw);
+    const fz = Math.cos(this.yaw);
+    const along = dx * fx + dz * fz;
+    const side = Math.abs(-dx * fz + dz * fx);
+    return this.kind === "horse" || this.kind === "wolf" ? dd < this.cfg.radius + 0.75 : along > -0.3 && along < atk.size * 0.9 && side < (atk.width ?? 0.7) + 0.35;
+  }
+
+  /** Snapshot for the network. */
+  snap(): MobSnap {
+    const r = (v: number) => Math.round(v * 100) / 100;
+    return [this.key, r(this.x), r(this.z), r(this.yaw), MOB_STATES.indexOf(this.state), Math.round(this.hp), this.atk ? this.cfg.attacks.indexOf(this.atk) : -1, r(Math.max(0, this.t)), MOB_KINDS.indexOf(this.kind)];
+  }
+
+  /** Applies a snapshot from the client that runs the world. */
+  applySnap(sn: MobSnap) {
+    const [, x, z, yaw, st, hp, atk, t] = sn;
+    const state = MOB_STATES[st] ?? "idle";
+    if (!this.net || Math.hypot(x - this.x, z - this.z) > 10) {
+      this.x = x;
+      this.z = z;
+      this.yaw = yaw;
+    }
+    this.net = { x, z, yaw };
+    this.hp = hp;
+    if (state === "dead" && this.alive) {
+      this.die();
+      this.respawnT = Infinity;
+    } else if (state !== "dead" && !this.alive) {
+      this.reset();
+      this.x = x;
+      this.z = z;
+    }
+    if (state !== this.state) {
+      if (this.state === "tell") {
+        this.env.decals.release(this.decal);
+        this.decal = null;
+      }
+      this.state = state;
+      this.t = t;
+      if (state === "tell") this.decal = this.env.decals.get();
+      if (state === "active") this.env.audio.swing((this.atk?.dmg ?? 0) > 14);
+    } else if (Math.abs(this.t - t) > 0.2) this.t = t;
+    this.atk = atk >= 0 ? this.cfg.attacks[atk] ?? null : null;
+  }
+
+  /** Becomes the real thing (this client now runs the world) or a puppet. */
+  setPuppet(on: boolean) {
+    if (this.puppet === on) return;
+    this.puppet = on;
+    this.net = null;
+    this.target = null;
+    if (!on && this.alive && (this.state === "tell" || this.state === "active")) {
+      this.env.decals.release(this.decal);
+      this.decal = null;
+      this.state = "chase";
+      this.cd = 0.6;
+    }
+    if (!on && !this.alive) this.respawnT = this.respawns ? 150 : Infinity;
+  }
+
+  private puppetUpdate(dt: number) {
+    const env = this.env;
+    if (this.flash > 0) this.flash -= dt;
+    this.mat.emissive.setHex(this.flash > 0 ? 0xff8866 : 0x000000);
+    this.mat.emissiveIntensity = this.flash > 0 ? 0.9 : 0;
+    if (this.state === "dead") {
+      this.deadT += dt;
+      if (this.deadT > 3.5) this.rig.group.position.y = this.y - (this.deadT - 3.5) * 0.6;
+      if (this.deadT > 5) this.rig.group.visible = false;
+      this.animate(dt);
+      return;
+    }
+    this.t -= dt;
+    const ox = this.x;
+    const oz = this.z;
+    if (this.net) {
+      const k = Math.min(1, dt * 9);
+      this.x += (this.net.x - this.x) * k;
+      this.z += (this.net.z - this.z) * k;
+      const dy = Math.atan2(Math.sin(this.net.yaw - this.yaw), Math.cos(this.net.yaw - this.yaw));
+      this.yaw += dy * Math.min(1, dt * 10);
+    }
+    const sp = Math.hypot(this.x - ox, this.z - oz) / Math.max(dt, 1e-3);
+    this.speed += (Math.min(sp, 12) - this.speed) * Math.min(1, dt * 6);
+    if (this.state === "tell" && this.atk && this.decal) {
+      const atk = this.atk;
+      const k = 1 - Math.max(0, this.t) / atk.tell;
+      const cx = atk.ground ? this.x + Math.sin(this.yaw) * 1.4 : this.x;
+      const cz = atk.ground ? this.z + Math.cos(this.yaw) * 1.4 : this.z;
+      this.decal.show(atk.shape, cx, env.groundAt(cx, cz), cz, this.yaw, atk.size, k, { half: atk.half, w: atk.width, color: 0xd9663a });
+    }
+    this.y = env.groundAt(this.x, this.z);
+    this.animate(dt);
+  }
+
+  update(dt: number) {
+    if (this.puppet) return this.puppetUpdate(dt);
+    const env = this.env;
+    const p = this.choose(dt);
     if (this.flash > 0) this.flash -= dt;
     this.mat.emissive.setHex(this.flash > 0 ? 0xff8866 : 0x000000);
     this.mat.emissiveIntensity = this.flash > 0 ? 0.9 : 0;
@@ -297,7 +442,7 @@ export class Mob {
       if (this.deadT > 3.5) this.rig.group.position.y = this.y - (this.deadT - 3.5) * 0.6;
       if (this.deadT > 5) this.rig.group.visible = false;
       this.respawnT -= dt;
-      if (this.respawnT <= 0 && (this.distTo(p.x, p.z) > 45 || p.inDungeon !== this.dungeon)) this.reset();
+      if (this.respawnT <= 0 && env.players().every((q) => this.distTo(q.x, q.z) > 45 || q.inDungeon !== this.dungeon)) this.reset();
       this.animate(dt);
       return;
     }
@@ -379,6 +524,7 @@ export class Mob {
           this.state = "tell";
           this.t = atk.tell;
           this.hitDone = false;
+          this.hitSet.clear();
           this.aimX = p.x;
           this.aimZ = p.z;
           this.decal = env.decals.get();
@@ -434,27 +580,16 @@ export class Mob {
           this.kx *= lim / kl;
           this.kz *= lim / kl;
         }
-        if (!this.hitDone && sameZone) {
-          let hit = false;
+        if (!this.hitDone) {
           const ox = atk.ground ? this.x + Math.sin(this.yaw) * 1.4 : this.x;
           const oz = atk.ground ? this.z + Math.cos(this.yaw) * 1.4 : this.z;
-          const dx = p.x - ox;
-          const dz = p.z - oz;
-          const dd = Math.hypot(dx, dz);
-          if (atk.shape === 0) hit = dd < atk.size + 0.3;
-          else if (atk.shape === 1) {
-            const ang = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - this.yaw), Math.cos(Math.atan2(dx, dz) - this.yaw)));
-            hit = dd < atk.size * 0.85 + 0.3 && ang < (atk.half ?? 0.6) + 0.3;
-          } else {
-            const fx = Math.sin(this.yaw);
-            const fz = Math.cos(this.yaw);
-            const along = dx * fx + dz * fz;
-            const side = Math.abs(-dx * fz + dz * fx);
-            hit = this.kind === "horse" || this.kind === "wolf" ? dd < cfg.radius + 0.75 : along > -0.3 && along < atk.size * 0.9 && side < (atk.width ?? 0.7) + 0.35;
-          }
-          if (hit) {
-            this.hitDone = true;
-            env.hurtPlayer(atk.dmg, this.x, this.z, { knock: atk.knock, source: this, parryable: true });
+          // each player is struck at most once per attack
+          for (const q of env.players()) {
+            if (q.dead || q.inDungeon !== this.dungeon || this.hitSet.has(q)) continue;
+            if (!this.inAttack(atk, ox, oz, q.x, q.z)) continue;
+            this.hitSet.add(q);
+            env.hurt(q, atk.dmg, this.x, this.z, { knock: atk.knock, source: this, parryable: true, src: this.key });
+            if (!atk.ground && q === p) this.hitDone = true;
           }
           if (atk.ground && this.t < atk.active * 0.5 && !this.hitDone) {
             this.hitDone = true;

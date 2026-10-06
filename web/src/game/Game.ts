@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { DESCRIPTIONS, ITEMS, MORE_LINES, RECIPES, SPEEDS, TRADES } from "./content";
+import { DESCRIPTIONS, ITEMS, MOB_SPAWNS, MORE_LINES, RECIPES, SPEEDS, TRADES } from "./content";
 import { addItem, canMine, consume, countOf, equip, equipped, gateOpen, grantUniques, item, recipeHint, strikeDamage, tryCraft, type Stack } from "./rules";
 import { Audio } from "./engine/audio";
 import { Beam, DecalPool, Flashes } from "./engine/fx";
@@ -12,11 +12,14 @@ import { blockTex } from "./engine/textures";
 import { buildDungeon, type Dungeon } from "./world/dungeon";
 import { BOUNDS, DUN, DUN_X, GATE, REGION_TITLE, SPAWN, VOSS, regionAt, type Region } from "./world/layout";
 import { buildOverworld, type NodeDef, type Overworld } from "./world/overworld";
-import { Cookie } from "./play/boss";
+import { Cookie, type BossSnap } from "./play/boss";
 import type { Env, HurtOpts, PlayerState } from "./play/env";
-import { Mob, type MobKind } from "./play/mobs";
+import { Mob, type MobKind, type MobSnap } from "./play/mobs";
 import { NPCS, Npc, VOSS_NPCS } from "./play/npcs";
+import { RemotePlayer, type NetPlayer } from "./play/remote";
 import { weaponModel } from "./play/weapons";
+import type { BossJson, EnterJson, HeartbeatJson, Realm, StackJson } from "../net/realm";
+import { Room, type Bundle, type Ev } from "../net/room";
 
 // ------------------------------------------------------------------ public types
 
@@ -31,6 +34,16 @@ export type Quality = "low" | "medium" | "high";
 export type Mode = "loading" | "title" | "create" | "play" | "bag" | "talk" | "dead" | "reward" | "end" | "pause";
 
 export type SlotInfo = { slot: number; name: string; place: string; progress: string; time: number } | null;
+
+/** Multiplayer status for the HUD; null in single player. */
+export type OnlineHud = {
+  code: string;
+  world: string;
+  day: number;
+  status: "connecting" | "connected" | "closed";
+  runner: boolean;
+  players: { name: string; hp: number; max: number; dead: boolean; me: boolean; away: boolean; zone: string }[];
+};
 
 export type Hud = {
   mode: Mode;
@@ -77,6 +90,7 @@ export type Hud = {
   slot: number;
   inDungeon: boolean;
   fps: number;
+  online: OnlineHud | null;
 };
 
 export type Press =
@@ -101,6 +115,8 @@ export type GameApi = {
   trade: (id: string) => void;
   setQuality: (q: Quality) => void;
   setMuted: (m: boolean) => void;
+  /** Enters a persistent world with a server character (the result of vm_join / vm_enter). */
+  startOnline: (realm: Realm, enter: EnterJson) => void;
 };
 
 // ------------------------------------------------------------------ save format
@@ -297,6 +313,37 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const good = { x: SPAWN.x, z: SPAWN.z, yaw: 0, cam: 0 };
   let nanWarned = false;
 
+  // ------------------------------------------------------------ online state (null in single player)
+  type Online = {
+    realm: Realm;
+    room: Room;
+    worldId: string;
+    code: string;
+    worldName: string;
+    charId: string;
+    day: number;
+    remotes: Map<string, RemotePlayer>;
+    tickT: number;
+    beatT: number;
+    playAcc: number;
+    boss: BossJson | null;
+    arenaEmptyT: number;
+    wxSent: number;
+    runner: boolean;
+    lastBeat: number;
+    names: Set<string>;
+  };
+  let online: Online | null = null;
+  /** changes with every new action, so other screens restart a repeated swing */
+  let actionCount = 0;
+  /** dead foes from the server: key -> seconds until they stand again (Infinity: for good) */
+  const deadLeft = new Map<string, number>();
+  let pendingRevive: string | null = null;
+  let lastCookieSt = "";
+  /** online: whether this session already handled Cookie's fall (the world flag can arrive first) */
+  let cookieFinished = false;
+  const r2 = (v: number) => Math.round(v * 100) / 100;
+
   // player
   const P: PlayerState & {
     stam: number; maxStam: number; mana: number; maxMana: number; vx: number; vz: number; kx: number; kz: number; speed: number;
@@ -343,6 +390,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     time: 0,
     player: P,
     hurtPlayer: (d, sx, sz, o) => hurtPlayer(d, sx, sz, o),
+    players: () => (online ? [P as PlayerState, ...livePeers()] : [P]),
+    hurt: (q, d, sx, sz, o) => (q === P ? env.hurtPlayer(d, sx, sz, o) : netHurt(q, d, sx, sz, o)),
     dust, sparks, decals, flashes, beam, audio,
     col: null as unknown as Env["col"],
     groundAt: (x, z) => (world ? world.groundAt(x, z) : 0),
@@ -420,6 +469,25 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         el.remove();
         bars.delete(id);
       }
+    if (online) {
+      const now = performance.now();
+      const inWorld = mode !== "title" && mode !== "create" && mode !== "loading";
+      for (const r of online.remotes.values()) {
+        const st = r.state;
+        const dist = Math.hypot(st.x - P.x, st.z - P.z);
+        const p = inWorld && r.rig.group.visible && dist < 55 ? project(st.x, st.y + 2.2, st.z) : null;
+        if (!p || !r.live(now)) {
+          r.plate.style.display = "none";
+          continue;
+        }
+        r.plate.style.display = "";
+        r.plate.style.transform = `translate3d(${p.x}px, ${p.y}px, 0) translate(-50%, -100%)`;
+        r.plate.style.opacity = String(Math.max(0.35, Math.min(1, 1.4 - dist / 40)));
+        r.plate.classList.toggle("down", st.dead);
+        r.plate.classList.toggle("hurt", st.hp < st.maxHp);
+        ((r.plate.lastChild as HTMLElement).firstChild as HTMLElement).style.width = `${Math.max(0, Math.min(100, (st.hp / st.maxHp) * 100))}%`;
+      }
+    }
   }
 
   function mainWeapon() {
@@ -551,6 +619,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       reward, fade, stats: { time: playTime, deaths, kills }, hurtAt, quality, muted: audio.muted,
       slots: mode === "title" || mode === "loading" || !slotCache ? (slotCache = readSlots()) : slotCache, combat: combatT > 0, charge: P.holding ? Math.min(1, P.holdT / 0.35) : 0, slot,
       inDungeon: P.inDungeon, fps: Math.round(fps),
+      online: online ? onlineHud() : null,
     };
   }
   let slotCache: SlotInfo[] | null = null;
@@ -582,6 +651,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
 
   function persist() {
+    // online characters and worlds live on the server: important changes are sent as they happen
+    if (online) return;
     if (mode === "title" || mode === "create" || mode === "loading" || !world) return;
     const s: Save = {
       v: 2, name, look, x: P.x, z: P.z, yaw: P.yaw, dungeon: P.inDungeon, hp: Math.max(1, P.hp), mana: P.mana, maxMana: P.maxMana,
@@ -617,6 +688,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     seq = s.seq;
     weightX = s.weightX ?? 0;
     deadMobs = new Set(s.deadMobs ?? []);
+    deadLeft.clear();
   }
 
   // ------------------------------------------------------------ world build (async so the loader can paint)
@@ -662,34 +734,37 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
   let glowTime: { value: number } = { value: 0 };
 
-  const MOB_SPAWNS: [string, MobKind, number, number, boolean][] = [
-    ["w1", "wolf", 14, 58, false], ["w2", "wolf", -18, 62, false], ["w3", "wolf", 16, 82, false], ["w4", "wolf", 21, 86, false], ["w5", "wolf", 22, 79, false],
-    ["w6", "wolf", 30, 128, false], ["w7", "wolf", -36, 136, false],
-    ["g1", "goblin", -39, 93, false], ["g2", "goblin", -46, 99, false], ["g3", "goblin", -37, 100, false], ["g4", "redcap", -43, 96, false],
-    ["d1", "deer", 34, 100, false], ["d2", "deer", 37, 104, false], ["d3", "deer", -34, 124, false], ["d4", "deer", 46, 72, false], ["d5", "deer", 130, 30, false],
-    ["s1", "soldier", -5, 150, false], ["s2", "soldier", 6, 154, false],
-    ["dm1", "mouse", DUN_X - 4, 10, true], ["dm2", "mouse", DUN_X + 4, 12, true],
-    ["ds1", "soldier", DUN_X - 4, 50, true], ["ds2", "soldier", DUN_X + 4, 52, true], ["dm3", "mouse", DUN_X, 46, true],
-    ["ds3", "soldier", DUN_X - 3, 66, true], ["ds4", "soldier", DUN_X + 3, 76, true], ["dh", "horse", DUN_X, 72, true],
-  ];
   const mobKey = new Map<Mob, string>();
+  const mobByKey = new Map<string, Mob>();
 
   function spawnMobs() {
     for (const m of mobs) m.remove();
     mobs.length = 0;
     mobKey.clear();
-    for (const [key, kind, x, z, d] of MOB_SPAWNS) {
-      const m = new Mob(kind, x, z, d, env, !d && kind !== "soldier");
+    mobByKey.clear();
+    // dungeon positions in the table are relative to the castle interior
+    for (const [key, k, x0, z, d] of MOB_SPAWNS) {
+      const kind = k as MobKind;
+      const m = new Mob(kind, d ? DUN_X + x0 : x0, z, d, env, !d && kind !== "soldier");
+      m.key = key;
       mobs.push(m);
       mobKey.set(m, key);
-      if (deadMobs.has(key)) {
+      mobByKey.set(key, m);
+      const left = deadLeft.get(key);
+      if (deadMobs.has(key) || left !== undefined || (online && flags.cookie && kind === "soldier" && !d)) {
         m.alive = false;
         m.state = "dead";
         m.deadT = 10;
-        m.respawnT = Infinity;
+        m.respawnT = left ?? Infinity;
         m.rig.group.visible = false;
       }
+      if (online && !online.room.isRunner) m.puppet = true;
     }
+  }
+
+  function findMob(key: unknown): Mob | undefined {
+    if (typeof key !== "string") return undefined;
+    return mobByKey.get(key) ?? cookie?.toys.find((t) => t.key === key);
   }
 
   // ------------------------------------------------------------ interactions
@@ -719,8 +794,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     interacts.push({
       x: a.bed.x, z: a.bed.z, r: 2.0, dungeon: false, label: () => "Rest (your bedroll)",
       act: () => fadeThen(() => {
-        if (hour > 18 || hour < 6) hour = 6.6;
-        else hour += 2;
+        // in a shared world the clock belongs to everyone
+        if (!online) {
+          if (hour > 18 || hour < 6) hour = 6.6;
+          else hour += 2;
+        }
         P.hp = P.maxHp;
         P.stam = P.maxStam;
         P.mana = P.maxMana;
@@ -733,7 +811,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       x: a.chest.x, z: a.chest.z, r: 1.8, dungeon: false, label: () => (flags.chest ? null : "Open your chest"),
       act: () => {
         flags.chest = true;
-        loot([["cons_bandage", 2], ["mat_fibre", 2], ["mat_wood", 1]]);
+        if (online) memberFlag("chest");
+        else loot([["cons_bandage", 2], ["mat_fibre", 2], ["mat_wood", 1]]);
         audio.pickup();
       },
     });
@@ -741,7 +820,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       x: a.hollow.x, z: a.hollow.z, r: 2.0, dungeon: false, label: () => (flags.hollow ? null : "Search the hollow"),
       act: () => {
         flags.hollow = true;
-        loot([["mat_copper", 3], ["mat_leather", 1], ["cons_bandage", 1]]);
+        if (online) memberFlag("hollow");
+        else loot([["mat_copper", 3], ["mat_leather", 1], ["cons_bandage", 1]]);
         say("Someone hid this in the giant's roots.");
         audio.pickup();
       },
@@ -749,6 +829,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     interacts.push({
       x: a.shrine.x, z: a.shrine.z, r: 2.6, dungeon: false, label: () => "Rest at the shrine",
       act: () => {
+        if (online && !flags.shrine) memberFlag("shrine");
         flags.shrine = true;
         respawnShrine = true;
         P.hp = P.maxHp;
@@ -764,6 +845,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       act: () => {
         ringT = 3;
         audio.bell(0.3, 330);
+        online?.room.event({ k: "bell" });
       },
     });
     interacts.push({
@@ -810,7 +892,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       x: d.nurseryDoor.x, z: d.nurseryDoor.z, r: 2.8, dungeon: true, label: () => (flags.nursery ? null : "Painted door"),
       act: () => {
         const horse = mobs.find((m) => m.kind === "horse");
-        if (horse && horse.alive) openTalkLines("", "", MORE_LINES.horseDoor);
+        if (horse && horse.alive && (!online || !deadLeft.has("dh"))) openTalkLines("", "", MORE_LINES.horseDoor);
         else openNursery();
       },
     });
@@ -849,6 +931,20 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       prompt = label;
       promptAct = it.act;
     }
+    if (online)
+      for (const r of online.remotes.values()) {
+        if (!r.state.dead || r.state.inDungeon !== P.inDungeon || !r.live(performance.now())) continue;
+        const d = Math.hypot(r.state.x - P.x, r.state.z - P.z);
+        if (d > 2.6 || d >= best) continue;
+        best = d;
+        prompt = "Revive " + r.name;
+        promptAct = () => {
+          if (P.action !== "none") return;
+          P.yaw = Math.atan2(r.state.x - P.x, r.state.z - P.z);
+          startAction("gather", 1.1, 0.85);
+          pendingRevive = r.cid;
+        };
+      }
     stationNear = "hand";
     if (world && !P.inDungeon) {
       if (Math.hypot(world.anchors.bench.x - P.x, world.anchors.bench.z - P.z) < 3.4) stationNear = "bench";
@@ -883,15 +979,35 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function finishGather(n: NodeDef) {
     const st = nodeState.get(n.id) ?? { left: n.max, regrow: 0 };
     if (st.left <= 0) return;
-    st.left -= 1;
-    st.regrow = 75;
-    nodeState.set(n.id, st);
-    items = addItem(items, n.item, 1, uid);
     audio.gather(n.item);
     const col = n.kind === "wood" ? 0x8a6a48 : n.kind === "fibre" ? 0x9aa05a : n.kind === "copper" ? 0xc07a42 : n.kind === "iron" ? 0x8a9098 : 0x9a948a;
     dust.burst(12, n.x, n.y + 0.5, n.z, 3, col, 0.7, 0.16, { up: 2, grav: 8 });
     if (n.kind !== "wood" && n.kind !== "fibre") sparks.burst(6, n.x, n.y + 0.5, n.z, 4, 0xffe0b0, 0.3, 0.12, { up: 2 });
     n.mesh.scale.setScalar(0.92);
+    if (online) {
+      // the server owns the node and the reward; the world sees the node shrink
+      rpc<{ items: StackJson[]; item: string; node: { id: string; left: number; regrow_at: string }; now: string }>("vm_gather", { p_node: n.id })
+        .then((r) => {
+          setItems(r.items);
+          const rg = Math.max(0, (Date.parse(r.node.regrow_at) - Date.parse(r.now)) / 1000);
+          nodeState.set(n.id, { left: r.node.left, regrow: rg });
+          online?.room.event({ k: "node", id: n.id, l: r.node.left, rg: Math.round(rg) });
+          floater(`+1 ${item(r.item).name}`, n.x, n.y + 1.4, n.z, "heal");
+          if (r.node.left <= 0) say(item(r.item).name + " · the node is spent for now");
+          if (!hasEdge() && countOf(items, "mat_flint") >= 2 && countOf(items, "mat_wood") >= 1) say("Enough for a knife. Open the bag → Craft.");
+        })
+        .catch((e: Error) => {
+          if (/spent/.test(e.message)) {
+            nodeState.set(n.id, { left: 0, regrow: 75 });
+            say("Someone got there first. The node is spent for now.");
+          } else if (!/too fast/.test(e.message)) netError(e);
+        });
+      return;
+    }
+    st.left -= 1;
+    st.regrow = 75;
+    nodeState.set(n.id, st);
+    items = addItem(items, n.item, 1, uid);
     floater(`+1 ${item(n.item).name}`, n.x, n.y + 1.4, n.z, "heal");
     if (st.left <= 0) say(item(n.item).name + " · the node is spent for now");
     if (!hasEdge() && countOf(items, "mat_flint") >= 2 && countOf(items, "mat_wood") >= 1) say("Enough for a knife. Open the bag → Craft.");
@@ -943,6 +1059,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         lines = L.tanicHello;
         end = () => {
           flags.talked = true;
+          charFlag("talked");
           audio.quest();
           say("New task: gather flint and wood");
           persist();
@@ -951,6 +1068,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         lines = [...L.tanicKnife, "Tanic presses a warm coal into your palm. Ember. It spends a little breath, and it burns what is made of cloth and wax.", ...L.tanicAfter];
         end = () => {
           flags.ember = true;
+          charFlag("ember");
           P.maxMana = 30;
           P.mana = 30;
           audio.reward();
@@ -974,10 +1092,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         end = () => {
           if (!flags.voss) {
             flags.voss = true;
+            charFlag("voss");
             persist();
           }
           if (!flags.ended) {
             flags.ended = true;
+            charFlag("ended");
             mode = "end";
             audio.reward();
             persist();
@@ -1012,6 +1132,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     snapCam();
     if (!flags.entered) {
       flags.entered = true;
+      if (online) memberFlag("entered");
       audio.quest();
     }
     persist();
@@ -1023,20 +1144,27 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     P.z = a.z - 2.5;
     P.yaw = Math.PI;
     camYaw = Math.PI;
-    if (cookie && cookie.fighting) cookie.reset();
+    // a shared fight resets only when everyone has left the courtyard (see runnerDuties)
+    if (!online && cookie && cookie.fighting) cookie.reset();
     snapCam();
     if (flags.cookie) say("The toys are still. The box has nothing left to call.");
     persist();
   }
   function openNursery() {
     flags.nursery = true;
+    if (online)
+      worldFlag("nursery").catch(() => {
+        flags.nursery = false;
+        openTalkLines("", "", MORE_LINES.horseDoor);
+      });
     audio.thud();
     say("The painted door swings in. A music box is playing.");
     persist();
   }
 
-  function startGate() {
+  function startGate(local = true) {
     if (gateOpening || flags.gate) return;
+    if (online && local) worldFlag("gate").catch(() => {});
     gateOpening = true;
     gateT = 0;
     audio.gate();
@@ -1046,6 +1174,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   // ------------------------------------------------------------ combat
   function startAction(a: HumanAction, dur: number, hitAt: number) {
+    actionCount++;
     P.action = a;
     P.at = 0;
     P.dur = dur;
@@ -1148,7 +1277,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     };
     for (const m of mobs) if (m.alive && m.dungeon === P.inDungeon) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy));
     if (cookie && P.inDungeon) {
-      if (cookie.fighting) tryHit(cookie.x, cookie.z, 1.1, (d) => cookie!.takeHit(d, P.x, P.z, heavy, false));
+      if (cookie.fighting) tryHit(cookie.x, cookie.z, 1.1, (d) => (online ? bossHit(d, heavy, false) : cookie!.takeHit(d, P.x, P.z, heavy, false)));
       for (const m of cookie.toys) if (m.alive) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy));
     }
     flashes.arc(ax, P.y + 1.15, az, P.yaw, reach * 0.8, P.action === "light3" || heavy, w.id === "wpn_cookie_blade" ? 0xffb0a0 : 0xffe6b8, P.action === "light2");
@@ -1161,7 +1290,22 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
 
   function onMobHit(m: Mob, dmg: number, heavy: boolean, fire = false) {
+    if (online && m.puppet) {
+      // another client runs this foe: show the blow now, let the runner apply it
+      if (!m.alive) return 0;
+      const d = fire ? Math.round(dmg * m.cfg.fireWeak) : dmg;
+      m.flash = 0.12;
+      m.hp = Math.max(1, m.hp - d);
+      online.room.event({ k: "hit", m: m.key, d: dmg, hv: heavy ? 1 : 0, f: fire ? 1 : 0, x: r2(P.x), z: r2(P.z) }, true);
+      combatT = 3;
+      return d;
+    }
     const dealt = m.takeHit(dmg, P.x, P.z, heavy, fire);
+    if (online) {
+      if (dealt > 0) online.room.event({ k: "hx", m: m.key });
+      if (!m.alive) claimKill(m.key, m);
+      return dealt;
+    }
     if (!m.alive) {
       kills++;
       const key = mobKey.get(m);
@@ -1226,7 +1370,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         }
       if (!hit && cookie && b.dungeon) {
         if (cookie.fighting && Math.hypot(cookie.x - b.x, cookie.z - b.z) < 1.4) {
-          const d = cookie.takeHit(fireDmg, P.x, P.z, false, true);
+          const d = online ? bossHit(fireDmg, false, true) : cookie.takeHit(fireDmg, P.x, P.z, false, true);
           if (d) floater(d + " fire", cookie.x, cookie.y + 2.8, cookie.z, "fire");
           boom();
         }
@@ -1248,7 +1392,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
 
   function hurtPlayer(dmg: number, sx: number, sz: number, o: HurtOpts = {}) {
-    if (P.dead || mode !== "play") return false;
+    // a shared world does not stop for menus
+    const exposed = mode === "play" || (online && (mode === "bag" || mode === "talk" || mode === "pause"));
+    if (P.dead || !exposed) return false;
     if (P.iframe > 0) {
       if (P.action === "dodge") floater("Dodged", P.x, P.y + 2.0, P.z, "info");
       return false;
@@ -1307,11 +1453,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     deaths++;
     startAction("dead", 99, 99);
     mode = "dead";
+    talk = null;
     audio.death();
-    for (const m of mobs) {
-      m.aggro = false;
-      if (m.state !== "dead") m.state = "return";
-    }
+    if (!online)
+      for (const m of mobs) {
+        m.aggro = false;
+        if (m.state !== "dead") m.state = "return";
+      }
     push();
   }
 
@@ -1324,7 +1472,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.mana = P.maxMana;
       P.action = "none";
       P.kx = P.kz = 0;
-      if (cookie && cookie.fighting) cookie.reset();
+      if (online) rpc("vm_died").catch(() => {});
+      else if (cookie && cookie.fighting) cookie.reset();
       if (P.inDungeon) setZone(false);
       const atDoor = flags.entered && !flags.cookie;
       const at = atDoor ? world!.anchors.castleDoor : respawnShrine && flags.shrine ? world!.anchors.shrine : world!.anchors.bed;
@@ -1350,6 +1499,33 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function doCraft(id: string) {
     const r = RECIPES.find((x) => x.id === id);
     if (!r) return;
+    if (online) {
+      if (r.station !== "hand" && r.station !== stationNear) {
+        say(r.station === "forge" ? "That needs Mara's forge." : "That needs the workbench.");
+        audio.block();
+        return;
+      }
+      if (!r.inputs.every((i) => countOf(items, i.id) >= i.n)) {
+        say("Missing materials.");
+        audio.block();
+        return;
+      }
+      // the server checks the station from your last known position, so tell it where you are first
+      const go = r.station === "hand" ? Promise.resolve() : heartbeat();
+      go.then(() => rpc<{ items: StackJson[]; made: string }>("vm_craft", { p_recipe: id, p_station: stationNear }))
+        .then((res) => {
+          setItems(res.items);
+          const made = item(res.made);
+          audio.craft();
+          say(made.name + " crafted" + (made.slot === "main" && !made.moveset.includes("pick") ? " and equipped" : ""));
+          if (made.id === "wpn_stone_knife") {
+            audio.quest();
+            setTimeout(() => say("Show Tanic your knife."), 1800);
+          }
+        })
+        .catch(netError);
+      return;
+    }
     const res = tryCraft(items, id, stationNear, uid);
     if (!res.ok) {
       say(res.reason === "station" ? (r.station === "forge" ? "That needs Mara's forge." : "That needs the workbench.") : "Missing materials.");
@@ -1376,6 +1552,23 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function doTrade(id: string) {
     const t = TRADES.find((x) => x.id === id);
     if (!t) return;
+    if (online) {
+      if (!t.give.every((g) => countOf(items, g.id) >= g.n)) {
+        say("You don't have enough.");
+        audio.block();
+        return;
+      }
+      rpc<{ items: StackJson[] }>("vm_trade", { p_trade: id })
+        .then((r) => {
+          setItems(r.items);
+          audio.pickup();
+          say(`Traded for ${t.get.n} ${item(t.get.id).name}`);
+          if (talk) talk = { ...talk, trades: tradeList() };
+          push();
+        })
+        .catch(netError);
+      return;
+    }
     let next: Stack[] | null = items;
     for (const g of t.give) {
       next = next ? consume(next, g.id, g.n) : null;
@@ -1405,12 +1598,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const next = consume(items, d.id, 1);
       if (!next) return;
       items = next;
+      if (online) rpc<{ items: StackJson[] }>("vm_use", { p_uid: id }, false).then((r) => setItems(r.items)).catch(netError);
       P.hp = Math.min(P.maxHp, P.hp + d.heal);
       floater("+" + d.heal, P.x, P.y + 2, P.z, "heal");
       audio.pickup();
       say("Bandaged. +" + d.heal);
     } else if (d.slot !== "none") {
       items = equip(items, id);
+      if (online) rpc<{ items: StackJson[] }>("vm_equip", { p_uid: id }, false).then((r) => setItems(r.items)).catch(netError);
       syncGear();
       audio.ui();
     }
@@ -1708,6 +1903,16 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           finishGather(pendingGather);
           pendingGather = null;
         }
+        if (P.action === "gather" && pendingRevive && online) {
+          const r = online.remotes.get(pendingRevive);
+          if (r && r.state.dead) {
+            online.room.event({ k: "revive", to: pendingRevive, by: name }, true);
+            sparks.burst(24, r.state.x, r.state.y + 1, r.state.z, 3, 0xffd28a, 1, 0.2, { up: 2, grav: -0.5 });
+            audio.bell(0.12, 523);
+            say("You pull " + r.name + " to their feet.");
+          }
+          pendingRevive = null;
+        }
       }
       if (P.action !== "dead" && P.at >= P.dur) {
         const wasLight = P.action.startsWith("light");
@@ -1863,6 +2068,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     wp.x += (wantX - wp.x) * Math.min(1, dt * 4);
     if (!flags.slab && weightX >= 8.8) {
       flags.slab = true;
+      if (online) worldFlag("slab").catch(() => {});
       audio.thud();
       shake = 0.3;
       say("The weight settles. The slab grinds up.");
@@ -1907,17 +2113,25 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     // arena
     if (cookie) {
-      const inArena = P.inDungeon && Math.hypot(P.x - DUN.arena.x, P.z - DUN.arena.z) < DUN.arena.r - 1.5;
-      if (mode === "play" && inArena && !flags.cookie && cookie.st === "dormant") {
+      const arena = (q: PlayerState) => q.inDungeon && !q.dead && Math.hypot(q.x - DUN.arena.x, q.z - DUN.arena.z) < DUN.arena.r - 1.5;
+      // online, Cookie fights whoever is in the courtyard; only the world runner decides
+      const inArena = online ? env.players().some(arena) : arena(P);
+      const runs = !online || online.room.isRunner;
+      if (runs && (online || mode === "play") && inArena && !flags.cookie && cookie.st === "dormant") {
         cookie.startIntro();
+        // a new fight: full health on the server too
+        if (online) rpc<Record<string, BossJson>>("vm_boss_reset").then((b) => online && (online.boss = b.cookie ?? online.boss)).catch(() => {});
+      }
+      if (cookie.st === "intro" && lastCookieSt !== "intro" && P.inDungeon) {
         introSeen = true;
         audio.bell(0.2, 523);
         placeAt = performance.now();
         placeName = "Evil Toy Penguin Caller Cookie";
         placeSub = "It bows. Then the toys stand up.";
       }
-      if (mode === "play" || cookie.st === "dying") cookie.update(dt, inArena);
-      if (cookie.st === "dead" && !flags.cookie && bossDoneT < 0) {
+      lastCookieSt = cookie.st;
+      if (online ? runs || P.inDungeon : mode === "play" || cookie.st === "dying") cookie.update(dt, inArena);
+      if (cookie.st === "dead" && (online ? !cookieFinished : !flags.cookie) && bossDoneT < 0) {
         bossDoneT = 1.4;
       }
       if (bossDoneT > 0) {
@@ -1976,6 +2190,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
 
   function finishCookie() {
+    if (online) return void finishCookieOnline();
     flags.cookie = true;
     const g = grantUniques(items, ["wpn_cookie_blade", "wpn_cookie_pick", "key_cookie_core"], uid);
     items = g.items;
@@ -2051,7 +2266,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (fade <= 0 && fadeTarget === 0) fade = 0;
     }
     if (world) {
-      const sim = mode === "play" || mode === "dead";
+      // a shared world keeps running behind menus
+      const sim = online ? mode !== "title" && mode !== "create" && mode !== "loading" : mode === "play" || mode === "dead";
       if (sim) {
         hour = (hour + dt / 90) % 24;
         playTime += rdt;
@@ -2080,13 +2296,18 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       nanCheck("player");
       if (P.dead) P.deadT += rdt;
       if (sim) {
+        const everyone = env.players();
+        const nearAny = (m: Mob) => everyone.some((q) => q.inDungeon === m.dungeon && (m.dungeon || Math.hypot(m.x - q.x, m.z - q.z) <= 110));
         for (const m of mobs) {
-          if (m.dungeon !== P.inDungeon && m.state !== "dead") continue;
-          if (!m.dungeon && Math.hypot(m.x - P.x, m.z - P.z) > 110) {
-            m.rig.group.visible = false;
+          const localNear = m.dungeon === P.inDungeon && (m.dungeon || Math.hypot(m.x - P.x, m.z - P.z) <= 110);
+          // the runner simulates every foe near any player; a puppet only needs to look right here
+          const relevant = m.puppet ? localNear : online ? nearAny(m) : localNear;
+          if (!relevant && m.state !== "dead") {
+            if (!localNear) m.rig.group.visible = false;
             continue;
           }
-          if (m.state !== "dead" || m.deadT < 5) m.rig.group.visible = true;
+          if (!localNear) m.rig.group.visible = false;
+          else if (m.state !== "dead" || m.deadT < 5) m.rig.group.visible = true;
           m.update(dt);
         }
         // keep mobs apart
@@ -2094,7 +2315,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           for (let j = i + 1; j < mobs.length; j++) {
             const a = mobs[i];
             const b = mobs[j];
-            if (!a.alive || !b.alive || a.dungeon !== b.dungeon) continue;
+            if (!a.alive || !b.alive || a.dungeon !== b.dungeon || a.puppet || b.puppet) continue;
             const dx = b.x - a.x;
             const dz = b.z - a.z;
             const d = Math.hypot(dx, dz);
@@ -2155,6 +2376,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         boss: cookie && cookie.fighting && P.inDungeon && cookie.st !== "intro" ? 1 : 0,
         music: mode === "title" ? 1 : P.inDungeon ? 0 : 0.6,
       });
+      // network timers run on wall time, even when a slow frame stretches game time
+      if (online) netFrame(Math.min(real, 1));
+      // labels must use this frame's camera, not the last render's
+      camera.updateMatrixWorld();
       updateOverlay(rdt);
     }
     renderer.render(scene, camera);
@@ -2352,6 +2577,403 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
   }
 
+  // ------------------------------------------------------------ online play
+  //
+  // The server (web/server/schema.sql) owns characters, inventories, loot, world progress and
+  // Cookie's health. One client, the "runner", simulates the enemies and Cookie and broadcasts
+  // snapshots; the others draw puppets. Every client checks only its own dodge, block and parry:
+  // the runner decides an attack reached you, your client decides whether it hurt.
+
+  function livePeers(): PlayerState[] {
+    if (!online) return [];
+    const now = performance.now();
+    const out: PlayerState[] = [];
+    for (const r of online.remotes.values()) if (r.live(now)) out.push(r.state);
+    return out;
+  }
+
+  function netHurt(q: PlayerState, dmg: number, sx: number, sz: number, o: HurtOpts = {}) {
+    if (!online || !q.cid) return false;
+    online.room.event({ k: "hurt", to: q.cid, d: dmg, sx: r2(sx), sz: r2(sz), kn: o.knock ?? 1, pa: o.parryable ? 1 : 0, ub: o.unblockable ? 1 : 0, src: o.src ?? "" }, true);
+    return true;
+  }
+
+  /** A realm call for this character (and this world unless `world` is false). */
+  function rpc<T>(fn: string, args: Record<string, unknown> = {}, world = true): Promise<T> {
+    const o = online;
+    if (!o) return Promise.reject(new Error("offline"));
+    return o.realm.call<T>(fn, { ...(world ? { p_world: o.worldId } : {}), p_char: o.charId, ...args });
+  }
+
+  function netError(e: unknown) {
+    const msg = String((e as Error)?.message ?? e);
+    if (/Failed to fetch|NetworkError|not running|did not answer|Load failed/i.test(msg)) say("The realm is not answering. Your last change may not have saved.");
+    else if (msg === "materials") say("Missing materials.");
+    else if (msg === "station") say("Stand at the bench or the forge for that.");
+    else if (msg.length < 90) say(msg);
+    else say("The realm refused that.");
+    audio.block();
+  }
+
+  /** The server's inventory replaces ours. */
+  function setItems(list: StackJson[]) {
+    items = list.map((s) => ({ uid: s.uid, def: s.def, count: s.count, equipped: s.equipped }));
+    syncGear();
+    push();
+  }
+
+  function lootDrops(drops: { item: string; n: number }[]) {
+    for (const d of drops) floater(`+${d.n} ${item(d.item).name}`, P.x, P.y + 2.1, P.z, "heal");
+  }
+
+  function charFlag(f: string) {
+    if (online) rpc("vm_char_flag", { p_flag: f }, false).catch(netError);
+  }
+
+  function memberFlag(f: string) {
+    rpc<{ items: StackJson[]; drops: { item: string; n: number }[] }>("vm_member_flag", { p_flag: f })
+      .then((r) => {
+        setItems(r.items);
+        lootDrops(r.drops);
+      })
+      .catch(netError);
+  }
+
+  function worldFlag(f: string) {
+    return rpc<Record<string, boolean>>("vm_world_flag", { p_flag: f }).then((flagsNow) => {
+      online?.room.event({ k: "flag", f }, true);
+      return flagsNow;
+    });
+  }
+
+  /** World progress made by anyone (an event, or the server's answer to a heartbeat). */
+  function applyWorldFlag(f: string) {
+    if (f === "slab" && !flags.slab) {
+      flags.slab = true;
+      weightX = 9;
+    } else if (f === "nursery" && !flags.nursery) {
+      flags.nursery = true;
+      audio.thud();
+    } else if (f === "gate" && !flags.gate && !gateOpening) startGate(false);
+    else if (f === "cookie" && !flags.cookie) {
+      flags.cookie = true;
+      if (!seals.includes("seal_cookie")) seals = [...seals, "seal_cookie"];
+      // a fight in progress finishes on screen (the runner's snapshot brings the fall); an idle Cookie just lies still
+      if (cookie && !cookie.fighting && cookie.st !== "dying" && cookie.st !== "dead") cookie.setDead();
+    }
+  }
+
+  /** This client struck the killing blow: ask the server for the loot (once per foe per spawn). */
+  function claimKill(key: string, m?: Mob) {
+    kills++;
+    if (m?.kind === "horse") {
+      say("The rocking horse is still. The painted door is free.");
+      audio.quest();
+      deadLeft.set("dh", Infinity);
+    }
+    if (!online || !mobByKey.has(key)) return;
+    rpc<{ items: StackJson[]; drops: { item: string; n: number }[]; dup: boolean }>("vm_loot", { p_mob: key })
+      .then((r) => {
+        setItems(r.items);
+        if (!r.dup) lootDrops(r.drops);
+      })
+      .catch(netError);
+  }
+
+  /** A blow on Cookie: the server prices it against the shared health pool. Returns a local estimate for the number. */
+  function bossHit(dmg: number, heavy: boolean, fire: boolean) {
+    const c = cookie;
+    if (!c || !online || !c.canTakeHit()) return 0;
+    const f = c.hitFlags(P.x, P.z);
+    let est = fire ? Math.round(dmg * 1.5) : dmg;
+    if (f.perched && !fire) est = Math.max(1, Math.round(est * 0.5));
+    if (heavy && f.behind && !fire) {
+      est = Math.round(est * 1.3);
+      floater("Back-stitch!", c.x, c.y + 3.6, c.z, "crit");
+    }
+    if (f.dizzy) est = Math.round(est * 1.3);
+    const x = P.x;
+    const z = P.z;
+    rpc<{ hp: number; max: number; dead: boolean; dealt: number }>("vm_boss_hit", { p_heavy: heavy, p_fire: fire, p_behind: heavy && f.behind, p_perched: f.perched, p_dizzy: f.dizzy })
+      .then((r) => {
+        if (!r.dealt && !r.dead) return;
+        c.netHit(r.hp, x, z, heavy, fire);
+        online?.room.event({ k: "bhp", hp: r.hp, x: r2(x), z: r2(z), hv: heavy ? 1 : 0, f: fire ? 1 : 0 }, true);
+        if (r.dead) applyWorldFlag("cookie");
+      })
+      .catch(netError);
+    return est;
+  }
+
+  /** Cookie fell in a shared world: the server already paid every fighter once. Show what we got. */
+  async function finishCookieOnline() {
+    cookieFinished = true;
+    flags.cookie = true;
+    if (!seals.includes("seal_cookie")) seals = [...seals, "seal_cookie"];
+    for (const m of mobs) if (m.kind === "soldier" && !m.dungeon && m.alive && !m.puppet) m.die();
+    const o = online;
+    if (!o) return;
+    const had = items.some((s) => s.def === "wpn_cookie_blade");
+    try {
+      const c = await o.realm.character(o.charId);
+      if (online !== o) return;
+      setItems(c.items);
+      const blade = c.items.find((s) => s.def === "wpn_cookie_blade");
+      if (!had && blade) {
+        items = equip(items, blade.uid);
+        syncGear();
+        rpc<{ items: StackJson[] }>("vm_equip", { p_uid: blade.uid }, false).then((r) => setItems(r.items)).catch(() => {});
+        reward = ["wpn_cookie_blade", "wpn_cookie_pick", "key_cookie_core"].map((id) => ({ id, name: item(id).name, desc: DESCRIPTIONS[id] ?? "" }));
+        if (mode === "play" || mode === "bag" || mode === "talk") mode = "reward";
+        audio.reward();
+      } else say(had ? "Cookie falls again in this world. You already carry its Core." : "Cookie is defeated. The toys go still.");
+    } catch (e) {
+      netError(e);
+    }
+    push();
+  }
+
+  function netState(): NetPlayer {
+    return {
+      x: r2(P.x), z: r2(P.z), y: r2(P.y), yw: r2(P.yaw), a: P.action, at: r2(P.action === "dead" ? P.at : P.at / P.dur), du: r2(P.dur), ac: actionCount,
+      mv: r2(P.speed), sp: P.sprint ? 1 : 0, b: P.blocking ? 1 : 0, d: P.dead ? 1 : 0, dn: P.inDungeon ? 1 : 0,
+      hp: Math.ceil(P.hp), mh: P.maxHp, w: mainWeapon().id, sh: P.shield ? 1 : 0,
+    };
+  }
+
+  type WorldSnap = { m: MobSnap[]; b: BossSnap | null };
+  function worldSnap(): WorldSnap {
+    const ps = env.players();
+    const near = (m: Mob) => ps.some((q) => q.inDungeon === m.dungeon && Math.hypot(q.x - m.x, q.z - m.z) < 120);
+    const anyDun = ps.some((q) => q.inDungeon);
+    return {
+      m: mobs.filter((m) => near(m) || (m.state !== "idle" && m.state !== "dead")).map((m) => m.snap()),
+      b: cookie && (anyDun || cookie.active) ? cookie.snap() : null,
+    };
+  }
+
+  function onBundle(b: Bundle) {
+    const o = online;
+    if (!o) return;
+    const now = performance.now();
+    if (b.s) {
+      const r = o.remotes.get(b.c);
+      if (r) {
+        const wasDead = r.state.dead;
+        r.apply(b.s as NetPlayer, now);
+        if (r.state.dead && !wasDead && r.state.inDungeon === P.inDungeon && Math.hypot(r.state.x - P.x, r.state.z - P.z) < 40) say(r.name + " is down. Reach them to pull them up.");
+      }
+    }
+    if (b.w && !o.room.isRunner) {
+      const w = b.w as WorldSnap;
+      for (const sn of w.m) {
+        const m = mobByKey.get(sn[0]);
+        if (m && m.puppet) m.applySnap(sn);
+      }
+      if (w.b && cookie && cookie.puppet && !(flags.cookie && cookie.st === "dead")) cookie.applySnap(w.b);
+    }
+    if (b.ev) for (const ev of b.ev) onEvent(ev, b.c);
+  }
+
+  function onEvent(ev: Ev, from: string) {
+    const o = online;
+    if (!o) return;
+    const me = o.room.cid;
+    const num = (v: unknown, d = 0) => (typeof v === "number" && Number.isFinite(v) ? v : d);
+    switch (ev.k) {
+      case "hurt": {
+        if (ev.to !== me) return;
+        const src = String(ev.src ?? "");
+        env.hurtPlayer(Math.min(60, num(ev.d)), num(ev.sx, P.x), num(ev.sz, P.z), {
+          knock: num(ev.kn, 1), unblockable: !!ev.ub, parryable: !!ev.pa,
+          source: ev.pa ? { stagger: (t: number) => o.room.event({ k: "parry", src, t }, true) } : undefined,
+        });
+        return;
+      }
+      case "parry": {
+        if (!o.room.isRunner) return;
+        const t = Math.min(2, num(ev.t, 1));
+        if (ev.src === "cookie") cookie?.parry(t);
+        else findMob(ev.src)?.stagger(t);
+        return;
+      }
+      case "hit": {
+        const m = findMob(ev.m);
+        if (!m || !m.alive) return;
+        if (!m.puppet) {
+          m.takeHit(Math.min(80, Math.max(0, num(ev.d))), num(ev.x, m.x), num(ev.z, m.z), !!ev.hv, !!ev.f);
+          if (!m.alive) o.room.event({ k: "kill", m: m.key, to: from }, true);
+        } else m.flash = 0.12;
+        return;
+      }
+      case "hx": {
+        const m = findMob(ev.m);
+        if (m && m.puppet) m.flash = 0.12;
+        return;
+      }
+      case "kill":
+        if (ev.to === me) claimKill(String(ev.m), findMob(ev.m));
+        return;
+      case "bhp":
+        if (cookie && !flags.cookie) {
+          cookie.netHit(num(ev.hp, cookie.hp), num(ev.x), num(ev.z), !!ev.hv, !!ev.f);
+          if (num(ev.hp, 1) <= 0) applyWorldFlag("cookie");
+        }
+        return;
+      case "breset":
+        if (cookie && !flags.cookie && cookie.st !== "dying") cookie.reset();
+        return;
+      case "flag":
+        applyWorldFlag(String(ev.f));
+        return;
+      case "node": {
+        const id = String(ev.id);
+        if (world?.nodes.some((n) => n.id === id)) nodeState.set(id, { left: num(ev.l), regrow: num(ev.rg, 75) });
+        return;
+      }
+      case "wx":
+        weightX = Math.max(weightX, Math.min(9, num(ev.v)));
+        return;
+      case "bell":
+        ringT = 3;
+        if (!P.inDungeon) audio.bell(0.22, 330);
+        return;
+      case "revive":
+        if (ev.to === me && P.dead) {
+          P.dead = false;
+          P.hp = Math.round(P.maxHp * 0.4);
+          P.action = "none";
+          P.iframe = 1.2;
+          mode = "play";
+          sparks.burst(24, P.x, P.y + 1, P.z, 3, 0xffd28a, 1, 0.2, { up: 2, grav: -0.5 });
+          audio.bell(0.12, 523);
+          say(String(ev.by ?? "Someone") + " pulls you to your feet.");
+          push();
+        }
+        return;
+    }
+  }
+
+  /** Presence changed: add avatars for newcomers, drop the ones who left. */
+  function syncPeers() {
+    const o = online;
+    if (!o || !world || !dun) return;
+    for (const [cid, meta] of o.room.peers) {
+      if (o.remotes.has(cid)) continue;
+      // the same character reconnecting replaces its old avatar
+      for (const [old, r] of o.remotes)
+        if (r.charId === meta.ch) {
+          r.remove();
+          o.remotes.delete(old);
+        }
+      o.remotes.set(cid, new RemotePlayer(cid, meta.ch, meta.name, lookToHuman(meta.look as Look), (d) => (d ? dun!.root : world!.root), overlay));
+      if (!o.names.has(meta.ch)) say(meta.name + " joined the world.");
+      o.names.add(meta.ch);
+    }
+    for (const [cid, r] of o.remotes)
+      if (!o.room.peers.has(cid)) {
+        r.remove();
+        o.remotes.delete(cid);
+        if (![...o.remotes.values()].some((x) => x.charId === r.charId)) {
+          o.names.delete(r.charId);
+          say(r.name + " left the world.");
+        }
+      }
+    push();
+  }
+
+  /** Every few seconds (and before position-checked actions): save where we are, read the shared clock and progress. */
+  function heartbeat(): Promise<void> {
+    const o = online;
+    if (!o) return Promise.resolve();
+    o.beatT = 5;
+    o.lastBeat = performance.now();
+    const play = Math.floor(o.playAcc);
+    o.playAcc -= play;
+    return rpc<HeartbeatJson>("vm_heartbeat", { p_x: r2(P.x), p_z: r2(P.z), p_yaw: r2(P.yaw), p_dungeon: P.inDungeon, p_hp: Math.max(1, Math.round(P.hp)), p_play: play })
+      .then((h) => {
+        if (online !== o) return;
+        let dh = h.hour - hour;
+        if (dh > 12) dh -= 24;
+        if (dh < -12) dh += 24;
+        if (Math.abs(dh) > 0.08) hour = h.hour;
+        o.day = h.day;
+        for (const [f, on] of Object.entries(h.flags ?? {})) if (on) applyWorldFlag(f);
+        if (h.boss?.cookie) o.boss = h.boss.cookie;
+      })
+      .catch(() => {
+        /* a missed beat: the next one retries */
+      });
+  }
+
+  /** The runner resets an abandoned fight so the next attempt starts fresh, for everyone. */
+  function runnerDuties(dt: number) {
+    const o = online!;
+    if (!cookie || flags.cookie || !cookie.fighting || cookie.st === "intro") {
+      o.arenaEmptyT = 0;
+      return;
+    }
+    const anyone = env.players().some((q) => q.inDungeon && !q.dead && Math.hypot(q.x - DUN.arena.x, q.z - DUN.arena.z) < DUN.arena.r + 4);
+    o.arenaEmptyT = anyone ? 0 : o.arenaEmptyT + dt;
+    if (o.arenaEmptyT > 6) {
+      o.arenaEmptyT = 0;
+      cookie.reset();
+      rpc("vm_boss_reset").catch(() => {});
+      o.room.event({ k: "breset" }, true);
+    }
+  }
+
+  function netFrame(rdt: number) {
+    const o = online!;
+    const now = performance.now();
+    o.room.elect();
+    const runner = o.room.isRunner;
+    if (runner !== o.runner) {
+      o.runner = runner;
+      for (const m of mobs) m.setPuppet(!runner);
+      cookie?.setPuppet(!runner);
+    }
+    for (const r of o.remotes.values()) r.update(rdt, now, env.time, P.inDungeon);
+    o.tickT -= rdt;
+    if (o.tickT <= 0) {
+      o.tickT = 1 / o.room.rate;
+      o.room.tick(netState(), runner ? worldSnap() : undefined);
+    }
+    if (weightX > o.wxSent + 0.3) {
+      o.wxSent = weightX;
+      o.room.event({ k: "wx", v: r2(weightX) });
+    }
+    o.playAcc += rdt;
+    o.beatT -= rdt;
+    if (o.beatT <= 0) void heartbeat();
+    if (runner) runnerDuties(rdt);
+  }
+
+  function onlineHud(): OnlineHud {
+    const o = online!;
+    const now = performance.now();
+    const zone = (dn: boolean, x: number, z: number) => (dn ? "Cookie's Castle" : REGION_TITLE[regionAt(x, z)][0]);
+    const players: OnlineHud["players"] = [{ name, hp: Math.ceil(P.hp), max: P.maxHp, dead: P.dead, me: true, away: false, zone: zone(P.inDungeon, P.x, P.z) }];
+    for (const r of o.remotes.values())
+      players.push({ name: r.name, hp: r.state.hp, max: r.state.maxHp, dead: r.state.dead, me: false, away: !r.live(now), zone: zone(r.state.inDungeon, r.state.x, r.state.z) });
+    return { code: o.code, world: o.worldName, day: o.day, status: o.room.status, runner: o.room.isRunner, players };
+  }
+
+  function leaveOnline() {
+    const o = online;
+    if (!o) return;
+    void rpc("vm_heartbeat", { p_x: r2(P.x), p_z: r2(P.z), p_yaw: r2(P.yaw), p_dungeon: P.inDungeon, p_hp: Math.max(1, Math.round(P.hp)), p_play: Math.floor(o.playAcc) })
+      .catch(() => {})
+      .finally(() => o.realm.call("vm_leave", { p_world: o.worldId, p_char: o.charId }).catch(() => {}));
+    o.room.leave();
+    for (const r of o.remotes.values()) r.remove();
+    o.remotes.clear();
+    online = null;
+    for (const m of mobs) m.setPuppet(false);
+    cookie?.setPuppet(false);
+    pendingRevive = null;
+  }
+
   // ------------------------------------------------------------ public api
   function beginPlay() {
     buildInteracts();
@@ -2363,9 +2985,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     camPitch = 0.3;
     snapCam();
     if (cookie) {
+      cookie.setPuppet(false);
       if (flags.cookie) cookie.setDead();
       else cookie.reset();
+      if (online) cookie.setPuppet(!online.room.isRunner);
     }
+    if (online) online.runner = online.room.isRunner;
     spawnMobs();
     setZone(P.inDungeon);
     if (P.inDungeon && P.z > DUN.galleryZ1 && !flags.cookie) {
@@ -2380,6 +3005,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       disposed = true;
       cancelAnimationFrame(raf);
       persist();
+      leaveOnline();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
@@ -2412,6 +3038,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     },
     newGame(s, nm, l) {
       audio.unlock();
+      leaveOnline();
+      deadLeft.clear();
       slot = s;
       name = nm.trim().slice(0, 18) || "Walker";
       look = l;
@@ -2440,6 +3068,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     },
     continueGame(s) {
       audio.unlock();
+      leaveOnline();
       const raw = localStorage.getItem(SAVE(s));
       if (!raw) return;
       try {
@@ -2464,6 +3093,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     },
     toTitle() {
       persist();
+      leaveOnline();
       mode = "title";
       talk = null;
       reward = null;
@@ -2487,6 +3117,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     press,
     equip(id) {
       items = equip(items, id);
+      if (online) rpc<{ items: StackJson[] }>("vm_equip", { p_uid: id }, false).then((r) => setItems(r.items)).catch(netError);
       syncGear();
       audio.ui();
       persist();
@@ -2515,6 +3146,87 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       audio.setMuted(m);
       localStorage.setItem("veyrmarch.muted", m ? "1" : "0");
       push();
+    },
+    startOnline(realm, e) {
+      audio.unlock();
+      leaveOnline();
+      const c = e.character;
+      const w = e.world;
+      const mem = e.member;
+      slot = -1;
+      name = c.name;
+      look = c.look as Look;
+      items = c.items.map((x) => ({ uid: x.uid, def: x.def, count: x.count, equipped: x.equipped }));
+      flags = {
+        ...freshFlags(),
+        talked: !!c.flags.talked, ember: !!c.flags.ember, voss: !!c.flags.voss, ended: !!c.flags.ended,
+        chest: !!mem.flags.chest, hollow: !!mem.flags.hollow, shrine: !!mem.flags.shrine, entered: !!mem.flags.entered,
+        slab: !!w.flags.slab, nursery: !!w.flags.nursery, cookie: !!w.flags.cookie, gate: !!w.flags.gate,
+      };
+      seals = flags.cookie ? ["seal_cookie"] : [];
+      const nowS = Date.parse(w.now);
+      nodeState.clear();
+      for (const [id, st] of Object.entries(w.nodes ?? {})) {
+        const rg = (Date.parse(st.regrow_at) - nowS) / 1000;
+        if (rg > 0) nodeState.set(id, { left: st.left, regrow: rg });
+      }
+      deadMobs.clear();
+      deadLeft.clear();
+      for (const [k, v] of Object.entries(w.dead_mobs ?? {})) {
+        if (v === null) deadLeft.set(k, Infinity);
+        else {
+          const left = (Date.parse(v) - nowS) / 1000;
+          if (left > 0) deadLeft.set(k, left);
+        }
+      }
+      hour = w.hour;
+      playTime = c.play_seconds;
+      deaths = c.deaths;
+      kills = c.kills;
+      weightX = flags.slab ? 9 : 0;
+      respawnShrine = flags.shrine;
+      bossDoneT = -1;
+      cookieFinished = flags.cookie;
+      gateOpening = false;
+      P.maxHp = c.max_hp;
+      P.hp = c.hp > 0 ? Math.min(c.hp, c.max_hp) : c.max_hp;
+      P.maxMana = c.mana_max;
+      P.mana = P.maxMana;
+      if (mem.x !== null && mem.z !== null) {
+        P.x = mem.x;
+        P.z = mem.z;
+        P.yaw = mem.yaw;
+        P.inDungeon = mem.dungeon;
+      } else {
+        // first time in this world: wake by the bell, a step apart from whoever is already here
+        const others = w.members.filter((m) => m.online && m.character_id !== c.id).length;
+        const a = others * 2.1 + 0.6;
+        P.x = SPAWN.x + (others ? Math.cos(a) * 2.2 : 0);
+        P.z = SPAWN.z + (others ? Math.sin(a) * 2.2 : 0);
+        P.yaw = SPAWN.yaw;
+        P.inDungeon = false;
+        if (world) {
+          const r = world.col.resolve(P.x, P.z, 0.5);
+          P.x = r.x;
+          P.z = r.z;
+        }
+      }
+      Object.assign(P, { dead: false, action: "none", kx: 0, kz: 0, vx: 0, vz: 0, stam: P.maxStam });
+      const room = new Room(realm.backend, w.id, { id: c.id, name: c.name, look: c.look });
+      online = {
+        realm, room, worldId: w.id, code: w.code, worldName: w.name, charId: c.id, day: w.day, remotes: new Map(), tickT: 0, beatT: 5, playAcc: 0,
+        boss: w.boss?.cookie ?? null, arenaEmptyT: 0, wxSent: weightX, runner: false, lastBeat: 0,
+        names: new Set(w.members.filter((m) => m.online && m.character_id !== c.id).map((m) => m.character_id)),
+      };
+      room.onBundle = onBundle;
+      room.onPeers = syncPeers;
+      room.onStatus = () => push();
+      buildPlayer();
+      fadeThen(() => {
+        beginPlay();
+        placeAt = performance.now();
+        setTimeout(() => say(`${w.name} · Day ${w.day}. Code ${w.code}.`), 1200);
+      });
     },
   };
 
@@ -2589,6 +3301,20 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       attack(heavy);
     },
     ember: () => castEmber(),
+    online: () =>
+      online
+        ? {
+            cid: online.room.cid, runner: online.room.isRunner, code: online.code, status: online.room.status,
+            peers: [...online.remotes.values()].map((r) => ({ name: r.name, x: r.state.x, z: r.state.z, live: r.live(performance.now()), dead: r.state.dead, dn: r.state.inDungeon, visible: r.rig.group.visible })),
+            mobs: mobs.filter((m) => m.alive).map((m) => ({ key: m.key, k: m.kind, x: m.x, z: m.z, hp: m.hp, puppet: m.puppet, st: m.state })),
+            boss: cookie ? { hp: cookie.hp, st: cookie.st, puppet: cookie.puppet, toys: cookie.toys.length } : null,
+            kills,
+          }
+        : null,
+    refresh: () => {
+      if (online) void online.realm.character(online.charId).then((c) => setItems(c.items));
+    },
+    beat: () => heartbeat(),
     interact: () => {
       if (mode === "play") nearestInteract();
       press("interact");
