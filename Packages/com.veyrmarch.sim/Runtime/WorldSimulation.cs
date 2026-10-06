@@ -239,8 +239,9 @@ namespace Veyr.Sim
             {
                 body.Yaw = Movement.NormaliseYaw(intent.Yaw);
                 float scale = MoveScale(actorId, body);
+                Movement.RefillBank(body, _content.Move, scale);
                 var move = intent.HasClaim
-                    ? Movement.ValidateClaim(body, intent, _content.Move, scale, Geometry, Flags)
+                    ? Movement.ValidateClaim(body, intent, _content.Move, Geometry, Flags)
                     : Movement.Step(body, intent, _content.Move, scale, Geometry, Flags);
                 _lastMove[actorId] = move;
                 if (!move.Accepted)

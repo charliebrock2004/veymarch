@@ -814,13 +814,47 @@ namespace Veyr.Sim
         }
     }
 
+    /// <summary>
+    /// Per-device settings. Kept on the phone, never on the cloud character. Accessibility
+    /// options come from design bible §33 and architecture §39.
+    /// </summary>
     public sealed class LocalSettings
     {
         public const int CurrentSchema = 1;
         public int Schema { get; set; } = CurrentSchema;
         public bool Haptics { get; set; } = true;
         public bool ColourblindShapes { get; set; } = true;
-        public string Quality { get; set; } = "Medium";
+        /// <summary>Low, Medium, High, or Auto to pick by device.</summary>
+        public string Quality { get; set; } = "Auto";
+        public bool Subtitles { get; set; } = true;
+        public float TextScale { get; set; } = 1f;
+        public float UiScale { get; set; } = 1f;
+        public bool SprintToggle { get; set; }
+        public bool BlockToggle { get; set; }
+        public bool DodgeFlick { get; set; } = true;
+        public float LookSensitivity { get; set; } = 1f;
+        public bool InvertLook { get; set; }
+        public bool CameraShake { get; set; } = true;
+        public bool ReduceFlash { get; set; }
+        public bool LockOnAssist { get; set; } = true;
+        /// <summary>Boss tell window scale for accessibility. Clamped to 1–1.25 (architecture §39).</summary>
+        public float TellWindowScale { get; set; } = 1f;
+        /// <summary>Combat cluster offset in reference pixels, for one-handed play.</summary>
+        public float ControlOffsetX { get; set; }
+        public float ControlOffsetY { get; set; }
+        public bool ShowFrameOverlay { get; set; } = true;
+
+        public void Clamp()
+        {
+            TextScale = Math.Clamp(TextScale, 0.8f, 1.6f);
+            UiScale = Math.Clamp(UiScale, 0.8f, 1.4f);
+            LookSensitivity = Math.Clamp(LookSensitivity, 0.2f, 3f);
+            TellWindowScale = Math.Clamp(TellWindowScale, 1f, 1.25f);
+            ControlOffsetX = Math.Clamp(ControlOffsetX, -300f, 300f);
+            ControlOffsetY = Math.Clamp(ControlOffsetY, -300f, 300f);
+            if (Quality != "Low" && Quality != "Medium" && Quality != "High")
+                Quality = "Auto";
+        }
 
         public string ToJson() =>
             new JsonWriter().BeginObject()
@@ -828,18 +862,50 @@ namespace Veyr.Sim
                 .Field("Haptics", Haptics)
                 .Field("ColourblindShapes", ColourblindShapes)
                 .Field("Quality", Quality)
+                .Field("Subtitles", Subtitles)
+                .Field("TextScale", TextScale)
+                .Field("UiScale", UiScale)
+                .Field("SprintToggle", SprintToggle)
+                .Field("BlockToggle", BlockToggle)
+                .Field("DodgeFlick", DodgeFlick)
+                .Field("LookSensitivity", LookSensitivity)
+                .Field("InvertLook", InvertLook)
+                .Field("CameraShake", CameraShake)
+                .Field("ReduceFlash", ReduceFlash)
+                .Field("LockOnAssist", LockOnAssist)
+                .Field("TellWindowScale", TellWindowScale)
+                .Field("ControlOffsetX", ControlOffsetX)
+                .Field("ControlOffsetY", ControlOffsetY)
+                .Field("ShowFrameOverlay", ShowFrameOverlay)
                 .EndObject().ToString();
 
         public static LocalSettings FromJson(string text)
         {
             var node = JsonNode.Parse(text);
-            return new LocalSettings
+            var settings = new LocalSettings
             {
                 Schema = node["Schema"].AsInt(),
                 Haptics = node.Bool("Haptics", true),
                 ColourblindShapes = node.Bool("ColourblindShapes", true),
-                Quality = node.Str("Quality", "Medium")
+                Quality = node.Str("Quality", "Auto"),
+                Subtitles = node.Bool("Subtitles", true),
+                TextScale = node.Float("TextScale", 1f),
+                UiScale = node.Float("UiScale", 1f),
+                SprintToggle = node.Bool("SprintToggle"),
+                BlockToggle = node.Bool("BlockToggle"),
+                DodgeFlick = node.Bool("DodgeFlick", true),
+                LookSensitivity = node.Float("LookSensitivity", 1f),
+                InvertLook = node.Bool("InvertLook"),
+                CameraShake = node.Bool("CameraShake", true),
+                ReduceFlash = node.Bool("ReduceFlash"),
+                LockOnAssist = node.Bool("LockOnAssist", true),
+                TellWindowScale = node.Float("TellWindowScale", 1f),
+                ControlOffsetX = node.Float("ControlOffsetX"),
+                ControlOffsetY = node.Float("ControlOffsetY"),
+                ShowFrameOverlay = node.Bool("ShowFrameOverlay", true)
             };
+            settings.Clamp();
+            return settings;
         }
     }
 

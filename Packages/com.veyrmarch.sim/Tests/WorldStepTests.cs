@@ -103,6 +103,26 @@ namespace Veyr.Tests.Sim
         }
 
         [Test]
+        public void ALatePacketMayCoverTwoTicks()
+        {
+            var sim = New();
+            var body = sim.SpawnPlayer("p");
+            float x = 0f;
+            for (int i = 0; i < 40; i++)
+            {
+                if (i % 2 == 0)
+                {
+                    sim.Step();
+                    continue;
+                }
+                x += 2f * 6.4f * Dt;
+                var move = sim.TryMove("p", Claim(x, 0f, 0f));
+                Assert.That(move.Accepted, Is.True, "tick " + i + " " + move.Reason);
+            }
+            Assert.That(body.X, Is.EqualTo(x).Within(0.0001f));
+        }
+
+        [Test]
         public void ASpeedHackIsHeldToTheCapOverTime()
         {
             var sim = New();

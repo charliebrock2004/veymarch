@@ -197,11 +197,20 @@ namespace Veyr.Sim
         /// sustained climb, and closed blockers. Accepted claims move the body; refused ones
         /// leave it where the sim last agreed, and the client must snap back.
         /// </summary>
-        public static MoveResult ValidateClaim(ActorBody body, PlayerIntent intent, MoveTuning tuning, float moveScale, WorldGeometry geometry, WorldFlags flags)
+        /// <summary>
+        /// Adds one tick of legal travel to the body's budget. Called every tick for every living
+        /// player, whether or not a claim arrived, so a late packet can cover two ticks.
+        /// </summary>
+        public static void RefillBank(ActorBody body, MoveTuning tuning, float moveScale)
+        {
+            float step = SpeedLimit(body, tuning) * Math.Clamp(moveScale, 0.2f, 1.25f) * tuning.TickDt;
+            float cap = MathF.Max(step, tuning.SpeedCapMetresPerSecond * tuning.ClaimBankSeconds);
+            body.MoveBank = MathF.Min(body.MoveBank + step, cap);
+        }
+
+        public static MoveResult ValidateClaim(ActorBody body, PlayerIntent intent, MoveTuning tuning, WorldGeometry geometry, WorldFlags flags)
         {
             float dt = tuning.TickDt;
-            float limit = SpeedLimit(body, tuning) * Math.Clamp(moveScale, 0.2f, 1.25f);
-            body.MoveBank = MathF.Min(body.MoveBank + limit * dt, MathF.Max(limit * dt, tuning.SpeedCapMetresPerSecond * tuning.ClaimBankSeconds));
 
             float dx = intent.ClaimX - body.X;
             float dz = intent.ClaimZ - body.Z;

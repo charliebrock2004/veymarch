@@ -12,6 +12,14 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Check", "Veyr.Check\Ve
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Tests.UnityCheck", "Veyr.Tests.UnityCheck\Veyr.Tests.UnityCheck.csproj", "{337731C5-A423-4D29-9B17-5C59DA427422}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Net", "Veyr.Net\Veyr.Net.csproj", "{9BBBF512-FEB9-4930-8210-057CAF714566}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Server", "Veyr.Server\Veyr.Server.csproj", "{CCC6EFD8-370B-4125-89AA-BDE87D22C7A8}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Client.Core", "Veyr.Client.Core\Veyr.Client.Core.csproj", "{8693038E-110C-4717-95B9-4727BBB8D719}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Tests.Core", "Veyr.Tests.Core\Veyr.Tests.Core.csproj", "{805FC1D6-BB6B-4A8A-85D6-E006CE161F5B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -42,5 +50,21 @@ Global
 		{337731C5-A423-4D29-9B17-5C59DA427422}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{337731C5-A423-4D29-9B17-5C59DA427422}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{337731C5-A423-4D29-9B17-5C59DA427422}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9BBBF512-FEB9-4930-8210-057CAF714566}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9BBBF512-FEB9-4930-8210-057CAF714566}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9BBBF512-FEB9-4930-8210-057CAF714566}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9BBBF512-FEB9-4930-8210-057CAF714566}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CCC6EFD8-370B-4125-89AA-BDE87D22C7A8}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CCC6EFD8-370B-4125-89AA-BDE87D22C7A8}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CCC6EFD8-370B-4125-89AA-BDE87D22C7A8}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CCC6EFD8-370B-4125-89AA-BDE87D22C7A8}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8693038E-110C-4717-95B9-4727BBB8D719}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8693038E-110C-4717-95B9-4727BBB8D719}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8693038E-110C-4717-95B9-4727BBB8D719}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8693038E-110C-4717-95B9-4727BBB8D719}.Release|Any CPU.Build.0 = Release|Any CPU
+		{805FC1D6-BB6B-4A8A-85D6-E006CE161F5B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{805FC1D6-BB6B-4A8A-85D6-E006CE161F5B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{805FC1D6-BB6B-4A8A-85D6-E006CE161F5B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{805FC1D6-BB6B-4A8A-85D6-E006CE161F5B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

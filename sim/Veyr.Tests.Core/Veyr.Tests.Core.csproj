@@ -1,18 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!--
-    Compile-only check. Builds the edit-mode test sources the way Unity's test runner will:
-    C# 9, .NET Standard 2.1, and NUnit 3.5 (com.unity.ext.nunit is an NUnit 3.5 fork).
-    It catches a test that uses an NUnit or BCL API Unity does not have. The tests run in
-    Veyr.Tests.Sim on .NET 8.
-  -->
+  <!-- Runs the server-host and client-core edit-mode tests on .NET 8. Unity runs the same sources. -->
   <PropertyGroup>
-    <AssemblyName>Veyr.Tests.UnityCheck</AssemblyName>
-    <RootNamespace>Veyr.Tests.Sim</RootNamespace>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Veyr.Tests.Core</AssemblyName>
     <IsPackable>false</IsPackable>
-    <NoWarn>$(NoWarn);NU1701;NU1903;NU1902</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="..\..\Packages\com.veyrmarch.sim\Tests\**\*.cs" />
     <Compile Include="..\..\Packages\com.veyrmarch.server\Tests\**\*.cs" />
     <Compile Include="..\..\Packages\com.veyrmarch.clientcore\Tests\**\*.cs" />
     <ProjectReference Include="..\Veyr.Sim\Veyr.Sim.csproj" />
@@ -22,6 +15,8 @@
     <ProjectReference Include="..\Veyr.Client.Core\Veyr.Client.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="NUnit" Version="3.5.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
   </ItemGroup>
 </Project>
