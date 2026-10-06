@@ -3,6 +3,7 @@ import type { Decal, Shape } from "../engine/fx";
 import {
   Poser, buildHuman, buildQuad, buildRockingHorse, characterMaterial, poseHorse, poseHuman, poseQuad, type HumanAction, type QuadAction, type Rig,
 } from "../engine/rig";
+import { MOB_LOOT } from "../content";
 import type { Env } from "./env";
 import { weaponModel } from "./weapons";
 
@@ -55,7 +56,7 @@ const A = (o: Partial<Attack> & Pick<Attack, "name" | "range" | "tell" | "dmg">)
 export const MOBS: Record<MobKind, Cfg> = {
   wolf: {
     hp: 34, speed: 2.2, run: 6.2, aggro: 13, leash: 34, radius: 0.55, height: 1.1, fireWeak: 1.2, strafe: true, xp: "wolf",
-    loot: [["mat_bone", 1, 1], ["mat_leather", 1, 0.35]],
+    loot: MOB_LOOT.wolf,
     attacks: [
       A({ name: "pounce", range: 4.6, tell: 0.55, active: 0.38, recover: 0.75, shape: 2, size: 4.8, width: 0.8, dmg: 11, lunge: 11, knock: 1.6, cooldown: 2.2, tellPose: "crouch", hitPose: "pounce" }),
       A({ name: "bite", range: 1.7, tell: 0.42, active: 0.18, recover: 0.5, shape: 1, size: 2.0, half: 0.55, dmg: 8, lunge: 3, tellPose: "crouch", hitPose: "bite", cooldown: 1.0 }),
@@ -63,7 +64,7 @@ export const MOBS: Record<MobKind, Cfg> = {
   },
   goblin: {
     hp: 30, speed: 2.4, run: 4.8, aggro: 12, leash: 30, radius: 0.45, height: 1.3, fireWeak: 1.25, xp: "goblin",
-    loot: [["mat_leather", 1, 0.8], ["mat_fibre", 2, 0.5]],
+    loot: MOB_LOOT.goblin,
     attacks: [
       A({ name: "stab", range: 2.4, tell: 0.42, active: 0.2, recover: 0.6, shape: 2, size: 2.8, width: 0.7, dmg: 9, lunge: 6, tellPose: "windup", hitPose: "thrust" }),
       A({ name: "flurry", range: 1.8, tell: 0.5, active: 0.35, recover: 0.8, shape: 1, size: 2.1, half: 0.8, dmg: 7, lunge: 2, tellPose: "windup", hitPose: "light2", cooldown: 2 }),
@@ -71,7 +72,7 @@ export const MOBS: Record<MobKind, Cfg> = {
   },
   redcap: {
     hp: 90, speed: 2.0, run: 3.8, aggro: 13, leash: 26, radius: 0.6, height: 1.7, fireWeak: 1.25, xp: "redcap",
-    loot: [["mat_copper", 3, 1], ["cons_bandage", 1, 1], ["mat_leather", 2, 1]],
+    loot: MOB_LOOT.redcap,
     attacks: [
       A({ name: "slam", range: 3.0, tell: 0.85, active: 0.25, recover: 1.0, shape: 0, size: 2.4, dmg: 18, lunge: 2, knock: 2.4, tellPose: "charge", hitPose: "heavy", ground: true, cooldown: 2 }),
       A({ name: "sweep", range: 2.6, tell: 0.6, active: 0.25, recover: 0.8, shape: 1, size: 3.0, half: 1.1, dmg: 12, lunge: 1, tellPose: "windup", hitPose: "light1", cooldown: 1.6 }),
@@ -79,19 +80,19 @@ export const MOBS: Record<MobKind, Cfg> = {
   },
   soldier: {
     hp: 30, speed: 1.9, run: 3.4, aggro: 14, leash: 40, radius: 0.45, height: 1.4, fireWeak: 1.5, xp: "soldier",
-    loot: [["cons_bandage", 1, 0.25]],
+    loot: MOB_LOOT.soldier,
     attacks: [
       A({ name: "bayonet", range: 2.8, tell: 0.55, active: 0.22, recover: 0.9, shape: 2, size: 3.2, width: 0.6, dmg: 10, lunge: 7, tellPose: "windup", hitPose: "thrust" }),
     ],
   },
   mouse: {
     hp: 12, speed: 3, run: 6.8, aggro: 12, leash: 40, radius: 0.3, height: 0.4, fireWeak: 1.5, xp: "mouse",
-    loot: [],
+    loot: MOB_LOOT.mouse,
     attacks: [A({ name: "nip", range: 1.3, tell: 0.4, active: 0.15, recover: 0.6, shape: 1, size: 1.4, half: 0.7, dmg: 5, lunge: 5, knock: 0.6, tellPose: "crouch", hitPose: "bite", cooldown: 0.9 })],
   },
   horse: {
     hp: 120, speed: 1.4, run: 2.0, aggro: 16, leash: 60, radius: 1.0, height: 2.2, fireWeak: 1.5, xp: "horse",
-    loot: [["cons_bandage", 2, 1]],
+    loot: MOB_LOOT.horse,
     attacks: [
       A({ name: "charge", range: 14, tell: 1.0, active: 1.05, recover: 1.5, shape: 2, size: 13, width: 1.5, dmg: 18, lunge: 12.5, knock: 3, tellPose: "rock", hitPose: "charge", cooldown: 1.2 }),
       A({ name: "buck", range: 2.6, tell: 0.6, active: 0.25, recover: 0.9, shape: 0, size: 2.6, dmg: 12, lunge: 0, knock: 2.2, tellPose: "rock", hitPose: "rock", cooldown: 1.5 }),
@@ -99,7 +100,7 @@ export const MOBS: Record<MobKind, Cfg> = {
   },
   deer: {
     hp: 20, speed: 1.4, run: 7.5, aggro: 12, leash: 60, radius: 0.5, height: 1.5, fireWeak: 1, flees: true, xp: "deer",
-    loot: [["mat_leather", 2, 1], ["mat_bone", 1, 0.5]],
+    loot: MOB_LOOT.deer,
     attacks: [],
   },
 };

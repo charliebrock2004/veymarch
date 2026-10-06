@@ -235,3 +235,47 @@ export const DESCRIPTIONS: Record<string, string> = {
   arm_cloth: "Village wool.",
   cons_bandage: "Restores 28 health.",
 };
+
+// ------------------------------------------------------------------ shared with the server (web/server/seed.sql is generated from these)
+
+/** Loot rolls: [item, count, chance]. The server rolls these; clients only display them. */
+export const MOB_LOOT: Record<string, [string, number, number][]> = {
+  wolf: [["mat_bone", 1, 1], ["mat_leather", 1, 0.35]],
+  goblin: [["mat_leather", 1, 0.8], ["mat_fibre", 2, 0.5]],
+  redcap: [["mat_copper", 3, 1], ["cons_bandage", 1, 1], ["mat_leather", 2, 1]],
+  soldier: [["cons_bandage", 1, 0.25]],
+  mouse: [],
+  horse: [["cons_bandage", 2, 1]],
+  deer: [["mat_leather", 2, 1], ["mat_bone", 1, 0.5]],
+};
+
+/** Every placed enemy has a stable key. Dungeon positions are relative to the castle interior's origin. */
+export const MOB_SPAWNS: [string, string, number, number, boolean][] = [
+  ["w1", "wolf", 14, 58, false], ["w2", "wolf", -18, 62, false], ["w3", "wolf", 16, 82, false], ["w4", "wolf", 21, 86, false], ["w5", "wolf", 22, 79, false],
+  ["w6", "wolf", 30, 128, false], ["w7", "wolf", -36, 136, false],
+  ["g1", "goblin", -39, 93, false], ["g2", "goblin", -46, 99, false], ["g3", "goblin", -37, 100, false], ["g4", "redcap", -43, 96, false],
+  ["d1", "deer", 34, 100, false], ["d2", "deer", 37, 104, false], ["d3", "deer", -34, 124, false], ["d4", "deer", 46, 72, false], ["d5", "deer", 130, 30, false],
+  ["s1", "soldier", -5, 150, false], ["s2", "soldier", 6, 154, false],
+  ["dm1", "mouse", -4, 10, true], ["dm2", "mouse", 4, 12, true],
+  ["ds1", "soldier", -4, 50, true], ["ds2", "soldier", 4, 52, true], ["dm3", "mouse", 0, 46, true],
+  ["ds3", "soldier", -3, 66, true], ["ds4", "soldier", 3, 76, true], ["dh", "horse", 0, 72, true],
+];
+
+/** Gatherable nodes. Positions live in the world builder; the rules live here. */
+export const NODE_DEFS: { id: string; item: string; tier: number; seal: string | null; max: number }[] = [
+  ...[0, 1, 2, 3].map((i) => ({ id: "flint_" + i, item: "mat_flint", tier: 0, seal: null, max: 3 })),
+  ...[0, 1, 2, 3, 4].map((i) => ({ id: "wood_" + i, item: "mat_wood", tier: 0, seal: null, max: 3 })),
+  ...[0, 1, 2, 3, 4, 5].map((i) => ({ id: "fibre_" + i, item: "mat_fibre", tier: 0, seal: null, max: 3 })),
+  ...[0, 1, 2].map((i) => ({ id: "stone_" + i, item: "mat_stone", tier: 0, seal: null, max: 3 })),
+  ...[0, 1, 2, 3].map((i) => ({ id: "copper_" + i, item: "mat_copper", tier: 2, seal: null, max: 3 })),
+  ...[0, 1].map((i) => ({ id: "iron_" + i, item: "mat_iron", tier: 4, seal: "seal_cookie", max: 4 })),
+];
+
+/** One-time caches a character can loot once per world. */
+export const CACHES: Record<string, [string, number][]> = {
+  chest: [["cons_bandage", 2], ["mat_fibre", 2], ["mat_wood", 1]],
+  hollow: [["mat_copper", 3], ["mat_leather", 1], ["cons_bandage", 1]],
+};
+
+export const COOKIE_REWARDS = ["wpn_cookie_blade", "wpn_cookie_pick", "key_cookie_core"];
+export const WORLD_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
