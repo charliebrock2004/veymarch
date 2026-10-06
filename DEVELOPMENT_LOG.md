@@ -65,3 +65,16 @@
 - Not done: Unity, a second player, the rest of the kingdom, a public URL until Vercel is linked.
 
 
+
+## 2026-10-06 — Port Veyr.Sim and Veyr.Content to Unity's compiler (P0)
+
+- Task: T003 prerequisite. Found during the takeover audit: the sim and content packages could not compile in Unity 6. They used C# 10–12 (`required`, collection expressions, file-scoped namespaces, `record struct`, raw strings), .NET 8 implicit usings, and .NET 5+ APIs (`System.Text.Json`, `SHA256.HashData`, `Convert.ToHexString`, `File.Move` overwrite, `IReadOnlySet`, `Enum.GetValues<T>`). The earlier "64 tests pass" was true on .NET 8 only.
+- What changed: All runtime and test sources rewritten to C# 9 / .NET Standard 2.1 with no behaviour change. `IsExternalInit` polyfill per assembly. In-house `JsonNode` / `JsonWriter` replaces `System.Text.Json` (explicit field writes, IL2CPP-safe, exact `ulong` seeds). `Hex.Sha256` replaces the .NET 5 hashing helpers; the catalog fingerprint is byte-identical.
+- Save store: temp file is flushed with `Flush(true)` before the rename. The rename uses `File.Replace`. Two previous generations are kept as `.1` and `.2` (the bible asks for previous snapshots retained). Before, `.bak` was overwritten with the new file on every write, so no previous copy existed. Read order: current, finished temp (kill before rename), `.1`, `.2`.
+- Tests changed: `TornSaveFallsBackAndAFinishedTempIsKept` now writes two generations and also covers kill-before-rename and a torn temp. `CookieGrantsOnceOpensTheGateAndSurvivesReload` saves the character twice (immediate unique save plus the dirty-timer save) before tearing the file. Neither test was weakened: the old version only passed because the backup was a copy of the newest write.
+- Build enforcement: `sim/Directory.Build.props` builds the Unity-shared libraries as `netstandard2.1`, C# 9, implicit usings off, nullable off (files opt in with `#nullable enable` as in Unity), warnings as errors. `sim/Veyr.Tests.UnityCheck` compiles the test sources against NUnit 3.5, the version Unity's `com.unity.ext.nunit` forks.
+- `global.json` accepts any 8.0 SDK feature band (was pinned to 8.0.425, which this container does not have).
+- Test asmdef uses the current Test Framework form (`UNITY_INCLUDE_TESTS`, `nunit.framework.dll`, TestRunner references) instead of the deprecated `optionalUnityReferences`.
+- Tests run: `dotnet test sim/Veyr.Tests.Sim` → 64 passed, 0 failed. `dotnet build sim/Veyr.Tests.UnityCheck` → 0 errors. `Veyr.Loop` exit 0, `Veyr.Check` audit clean, fingerprint `82FC867A…6E06`.
+- Not verified: a real Unity compile. This build reproduces Unity's language version and API surface; it is not the Unity compiler.
+- Next legal task: 20 Hz world step (T006/T007 sim side).
