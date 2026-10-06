@@ -14,12 +14,20 @@ namespace Veyr.Sim
         readonly Dictionary<string, HurtboxHistory> _hurt = new(StringComparer.Ordinal);
         readonly Dictionary<string, StatusSheet> _status = new(StringComparer.Ordinal);
         readonly Dictionary<string, BossController> _bosses = new(StringComparer.Ordinal);
+        readonly List<string> _players = new List<string>();
+        readonly List<string> _actorOrder = new List<string>();
+        readonly Dictionary<string, PlayerIntent> _pending = new(StringComparer.Ordinal);
+        readonly Dictionary<string, MoveResult> _lastMove = new(StringComparer.Ordinal);
         int _seq;
 
         public SimClock Clock { get; } = new();
         public DayClock Day { get; } = new();
         public WorldFlags Flags { get; } = new();
         public Dictionary<string, ActorBody> Actors { get; } = new(StringComparer.Ordinal);
+        public WorldGeometry Geometry { get; } = new WorldGeometry();
+        public SimEventLog Events { get; } = new SimEventLog();
+        /// <summary>Players in join order. Steps visit them in this order so a tick is deterministic.</summary>
+        public IReadOnlyList<string> Players => _players;
         public DeathMode Mode { get; }
         public string WorldId { get; }
         public ulong Seed { get; }
@@ -33,8 +41,10 @@ namespace Veyr.Sim
             _content = content ?? ContentCatalog.Slice();
         }
 
-        public ActorBody SpawnPlayer(string id)
+        public ActorBody SpawnPlayer(string id, float x = 0f, float y = 0f, float z = 0f)
         {
+            if (Actors.ContainsKey(id))
+                throw new ArgumentException("Actor " + id + " already exists.");
             var body = new ActorBody
             {
                 Id = id,
@@ -42,13 +52,16 @@ namespace Veyr.Sim
                 Health = 80,
                 MaxHealth = 80,
                 Stamina = 60,
-                MaxStamina = 60
+                MaxStamina = 60,
+                X = x,
+                Y = y,
+                Z = z,
+                SpawnX = x,
+                SpawnY = y,
+                SpawnZ = z
             };
-            Actors[id] = body;
-            _bags[id] = new Inventory();
-            _skills[id] = new SkillSheet();
-            _hurt[id] = new HurtboxHistory();
-            _status[id] = new StatusSheet();
+            Register(body);
+            _players.Add(id);
             return body;
         }
 
@@ -64,12 +77,18 @@ namespace Veyr.Sim
                 Health = def.MaxHealth,
                 MaxHealth = def.MaxHealth
             };
+            Register(body);
+            return body;
+        }
+
+        void Register(ActorBody body)
+        {
             Actors[body.Id] = body;
+            _actorOrder.Add(body.Id);
             _bags[body.Id] = new Inventory();
             _skills[body.Id] = new SkillSheet();
             _hurt[body.Id] = new HurtboxHistory();
             _status[body.Id] = new StatusSheet();
-            return body;
         }
 
         public Inventory Bag(string actorId) => _bags[actorId];
@@ -98,41 +117,91 @@ namespace Veyr.Sim
                 X = 8,
                 Z = 0
             };
-            Actors[bossId] = body;
-            _bags[bossId] = new Inventory();
-            _skills[bossId] = new SkillSheet();
-            _hurt[bossId] = new HurtboxHistory();
-            _status[bossId] = new StatusSheet();
+            Register(body);
             boss.Begin();
             return boss;
         }
 
         public BossController Boss(string id) => _bosses[id];
 
-        public void Tick(PlayerIntent intent, string actorId)
+        /// <summary>
+        /// Queues a player's intent for the next <see cref="Step"/>. If two arrive before a step,
+        /// the newer movement wins and button presses from both are kept.
+        /// </summary>
+        public void Submit(string actorId, PlayerIntent intent)
+        {
+            if (!Actors.TryGetValue(actorId, out var body) || body.DefId != "player")
+            {
+                Events.Add(new SimEvent(SimEventKind.Rejected, Clock.Tick, actorId, arg: "unknown_actor"));
+                return;
+            }
+            _pending[actorId] = _pending.TryGetValue(actorId, out var older) ? PlayerIntent.Merge(older, intent) : intent;
+        }
+
+        /// <summary>
+        /// One 20 Hz tick. Every actor's pose is recorded for hit rewind, every player's queued
+        /// intent is applied in join order, statuses and bosses advance, then the clock moves once.
+        /// </summary>
+        public void Step()
+        {
+            long tick = Clock.Tick;
+            foreach (var id in _actorOrder)
+            {
+                var body = Actors[id];
+                _hurt[id].Record(tick, body.X, body.Z);
+                if (body.IFrameTicks > 0)
+                    body.IFrameTicks--;
+                if (body.StaggerTicks > 0)
+                    body.StaggerTicks--;
+                if (body.DodgeTicks > 0)
+                    body.DodgeTicks--;
+            }
+
+            foreach (var id in _players)
+            {
+                _pending.TryGetValue(id, out var intent);
+                ApplyIntent(id, intent, tick);
+            }
+            _pending.Clear();
+
+            foreach (var id in _actorOrder)
+                _status[id].Tick(Actors[id], _content.Statuses);
+
+            foreach (var pair in _bosses)
+                pair.Value.Tick(_content.Boss(pair.Key));
+
+            Clock.Advance();
+            Day.AdvanceTicks(1);
+        }
+
+        void ApplyIntent(string actorId, PlayerIntent intent, long tick)
         {
             var body = Actors[actorId];
-            _hurt[actorId].Record(Clock.Tick, body.X, body.Z);
-            if (body.IFrameTicks > 0)
-                body.IFrameTicks--;
-            if (body.StaggerTicks > 0)
-                body.StaggerTicks--;
-            if (intent.Dodge && body.Stamina >= DodgeCost(actorId) && body.Life == LifeState.Alive)
+            bool alive = body.Life == LifeState.Alive;
+            if (alive && intent.Dodge && body.DodgeTicks <= 0 && body.Stamina >= DodgeCost(actorId))
             {
                 body.Stamina -= DodgeCost(actorId);
                 body.IFrameTicks = SimRates.DodgeIFrameTicks;
+                body.DodgeTicks = _content.Move.DodgeTicks;
+                Events.Add(new SimEvent(SimEventKind.Dodged, tick, actorId, x: body.X, y: body.Y, z: body.Z));
             }
-            if (body.Life == LifeState.Alive)
+
+            if (alive)
             {
-                float scale = _status.TryGetValue(actorId, out var sheet) ? sheet.MoveScale : 1f;
-                if (_content.Sets.TryGetValue("set_hunter", out var hunter) && ArmourSets.Worn(hunter, body, Bag(actorId)) >= 2)
-                    scale *= 1.05f;
-                Movement.Step(body, intent, _content.Move, scale);
+                body.Yaw = Movement.NormaliseYaw(intent.Yaw);
+                float scale = MoveScale(actorId, body);
+                var move = intent.HasClaim
+                    ? Movement.ValidateClaim(body, intent, _content.Move, scale, Geometry, Flags)
+                    : Movement.Step(body, intent, _content.Move, scale, Geometry, Flags);
+                _lastMove[actorId] = move;
+                if (!move.Accepted)
+                    Events.Add(new SimEvent(SimEventKind.MoveRejected, tick, actorId, arg: move.Reason, x: body.X, y: body.Y, z: body.Z));
             }
-            if (intent.Block && body.Life == LifeState.Alive)
+
+            if (intent.Block && alive)
             {
                 if (!body.Blocking)
-                    body.BlockStartedTick = Clock.Tick;
+                    body.BlockStartedTick = tick;
                 body.Blocking = true;
             }
             else
@@ -142,20 +211,38 @@ namespace Veyr.Sim
 
             if (body.Stamina < body.MaxStamina)
                 body.Stamina = Math.Min(body.MaxStamina, body.Stamina + 0.4f);
-            if (_status.TryGetValue(actorId, out var statuses))
-                statuses.Tick(body, _content.Statuses);
-            Clock.Advance();
-            Day.AdvanceTicks(1);
+            if (intent.Seq > body.LastSeq)
+                body.LastSeq = intent.Seq;
         }
 
+        float MoveScale(string actorId, ActorBody body)
+        {
+            float scale = _status.TryGetValue(actorId, out var sheet) ? sheet.MoveScale : 1f;
+            if (_content.Sets.TryGetValue("set_hunter", out var hunter) && ArmourSets.Worn(hunter, body, Bag(actorId)) >= 2)
+                scale *= 1.05f;
+            return scale;
+        }
+
+        /// <summary>Submit and step in one call. Kept for tests and single-player harnesses.</summary>
+        public void Tick(PlayerIntent intent, string actorId)
+        {
+            Submit(actorId, intent);
+            Step();
+        }
+
+        /// <summary>Submit, step, and report how this actor's move went.</summary>
         public MoveResult TryMove(string actorId, PlayerIntent intent)
         {
-            var body = Actors[actorId];
-            var result = Movement.Step(body, intent, _content.Move);
-            _hurt[actorId].Record(Clock.Tick, body.X, body.Z);
-            Clock.Advance();
-            return result;
+            _lastMove.Remove(actorId);
+            Submit(actorId, intent);
+            Step();
+            return _lastMove.TryGetValue(actorId, out var result)
+                ? result
+                : new MoveResult(false, "dead", Actors[actorId].X, Actors[actorId].Z, Actors[actorId].Y);
         }
+
+        public MoveResult LastMove(string actorId) =>
+            _lastMove.TryGetValue(actorId, out var result) ? result : new MoveResult(true, "", Actors[actorId].X, Actors[actorId].Z, Actors[actorId].Y);
 
         public GatherResult TryGather(string actorId, string nodeId)
         {
@@ -302,6 +389,13 @@ namespace Veyr.Sim
                 weakness,
                 Equipment.Defence(_content, target, Bag(targetId)),
                 Mode);
+            if (result.Parried)
+                Events.Add(new SimEvent(SimEventKind.Parried, Clock.Tick, targetId, actorId, x: target.X, y: target.Y, z: target.Z));
+            else if (result.Accepted && result.Damage > 0)
+                Events.Add(new SimEvent(SimEventKind.Hit, Clock.Tick, actorId, targetId, heavy ? "heavy" : "light", result.Damage, target.X, target.Y, target.Z));
+            else if (!result.Accepted)
+                Events.Add(new SimEvent(SimEventKind.Rejected, Clock.Tick, actorId, targetId, "attack_" + result.Reason));
+
             if (boss && result.Damage > 0)
             {
                 var def = _content.Boss(targetId);
@@ -310,10 +404,22 @@ namespace Veyr.Sim
                 if (_bosses[targetId].State == BossState.Dead)
                 {
                     target.Life = LifeState.Dead;
-                    Grants.Mint(_content, Bag(actorId), def, WorldId, actorId, () => NextId("item"));
-                    if (def.SealId != null)
+                    Events.Add(new SimEvent(SimEventKind.Killed, Clock.Tick, actorId, targetId, x: target.X, y: target.Y, z: target.Z));
+                    foreach (var mint in Grants.Mint(_content, Bag(actorId), def, WorldId, actorId, () => NextId("item")))
+                    {
+                        if (mint.Created)
+                            Events.Add(new SimEvent(SimEventKind.ItemGranted, Clock.Tick, actorId, arg: mint.InstanceId));
+                    }
+                    if (def.SealId != null && !Flags.Has(def.SealId))
+                    {
                         Flags.Set(def.SealId);
+                        Events.Add(new SimEvent(SimEventKind.SealSet, Clock.Tick, actorId, arg: def.SealId));
+                    }
                 }
+            }
+            else if (result.Killed)
+            {
+                Events.Add(new SimEvent(SimEventKind.Killed, Clock.Tick, actorId, targetId, x: target.X, y: target.Y, z: target.Z));
             }
             if (result.Killed && Mode == DeathMode.Adventure && target.DefId == "player")
                 Respawn(target);
@@ -325,7 +431,11 @@ namespace Veyr.Sim
             body.Life = LifeState.Alive;
             body.Health = body.MaxHealth;
             body.X = body.SpawnX;
+            body.Y = body.SpawnY;
             body.Z = body.SpawnZ;
+            body.MoveBank = 0f;
+            body.Ascent = 0f;
+            Events.Add(new SimEvent(SimEventKind.Respawned, Clock.Tick, body.Id, arg: body.SpawnId, x: body.X, y: body.Y, z: body.Z));
         }
 
         public void RecordHurt(string actorId)

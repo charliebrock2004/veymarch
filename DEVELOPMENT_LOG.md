@@ -78,3 +78,18 @@
 - Tests run: `dotnet test sim/Veyr.Tests.Sim` → 64 passed, 0 failed. `dotnet build sim/Veyr.Tests.UnityCheck` → 0 errors. `Veyr.Loop` exit 0, `Veyr.Check` audit clean, fingerprint `82FC867A…6E06`.
 - Not verified: a real Unity compile. This build reproduces Unity's language version and API surface; it is not the Unity compiler.
 - Next legal task: 20 Hz world step (T006/T007 sim side).
+
+## 2026-10-06 — T006/T007 sim side: 20 Hz world step and movement authority
+
+- Task: T006 (sim clock), the sim half of T007, and the authority shape Phase 2 needs ("input produces `PlayerIntent`, not direct transform authority").
+- Found: `WorldSimulation.Tick(intent, actor)` advanced the world clock once per actor, so two players made the world run at 40 Hz. Mob stagger and i-frames never counted down because only the ticked player was updated. Hurtbox history for mobs was only written by hand from tests. A half-pushed stick moved at full speed. The hunter set's 1.05 move bonus was clamped away.
+- What changed:
+  - `Submit(actor, intent)` queues per player; two intents before a step merge (newest movement, buttons kept). `Step()` records every actor's pose for rewind, applies players in join order, ticks statuses for every actor and every boss, then advances the clock and day once. `Tick` and `TryMove` are now Submit plus Step, so tests and harnesses use the same path.
+  - Position claims: a client that moves its own CharacterController sends where it ended. `Movement.ValidateClaim` keeps a per-body budget refilled at the cap (dodge speed during the dodge burst), banks at most 0.5 s, and borrows the 0.15 m slack instead of granting it every tick. It refuses NaN, a jump over 6 m ("teleport"), a fall faster than terminal, sustained climb beyond the jump apex ("climb"), and any path through a closed blocker.
+  - `WorldGeometry` blockers: ground-plane walls the sim enforces whatever the client's physics does. A gate blocker opens through `WorldFlags.GateOpen`. A body inside a blocker may always leave.
+  - `SimEventLog`: Dodged, MoveRejected (with the authoritative position), Hit, Parried, Killed, Respawned, ItemGranted, SealSet, Rejected. Hosts drain it; it caps at 4096 so a host that never drains cannot leak.
+  - `ActorBody` gains Y, Yaw, SpawnY, DodgeTicks, MoveBank, Ascent, LastSeq. `MoveTuning` gains dodge, jump, gravity, terminal fall, slack, and bank values.
+- Tests run: `dotnet test sim/Veyr.Tests.Sim` → 81 passed (64 existing, 17 new in `WorldStepTests`). `Veyr.Tests.UnityCheck` → 0 errors.
+- A test caught the first version of the budget letting a sustained 9 m/s claim through (slack refilled every tick). Fixed before commit.
+- Not done: AI in the step (Phase 6), Unity physics sweep on a dedicated server (Phase 13).
+- Next legal task: repair the gather, craft-station, and flank authority holes.
