@@ -933,15 +933,13 @@ export function buildOverworld(M: Mats, state: { gate: () => boolean }): Overwor
       const m = new THREE.MeshLambertMaterial({ vertexColors: true, fog: false });
       hazeMats.push(m);
       const mesh = new THREE.Mesh(g, m);
-      mesh.position.set(x, hh / 2 - 70, z);
+      mesh.position.set(x, hh / 2 - 110, z);
       far.add(mesh);
     };
-    mountain(60, 760, 220, 300, true, 1);
-    mountain(-260, 700, 180, 210, true, 2);
-    mountain(320, 680, 200, 230, true, 3);
-    mountain(-80, 820, 160, 190, true, 4);
-    mountain(640, -180, 240, 110, false, 5);
-    mountain(620, 320, 220, 130, false, 6);
+    // the Frostlands: one white tooth far to the north, seen on clear mornings
+    mountain(40, 1150, 260, 330, true, 1);
+    mountain(-220, 1100, 200, 230, true, 2);
+    mountain(700, -200, 260, 120, false, 5);
     // a dark ring of distant forest hills so the horizon is never a cut edge
     const ring = new THREE.Group();
     const rrr = rng(99);
