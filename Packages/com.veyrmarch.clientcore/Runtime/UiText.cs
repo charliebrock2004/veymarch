@@ -19,7 +19,8 @@ namespace Veyr.Client.Core
             ["hud.lock"] = "Lock",
             ["hud.health"] = "Health",
             ["hud.stamina"] = "Stamina",
-            ["boot.loading"] = "The sealed lands"
+            ["boot.loading"] = "The sealed lands",
+            ["dev.switch"] = "Next test"
         };
 
         /// <summary>The text for a key, or the key itself so a missing string is visible, never blank.</summary>

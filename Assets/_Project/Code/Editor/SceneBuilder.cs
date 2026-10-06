@@ -27,10 +27,15 @@ namespace Veyr.EditorTools
         public const string SceneFolder = "Assets/_Project/Scenes";
         public const string BootPath = SceneFolder + "/Boot.unity";
         public const string DevMovePath = SceneFolder + "/Dev/Dev_Move.unity";
+        public const string ForestPath = SceneFolder + "/Regions/Forest_Blockout.unity";
         public const string PrefabFolder = "Assets/_Project/Prefabs";
-        public const string GeneratedFolder = "Assets/_Project/Generated/Dev_Move";
+        public const string GeneratedRoot = "Assets/_Project/Generated";
         public const string InputPath = "Assets/_Project/Input/Veyr.inputactions";
         public const ulong ForestSeed = 7;
+
+        // Each scene keeps its meshes in its own folder: rebuilding one scene must never delete
+        // a mesh another scene references. Set at the start of each build; editor-only, single-threaded.
+        static string _meshFolder = GeneratedRoot;
 
         const float GroundMinX = -128f;
         const float GroundMaxX = 128f;
@@ -39,7 +44,8 @@ namespace Veyr.EditorTools
 
         public static string BuildAll(QualityAssetSet quality)
         {
-            var stats = BuildDevMove(quality);
+            BuildMovementScene(quality, DevMovePath, false, "Forest_Blockout");
+            var stats = BuildMovementScene(quality, ForestPath, true, "Dev_Move");
             BuildBoot(quality);
             SetBuildScenes();
             AssetDatabase.SaveAssets();
@@ -51,7 +57,8 @@ namespace Veyr.EditorTools
             EditorBuildSettings.scenes = new[]
             {
                 new EditorBuildSettingsScene(BootPath, true),
-                new EditorBuildSettingsScene(DevMovePath, true)
+                new EditorBuildSettingsScene(DevMovePath, true),
+                new EditorBuildSettingsScene(ForestPath, true)
             };
         }
 
@@ -70,12 +77,18 @@ namespace Veyr.EditorTools
             EditorSceneManager.SaveScene(scene, BootPath);
         }
 
-        public static string BuildDevMove(QualityAssetSet quality)
+        /// <summary>
+        /// Dev_Move is the near-empty movement scene the Phase 3 frame gate asks for. Forest_Blockout
+        /// adds the seeded forest, giant trees, and roots: the forest is the performance test.
+        /// </summary>
+        public static string BuildMovementScene(QualityAssetSet quality, string path, bool forest, string switchTo)
         {
             Folders.Ensure(SceneFolder + "/Dev");
+            Folders.Ensure(SceneFolder + "/Regions");
             Folders.Ensure(PrefabFolder + "/Characters");
             Folders.Ensure(PrefabFolder + "/UI");
-            Folders.Ensure(GeneratedFolder);
+            _meshFolder = GeneratedRoot + "/" + System.IO.Path.GetFileNameWithoutExtension(path);
+            Folders.Ensure(_meshFolder);
             var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
 
             Lighting();
@@ -83,12 +96,17 @@ namespace Veyr.EditorTools
             Ground(world);
             var spawn = SpawnPad(world);
             Road(world);
-            var forest = Forest(world);
-            Landmarks(world);
+            string stats = "Dev_Move: ground, pad, course, horizon landmarks";
+            if (forest)
+            {
+                stats = Forest(world);
+                ForestLandmarks(world);
+            }
+            HorizonLandmarks(world);
             CameraCourse(world);
             Boundary(world);
 
-            var hud = HudBuilder.Build(out var touch, out var overlay, out var vitals);
+            var hud = HudBuilder.Build(out var touch, out var overlay, out var vitals, out var switchButton);
             HudBuilder.EventSystemObject();
 
             var player = Player(spawn.position, out var model, out var bodyRenderers);
@@ -109,13 +127,14 @@ namespace Veyr.EditorTools
             var root = rootObject.AddComponent<SceneRoot>();
             var deviceLog = rootObject.AddComponent<DeviceLog>();
             root.Wire(spawn, controller, input, rig, overlay, deviceLog, vitals, quality);
+            rootObject.AddComponent<DevSceneSwitch>().Wire(switchButton, switchTo);
 
             PrefabUtility.SaveAsPrefabAssetAndConnect(player, PrefabFolder + "/Characters/PF_Player.prefab", InteractionMode.AutomatedAction);
             PrefabUtility.SaveAsPrefabAssetAndConnect(rigObject, PrefabFolder + "/Characters/PF_CameraRig.prefab", InteractionMode.AutomatedAction);
             PrefabUtility.SaveAsPrefabAssetAndConnect(hud, PrefabFolder + "/UI/PF_Hud.prefab", InteractionMode.AutomatedAction);
 
-            EditorSceneManager.SaveScene(scene, DevMovePath);
-            return forest;
+            EditorSceneManager.SaveScene(scene, path);
+            return stats;
         }
 
         static void Lighting()
@@ -265,17 +284,13 @@ namespace Veyr.EditorTools
             new Vector3(-26f, 0f, 134f)
         };
 
-        static void Landmarks(Transform world)
+        static void ForestLandmarks(Transform world)
         {
-            var parent = new GameObject("Landmarks").transform;
+            var parent = new GameObject("ForestLandmarks").transform;
             parent.SetParent(world, false);
             int layer = LayerMask.NameToLayer(ProjectSetup.LandmarkLayer);
             var bark = Palette.Get("bark", Palette.SootTimber);
             var canopy = Palette.Get("canopy_old", Palette.DeepMoss);
-            var stone = Palette.Get("pale_stone", Palette.BoneStone);
-            var red = Palette.Get("nursery_red", Palette.NurseryRed, 0.3f);
-            var moss = Palette.Get("forest_ground", Palette.Moss);
-            var frost = Palette.Get("frost_peak", Palette.FrostWhite);
 
             for (int i = 0; i < GiantTrees.Length; i++)
             {
@@ -318,6 +333,18 @@ namespace Veyr.EditorTools
             ramp.Box(new Vector3(-12f, 4.2f, 84f), new Vector3(6f, 0.8f, 6f), Quaternion.identity);
             var climb = MeshObject("RootRamp", parent, ramp, "Dev_RootRamp", bark, true);
             MarkStatic(climb);
+        }
+
+        /// <summary>Visible before reachable: the castle hill and a frost peak on the Landmark layer.</summary>
+        static void HorizonLandmarks(Transform world)
+        {
+            var parent = new GameObject("HorizonLandmarks").transform;
+            parent.SetParent(world, false);
+            int layer = LayerMask.NameToLayer(ProjectSetup.LandmarkLayer);
+            var stone = Palette.Get("pale_stone", Palette.BoneStone);
+            var red = Palette.Get("nursery_red", Palette.NurseryRed, 0.3f);
+            var moss = Palette.Get("forest_ground", Palette.Moss);
+            var frost = Palette.Get("frost_peak", Palette.FrostWhite);
 
             // Cookie's castle: a nursery fossilised into a hill, on the horizon from the pad.
             var hillKit = new MeshKit();
@@ -462,7 +489,7 @@ namespace Veyr.EditorTools
 
         static Mesh SaveMesh(Mesh mesh, string assetName)
         {
-            string path = GeneratedFolder + "/" + assetName + ".asset";
+            string path = _meshFolder + "/" + assetName + ".asset";
             if (AssetDatabase.LoadAssetAtPath<Mesh>(path) != null)
                 AssetDatabase.DeleteAsset(path);
             AssetDatabase.CreateAsset(mesh, path);

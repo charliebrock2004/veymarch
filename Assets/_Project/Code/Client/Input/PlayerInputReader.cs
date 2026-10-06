@@ -181,8 +181,9 @@ namespace Veyr.Client.Input
                 look += touch.Look.Consume(Screen.height, sensitivity, _settings.InvertLook).ToUnity();
             if (_look != null)
             {
+                // Same convention as touch and mouse: pushing up looks up (pitch goes down).
                 Vector2 pad = _look.ReadValue<Vector2>();
-                look += new Vector2(pad.x, pad.y * invert) * (gamepadLookDegreesPerSecond * sensitivity * dt);
+                look += new Vector2(pad.x, -pad.y * invert) * (gamepadLookDegreesPerSecond * sensitivity * dt);
             }
             var mouse = Mouse.current;
             if (mouse != null && mouse.rightButton.isPressed)

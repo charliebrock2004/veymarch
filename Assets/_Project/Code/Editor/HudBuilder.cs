@@ -20,7 +20,7 @@ namespace Veyr.EditorTools
         static readonly Color StickFill = new Color(0.906f, 0.863f, 0.784f, 0.22f);
         static readonly Color Clear = new Color(0f, 0f, 0f, 0f);
 
-        public static GameObject Build(out TouchControls touch, out FrameOverlay overlay, out VitalsHud vitals)
+        public static GameObject Build(out TouchControls touch, out FrameOverlay overlay, out VitalsHud vitals, out TouchButton sceneSwitch)
         {
             var canvasObject = new GameObject("PF_Hud");
             var canvas = canvasObject.AddComponent<Canvas>();
@@ -67,6 +67,9 @@ namespace Veyr.EditorTools
             overlayText.raycastTarget = false;
             overlay = overlayRect.gameObject.AddComponent<FrameOverlay>();
             overlay.Wire(overlayText);
+
+            // Developer button, top-right, away from the combat cluster: switches between the test scenes.
+            sceneSwitch = Button("SceneSwitch", safe, new Vector2(-120f, -70f), 110f, "dev.switch", knob, new Vector2(1f, 1f));
 
             // Zones first in the sibling order so buttons, drawn later, receive the touch first.
             stickZone.SetSiblingIndex(0);

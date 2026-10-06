@@ -148,3 +148,10 @@
 - Found by review before commit: the icosphere winding faced inward, and the stair treads rose 0.6 m (over the 0.4 m step offset). Both fixed. Boot had no AudioListener.
 - Compile check: `sim/UnityCheck.Editor` and `sim/UnityCheck.Play` build the sources against the API declarations and NUnit 3.5 with 0 errors and 0 warnings.
 - Not verified: none of this has run. The generator, the scenes it makes, and the play-mode tests need the Unity 6 editor (ENV-1).
+
+## 2026-10-06 — Split Dev_Move and Forest_Blockout; review fixes
+
+- Task: T013 and the Phase 3 device note need an empty-scene frame number ("median ≤ 33 ms on the mid device in an empty scene"), and the bibles say the forest is the performance test. One scene could not serve both.
+- What changed: the generator now writes `Dev_Move` (ground, pad, road, camera course, horizon landmarks) and `Forest_Blockout` (the same plus the seeded forest, giant trees, root arch and ramp). `Forest_Blockout` is the name already listed in `SliceBuild.PlayerScenes`. Build list: Boot, Dev_Move, Forest_Blockout. A developer "Next test" button (top-right) ends the session and loads the other scene, so one phone build measures both.
+- Review fixes before any run: gamepad look had the pitch sign opposite to touch and mouse. Generated meshes for both scenes shared one folder and were deleted and recreated per build, which would have broken the first scene's mesh references; each scene now has its own folder under `Assets/_Project/Generated/`.
+- Tests run: `dotnet build sim/Veyrmarch.sln` → 0 errors, 0 warnings. `dotnet test` → 98 + 36 passed.

@@ -57,7 +57,7 @@ namespace Veyr.EditorTools
             var set = RenderingSetup.CreateTiers();
             report.Add("Quality tiers: Low, Medium, High URP assets at " + RenderingSetup.Folder + ".");
             report.Add(SceneBuilder.BuildAll(set));
-            report.Add("Scenes: " + SceneBuilder.BootPath + ", " + SceneBuilder.DevMovePath + ". Build list set.");
+            report.Add("Scenes: " + SceneBuilder.BootPath + ", " + SceneBuilder.DevMovePath + ", " + SceneBuilder.ForestPath + ". Build list set.");
             var problems = ProjectValidator.Run();
             report.Add(problems.Count == 0 ? "Validation: clean." : "Validation: " + string.Join("; ", problems));
             return report;
@@ -123,7 +123,7 @@ namespace Veyr.EditorTools
                 problems.Add("Unity " + Application.unityVersion + " is not Unity 6 (6000.x). Stop: the programme requires Unity 6.");
 
             var scenes = EditorBuildSettings.scenes;
-            foreach (var path in new[] { SceneBuilder.BootPath, SceneBuilder.DevMovePath })
+            foreach (var path in new[] { SceneBuilder.BootPath, SceneBuilder.DevMovePath, SceneBuilder.ForestPath })
             {
                 if (!File.Exists(path))
                     problems.Add("Missing scene " + path + ". Run Veyrmarch > Setup.");
