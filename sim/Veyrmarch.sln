@@ -20,6 +20,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Client.Core", "Veyr.Cl
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Tests.Core", "Veyr.Tests.Core\Veyr.Tests.Core.csproj", "{805FC1D6-BB6B-4A8A-85D6-E006CE161F5B}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.UnityStubs", "UnityStubs\Veyr.UnityStubs.csproj", "{47A35838-3508-4DE1-8087-41E4DB413D55}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Client", "UnityCheck.Client\Veyr.Client.csproj", "{F6595297-4DCF-47C4-84AE-7E11DC5D6143}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.App", "UnityCheck.App\Veyr.App.csproj", "{28DEE6A9-F110-485A-A2CD-91920DE4ACB4}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -66,5 +72,17 @@ Global
 		{805FC1D6-BB6B-4A8A-85D6-E006CE161F5B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{805FC1D6-BB6B-4A8A-85D6-E006CE161F5B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{805FC1D6-BB6B-4A8A-85D6-E006CE161F5B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{47A35838-3508-4DE1-8087-41E4DB413D55}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{47A35838-3508-4DE1-8087-41E4DB413D55}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{47A35838-3508-4DE1-8087-41E4DB413D55}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{47A35838-3508-4DE1-8087-41E4DB413D55}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F6595297-4DCF-47C4-84AE-7E11DC5D6143}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F6595297-4DCF-47C4-84AE-7E11DC5D6143}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F6595297-4DCF-47C4-84AE-7E11DC5D6143}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F6595297-4DCF-47C4-84AE-7E11DC5D6143}.Release|Any CPU.Build.0 = Release|Any CPU
+		{28DEE6A9-F110-485A-A2CD-91920DE4ACB4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{28DEE6A9-F110-485A-A2CD-91920DE4ACB4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{28DEE6A9-F110-485A-A2CD-91920DE4ACB4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{28DEE6A9-F110-485A-A2CD-91920DE4ACB4}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

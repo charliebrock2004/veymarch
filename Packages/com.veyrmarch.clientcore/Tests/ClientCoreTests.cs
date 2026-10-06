@@ -389,6 +389,21 @@ namespace Veyr.Tests.ClientCore
         }
 
         [Test]
+        public void TheRunHistogramGivesTheWholeSessionMedian()
+        {
+            var h = new FrameHistogram();
+            for (int i = 0; i < 36000; i++)
+                h.Add(i % 10 == 0 ? 45f : 30f);
+            Assert.That(h.Count, Is.EqualTo(36000));
+            Assert.That(h.Percentile(0.5f), Is.EqualTo(30.5f).Within(0.001f));
+            Assert.That(h.Percentile(0.95f), Is.EqualTo(45.5f).Within(0.001f));
+            Assert.That(h.CountAbove(33.3f), Is.EqualTo(3600));
+            Assert.That(h.MeanMs, Is.EqualTo(31.5f).Within(0.01f));
+            h.Add(900f);
+            Assert.That(h.Percentile(1f), Is.EqualTo(250.5f).Within(0.001f));
+        }
+
+        [Test]
         public void TiersHitTheirResolutionsAndLowKeepsNoShadows()
         {
             Assert.That(QualityProfile.Low.RenderScale(1080), Is.EqualTo(720f / 1080f).Within(0.001f));

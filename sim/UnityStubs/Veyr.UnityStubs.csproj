@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Hand-written declarations of the slice of the Unity 6 API that Assets/_Project/Code uses.
+    They let the .NET build type-check the Unity adapters under C# 9 / .NET Standard 2.1.
+    They are NOT Unity: behaviour is empty, and a signature here can be wrong. A real compile
+    in the Unity 6 editor is still required (KNOWN_ISSUES ENV-1). Never shipped, never referenced
+    by Unity.
+  -->
+  <PropertyGroup>
+    <AssemblyName>Veyr.UnityStubs</AssemblyName>
+    <RootNamespace>UnityEngine</RootNamespace>
+    <NoWarn>$(NoWarn);CS0067;CS0649;CS0169;CS0414;CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\tools\unity-api-stubs\**\*.cs" />
+  </ItemGroup>
+</Project>

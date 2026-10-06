@@ -104,6 +104,63 @@ namespace Veyr.Client.Core
         }
     }
 
+    /// <summary>
+    /// Whole-session frame histogram in 0.5 ms buckets up to 250 ms. A 20-minute device run keeps
+    /// every frame in a fixed array, so the reported median is over the whole run, not a window.
+    /// </summary>
+    public sealed class FrameHistogram
+    {
+        public const float BucketMs = 0.5f;
+        readonly long[] _buckets;
+
+        public FrameHistogram(float maxMs = 250f)
+        {
+            _buckets = new long[(int)MathF.Ceiling(maxMs / BucketMs) + 1];
+        }
+
+        public long Count { get; private set; }
+        public double SumMs { get; private set; }
+
+        public void Add(float frameMs)
+        {
+            if (float.IsNaN(frameMs) || frameMs < 0f)
+                return;
+            int i = Math.Min(_buckets.Length - 1, (int)(frameMs / BucketMs));
+            _buckets[i]++;
+            Count++;
+            SumMs += frameMs;
+        }
+
+        /// <summary>Upper edge of the bucket holding the p-th frame. Never under-reports by more than one bucket.</summary>
+        public float Percentile(float p)
+        {
+            if (Count == 0)
+                return 0f;
+            long rank = (long)MathF.Ceiling(Math.Clamp(p, 0f, 1f) * Count);
+            if (rank < 1)
+                rank = 1;
+            long seen = 0;
+            for (int i = 0; i < _buckets.Length; i++)
+            {
+                seen += _buckets[i];
+                if (seen >= rank)
+                    return (i + 1) * BucketMs;
+            }
+            return _buckets.Length * BucketMs;
+        }
+
+        public float MeanMs => Count == 0 ? 0f : (float)(SumMs / Count);
+
+        public long CountAbove(float ms)
+        {
+            long over = 0;
+            int from = Math.Min(_buckets.Length - 1, (int)(ms / BucketMs) + 1);
+            for (int i = from; i < _buckets.Length; i++)
+                over += _buckets[i];
+            return over;
+        }
+    }
+
     public enum QualityTier
     {
         Low,
@@ -129,6 +186,8 @@ namespace Veyr.Client.Core
         /// <summary>Scatter density multiplier for grass and small props.</summary>
         public float FoliageDensity { get; init; }
         public float ImpostorDistance { get; init; }
+        /// <summary>Far clip for landmark layers: the next castle stays on the horizon (architecture §11).</summary>
+        public float HorizonDistance { get; init; }
         public int ActiveHostileCap { get; init; }
         public int FullNpcCap { get; init; }
         public float ResidentWarningMb { get; init; }
@@ -151,6 +210,7 @@ namespace Veyr.Client.Core
             Hdr = false,
             FoliageDensity = 0.5f,
             ImpostorDistance = 40f,
+            HorizonDistance = 250f,
             ActiveHostileCap = 8,
             FullNpcCap = 6,
             ResidentWarningMb = 1000f
@@ -167,6 +227,7 @@ namespace Veyr.Client.Core
             Hdr = false,
             FoliageDensity = 0.8f,
             ImpostorDistance = 70f,
+            HorizonDistance = 400f,
             ActiveHostileCap = 12,
             FullNpcCap = 10,
             ResidentWarningMb = 1200f
@@ -183,6 +244,7 @@ namespace Veyr.Client.Core
             Hdr = false,
             FoliageDensity = 1f,
             ImpostorDistance = 100f,
+            HorizonDistance = 400f,
             ActiveHostileCap = 15,
             FullNpcCap = 12,
             ResidentWarningMb = 1600f

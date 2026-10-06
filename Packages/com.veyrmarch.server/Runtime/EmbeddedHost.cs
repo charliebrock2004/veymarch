@@ -12,7 +12,7 @@ namespace Veyr.Server
     /// dedicated server runs: the client reaches it only through <see cref="ISimEndpoint"/>, sends
     /// intents, and reads snapshots and events. Steps at a fixed 20 Hz from real time.
     /// </summary>
-    public sealed class EmbeddedHost : ISimEndpoint
+    public sealed class EmbeddedHost : ISimEndpoint, IHostDiagnostics
     {
         public const int DefaultMaxStepsPerAdvance = 5;
         const int EventCap = 4096;

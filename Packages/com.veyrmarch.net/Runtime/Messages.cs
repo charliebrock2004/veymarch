@@ -98,6 +98,14 @@ namespace Veyr.Net
         void DrainEvents(List<SimEvent> into);
     }
 
+    /// <summary>Host health a debug overlay may show. Implemented by the embedded host; a remote host may not offer it.</summary>
+    public interface IHostDiagnostics
+    {
+        /// <summary>Real time the host threw away because a frame was too long to catch up.</summary>
+        double DroppedSeconds { get; }
+        int StepsTaken { get; }
+    }
+
     /// <summary>
     /// Everything a running session needs, created by the composition root and handed down.
     /// Not a service locator: nothing looks it up, it is passed in.
