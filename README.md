@@ -1,22 +1,32 @@
 # VEYRMARCH
 
-The Sealed Continent. Unity 6 LTS, URP, is the production engine. This repository is not a web game.
+The Sealed Continent.
 
-## What runs here
+The playable build right now is the browser game in `web/`. Open it on a phone. Unity 6 remains the production engine later and is not required to play.
 
-The rules live in `Veyr.Sim` and do not reference Unity. They are tested with the .NET 8 SDK.
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Production build: `npm run build` in `web/`. Static files land in `web/dist`. Vercel should use `web` as the root directory (Vite). A repo-root `vercel.json` also builds `web/` if the project root stays at the repository root.
+
+Save is local to the browser (`localStorage`). There is no account.
+
+## What the browser slice contains
+
+Hearthfen, the giant forest, gathering, a stone knife, wolves, the nursery castle, the weight door, Cookie, Cookie's Blade / Pickaxe / Core, the Green Gate, and the wheat road up to a shut fortress. Touch controls are on screen. WASD, Shift to sprint, J strike, K dodge, E use, I pack.
+
+## Rules that still live in C#
+
+`Veyr.Sim` does not reference Unity. It is not the thing you play. Tests:
 
 ```bash
 dotnet test sim/Veyr.Tests.Sim/Veyr.Tests.Sim.csproj
-dotnet run --project sim/Veyr.Loop/Veyr.Loop.csproj
-dotnet run --project sim/Veyr.Check/Veyr.Check.csproj
 ```
 
-The loop harness wakes a body, gathers flint and wood, crafts one stone knife, kills a wolf, and returns to the pad. `Veyr.Check` audits the catalog and prints a content fingerprint. Neither is a client.
-
-## What does not run here
-
-Unity has not opened this project. There is no phone build, no frame time, and no scene test. See `Assets/_Project/INTEGRATION.md`.
+Unity has not opened this project. There is no phone binary. Do not treat Unity tasks as done.
 
 ## Authority
 
@@ -25,9 +35,3 @@ Unity has not opened this project. There is no phone build, no frame time, and n
 3. `Docs/programme/CLAUDE_IMPLEMENTATION_PROGRAMME.md`
 4. `Docs/ops/MASTER_CLAUDE_BUILD_PROMPT.md`
 5. `Docs/art/ART_DIRECTION_BIBLE.md`
-
-`PROJECT_AUDIT.md` records conflicts. Architecture wins on technical matters. The programme wins on order.
-
-## Current phase
-
-Simulation and content for the slice are implemented and covered by automated tests. Unity integration is blocked, not done. Prefab names and the input map are prepared in `Docs/assets/SLICE_PREFAB_SPEC.md` and `Assets/_Project/Input/Veyr.inputactions`.

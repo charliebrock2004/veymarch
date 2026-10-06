@@ -47,3 +47,21 @@
   - Slice scene ids that may ship are Boot, Forest_Blockout, Cookie_Nursery. Kingdom is data only.
 - Not done: any Unity compile, any scene, any device frame time, NGO, a visible corpse, bow four-piece damage.
 
+## 2026-10-06 — Playable browser client
+
+- Task: a game you can open on a phone. Unity stays out of this build. No Unity scene was created. No Unity task was marked done.
+- What changed: `web/` is a Vite + React + Three.js client. It plays Hearthfen, the forest, gather, craft, combat, the nursery castle, the weight door, Cookie, the three unique rewards, the Green Gate, and the wheat road to a shut fortress. Touch stick, strike, dodge, block, use, pack. Saves in localStorage.
+- Tests run: rules unit tests in the client; a browser pass that walked, turned, gathered, crafted a knife, killed a wolf, entered the castle, opened the weight door, killed Cookie once, and stood on the Harrenvale road with the gate open.
+- Results: that loop completed. Walk speed read 4.2. Holding A while moving forward increased yaw. Holding D decreased it.
+- Decisions recorded (browser slice, not catalog changes):
+  - Wolf bite is 12, not the catalog 4, so the telegraph is worth a dodge.
+  - Bandage heals 28.
+  - Stump shield can also be crafted: 3 wood + 1 fibre at the bench. It is also a world pickup.
+  - Ember's mana pool is 20.
+  - The browser steps at 1/60. The sim's conceptual rate is still 20 Hz.
+  - The nursery is offset to x=400 so it does not sit inside the forest.
+  - Keyboard sprint is Shift. A full stick sprints. Walking with WASD does not.
+  - Light chain matches the sim: three swings inside 0.75 s, third hit ×1.15.
+- Not done: Unity, a second player, the rest of the kingdom, a public URL until Vercel is linked.
+
+
