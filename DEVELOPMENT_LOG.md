@@ -155,3 +155,11 @@
 - What changed: the generator now writes `Dev_Move` (ground, pad, road, camera course, horizon landmarks) and `Forest_Blockout` (the same plus the seeded forest, giant trees, root arch and ramp). `Forest_Blockout` is the name already listed in `SliceBuild.PlayerScenes`. Build list: Boot, Dev_Move, Forest_Blockout. A developer "Next test" button (top-right) ends the session and loads the other scene, so one phone build measures both.
 - Review fixes before any run: gamepad look had the pitch sign opposite to touch and mouse. Generated meshes for both scenes shared one folder and were deleted and recreated per build, which would have broken the first scene's mesh references; each scene now has its own folder under `Assets/_Project/Generated/`.
 - Tests run: `dotnet build sim/Veyrmarch.sln` → 0 errors, 0 warnings. `dotnet test` → 98 + 36 passed.
+
+## 2026-10-06 — Documentation, CI, and the checkpoint 1 stop
+
+- Task: T001 audit refresh, T004 (ignore and LFS already present), documentation gate J, and the stop at checkpoint 1.
+- What changed: `PROJECT_AUDIT.md` rewritten from verified state. `ARCHITECTURE.md` added (assembly map, dependency rules, departures from §3.1). `README.md` now points at Unity as the product and the browser build as a reference. `KNOWN_ISSUES.md`, `TECHNICAL_DEBT.md` (TD-002 removed: the client adapters landed in 5690b65 and 861edbc; TD-008 to TD-013 added), `CHANGELOG.md`, `Assets/_Project/INTEGRATION.md`, and `Docs/assets/SLICE_PREFAB_SPEC.md` updated. `Docs/device/PHASE3.md` is the human's script for first open, setup, the phone build, the 10-minute walk, and the report table.
+- CI: `.github/workflows/ci.yml` runs the .NET build (shared libraries under Unity's limits, Unity assemblies against the API declarations), all edit-mode tests, the content audit, the loop harness, and the web build. The same commands were run locally in Release: 0 errors, 0 warnings, 98 + 36 tests passed, audit clean, loop exit 0.
+- Performance numbers: none. No device.
+- Next legal task: T015/T016 on a mid Android phone by a human (checkpoint 1). The agent stops here. Phase 4+ Unity work waits for the checkpoint report or a written waiver from Charlie.
