@@ -144,7 +144,8 @@ namespace Veyr.Sim
             StationId station,
             int skillRank,
             string idempotencyKey,
-            Func<string> nextId)
+            Func<string> nextId,
+            bool stationInReach = true)
         {
             if (!content.Recipes.TryGetValue(recipeId, out var recipe))
                 return new CraftResult(false, "", "recipe");
@@ -158,6 +159,8 @@ namespace Veyr.Sim
             var known = inventory.InstanceForBirth(idempotencyKey);
             if (known != null)
                 return new CraftResult(true, known, "replay");
+            if (!stationInReach)
+                return new CraftResult(false, "", "station_range");
 
             foreach (var input in recipe.Inputs)
             {

@@ -173,15 +173,15 @@ namespace Veyr.Tests.Sim
             Arm(sim, "wpn_stone_knife");
             var wolf = sim.SpawnActor("mob_wolf", 1f, 0f);
             sim.Actors["p"].Stamina = 80;
-            int first = sim.TryAttack("p", wolf.Id, false, false).Damage;
+            int first = sim.TryAttack("p", wolf.Id, false).Damage;
             wolf.Health = wolf.MaxHealth;
             wolf.Life = LifeState.Alive;
             sim.Actors["p"].Stamina = 80;
-            sim.TryAttack("p", wolf.Id, false, false);
+            sim.TryAttack("p", wolf.Id, false);
             wolf.Health = wolf.MaxHealth;
             wolf.Life = LifeState.Alive;
             sim.Actors["p"].Stamina = 80;
-            int third = sim.TryAttack("p", wolf.Id, false, false).Damage;
+            int third = sim.TryAttack("p", wolf.Id, false).Damage;
             Assert.That(third, Is.GreaterThan(first));
 
             var hammer = new WorldSimulation("w", DeathMode.Adventure, 1);
@@ -189,7 +189,7 @@ namespace Veyr.Tests.Sim
             Arm(hammer, "wpn_stone_hammer");
             var boar = hammer.SpawnActor("mob_boar", 1f, 0f);
             hammer.Actors["p"].Stamina = 80;
-            var hit = hammer.TryAttack("p", boar.Id, true, false);
+            var hit = hammer.TryAttack("p", boar.Id, true);
             Assert.That(hit.Knockback, Is.GreaterThan(0f));
         }
 
@@ -203,7 +203,7 @@ namespace Veyr.Tests.Sim
             int start = knife.Durability;
             var wolf = sim.SpawnActor("mob_wolf", 1f, 0f);
             sim.Actors["p"].Stamina = 80;
-            sim.TryAttack("p", wolf.Id, false, false);
+            sim.TryAttack("p", wolf.Id, false);
             Assert.That(knife.Durability, Is.EqualTo(start - 1));
 
             var adventure = new WorldSimulation("w", DeathMode.Adventure, 1);
@@ -213,7 +213,7 @@ namespace Veyr.Tests.Sim
             int full = kept.Durability;
             var other = adventure.SpawnActor("mob_wolf", 1f, 0f);
             adventure.Actors["p"].Stamina = 80;
-            adventure.TryAttack("p", other.Id, false, false);
+            adventure.TryAttack("p", other.Id, false);
             Assert.That(kept.Durability, Is.EqualTo(full));
 
             var dull = new WorldSimulation("w", DeathMode.Survival, 1);
@@ -223,11 +223,11 @@ namespace Veyr.Tests.Sim
             blade.Durability = 1;
             var dummy = dull.SpawnActor("mob_wolf", 1f, 0f);
             dull.Actors["p"].Stamina = 80;
-            int sharp = dull.TryAttack("p", dummy.Id, true, false).Damage;
+            int sharp = dull.TryAttack("p", dummy.Id, true).Damage;
             dummy.Health = dummy.MaxHealth;
             dummy.Life = LifeState.Alive;
             dull.Actors["p"].Stamina = 80;
-            int dulled = dull.TryAttack("p", dummy.Id, true, false).Damage;
+            int dulled = dull.TryAttack("p", dummy.Id, true).Damage;
             Assert.That(blade.Durability, Is.EqualTo(0));
             Assert.That(dulled, Is.LessThan(sharp));
             Assert.That(DurabilityRules.IsBroken(blade, dull.Content.Item(blade.DefId), DeathMode.Survival), Is.False);
@@ -333,7 +333,7 @@ namespace Veyr.Tests.Sim
             body.X = 1f;
             body.Health = 100;
             sim.Actors["p"].Stamina = 80;
-            var hit = sim.TryAttack("p", "boss_wyrm", false, false);
+            var hit = sim.TryAttack("p", "boss_wyrm", false);
             Assert.That(hit.Reason, Is.EqualTo("heal"));
             Assert.That(body.Health, Is.GreaterThan(100));
             Assert.That(boss.State, Is.Not.EqualTo(BossState.Dead));

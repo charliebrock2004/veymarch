@@ -18,6 +18,8 @@ namespace Veyr.Sim
         readonly List<string> _actorOrder = new List<string>();
         readonly Dictionary<string, PlayerIntent> _pending = new(StringComparer.Ordinal);
         readonly Dictionary<string, MoveResult> _lastMove = new(StringComparer.Ordinal);
+        readonly Dictionary<string, NodeInstance> _nodes = new(StringComparer.Ordinal);
+        readonly Dictionary<string, StationInstance> _stations = new(StringComparer.Ordinal);
         int _seq;
 
         public SimClock Clock { get; } = new();
@@ -28,6 +30,8 @@ namespace Veyr.Sim
         public SimEventLog Events { get; } = new SimEventLog();
         /// <summary>Players in join order. Steps visit them in this order so a tick is deterministic.</summary>
         public IReadOnlyList<string> Players => _players;
+        public IReadOnlyDictionary<string, NodeInstance> Nodes => _nodes;
+        public IReadOnlyDictionary<string, StationInstance> Stations => _stations;
         public DeathMode Mode { get; }
         public string WorldId { get; }
         public ulong Seed { get; }
@@ -124,6 +128,41 @@ namespace Veyr.Sim
 
         public BossController Boss(string id) => _bosses[id];
 
+        public NodeInstance PlaceNode(string instanceId, string nodeDefId, float x, float y, float z)
+        {
+            if (_nodes.ContainsKey(instanceId))
+                throw new ArgumentException("Node " + instanceId + " already placed.");
+            var node = new NodeInstance(instanceId, _content.Node(nodeDefId), x, y, z);
+            _nodes[instanceId] = node;
+            return node;
+        }
+
+        public StationInstance PlaceStation(string instanceId, StationId station, float x, float y, float z)
+        {
+            if (station == StationId.Hand)
+                throw new ArgumentException("Hand crafting needs no station.");
+            if (_stations.ContainsKey(instanceId))
+                throw new ArgumentException("Station " + instanceId + " already placed.");
+            var placed = new StationInstance(instanceId, station, x, y, z);
+            _stations[instanceId] = placed;
+            return placed;
+        }
+
+        /// <summary>True when a station of this kind is in reach. Hand is always in reach.</summary>
+        public bool StationInReach(string actorId, StationId station)
+        {
+            if (station == StationId.Hand)
+                return true;
+            if (!Actors.TryGetValue(actorId, out var body))
+                return false;
+            foreach (var placed in _stations.Values)
+            {
+                if (placed.Station == station && Reach.Within(body, placed.X, placed.Y, placed.Z))
+                    return true;
+            }
+            return false;
+        }
+
         /// <summary>
         /// Queues a player's intent for the next <see cref="Step"/>. If two arrive before a step,
         /// the newer movement wins and button presses from both are kept.
@@ -169,6 +208,16 @@ namespace Veyr.Sim
 
             foreach (var pair in _bosses)
                 pair.Value.Tick(_content.Boss(pair.Key));
+
+            foreach (var node in _nodes.Values)
+            {
+                if (node.Spent && node.RespawnAtTick >= 0 && tick >= node.RespawnAtTick)
+                {
+                    node.ChargesLeft = Math.Max(1, node.Def.Charges);
+                    node.RespawnAtTick = -1;
+                    Events.Add(new SimEvent(SimEventKind.NodeRestored, tick, "", arg: node.Id, x: node.X, y: node.Y, z: node.Z));
+                }
+            }
 
             Clock.Advance();
             Day.AdvanceTicks(1);
@@ -244,22 +293,81 @@ namespace Veyr.Sim
         public MoveResult LastMove(string actorId) =>
             _lastMove.TryGetValue(actorId, out var result) ? result : new MoveResult(true, "", Actors[actorId].X, Actors[actorId].Z, Actors[actorId].Y);
 
-        public GatherResult TryGather(string actorId, string nodeId)
+        /// <summary>
+        /// Strikes a placed node. The sim checks that the node exists, is in reach, is not spent,
+        /// and that the seal and tool tier allow it. A client cannot name a node type and mine it
+        /// from anywhere.
+        /// </summary>
+        public GatherResult TryGather(string actorId, string nodeInstanceId)
         {
-            var node = _content.Node(nodeId);
-            var result = Gathering.TryGather(_content, Bag(actorId), Actors[actorId], node, Flags, actorId, () => NextId("item"));
-            if (result.Ok)
-                Skills(actorId).Practise(node.Practice);
+            var reason = GatherGate(actorId, nodeInstanceId, out var body, out var node);
+            if (reason.Length > 0)
+            {
+                Events.Add(new SimEvent(SimEventKind.Rejected, Clock.Tick, actorId, arg: "gather_" + reason));
+                return new GatherResult(false, reason, 0);
+            }
+
+            var result = Gathering.TryGather(_content, Bag(actorId), body!, node!.Def, Flags, actorId, () => NextId("item"));
+            if (!result.Ok)
+            {
+                Events.Add(new SimEvent(SimEventKind.Rejected, Clock.Tick, actorId, arg: "gather_" + result.Reason));
+                return result;
+            }
+
+            Skills(actorId).Practise(node.Def.Practice);
+            node.ChargesLeft--;
+            Events.Add(new SimEvent(SimEventKind.Gathered, Clock.Tick, actorId, node.Id, node.Def.YieldItemId, result.Amount, node.X, node.Y, node.Z));
+            if (node.Spent)
+            {
+                node.RespawnAtTick = node.Def.RespawnTicks > 0 ? Clock.Tick + node.Def.RespawnTicks : -1;
+                Events.Add(new SimEvent(SimEventKind.NodeDepleted, Clock.Tick, actorId, arg: node.Id, x: node.X, y: node.Y, z: node.Z));
+            }
             return result;
         }
 
+        string GatherGate(string actorId, string nodeInstanceId, out ActorBody? body, out NodeInstance? node)
+        {
+            node = null;
+            if (!Actors.TryGetValue(actorId, out body))
+                return "actor";
+            if (body.Life != LifeState.Alive)
+                return "dead";
+            if (!_nodes.TryGetValue(nodeInstanceId, out node))
+                return "node";
+            if (!Reach.Within(body, node.X, node.Y, node.Z))
+                return "range";
+            if (node.Spent)
+                return "spent";
+            return "";
+        }
+
+        /// <summary>
+        /// Crafts in one transaction. Hand needs nothing; any other station must be placed in the
+        /// world and in reach of the crafter. A retry with the same key returns the first result.
+        /// </summary>
         public CraftResult TryCraft(string actorId, string recipeId, StationId station, string key)
         {
-            var recipe = _content.Recipe(recipeId);
+            if (!Actors.TryGetValue(actorId, out var body))
+                return new CraftResult(false, "", "actor");
+            if (body.Life != LifeState.Alive)
+                return new CraftResult(false, "", "dead");
+            if (!_content.Recipes.TryGetValue(recipeId, out var recipe))
+                return Reject(actorId, new CraftResult(false, "", "recipe"));
             int rank = Skills(actorId).Rank(recipe.Skill);
-            var result = Crafting.TryCraft(_content, Bag(actorId), actorId, recipeId, station, rank, key, () => NextId("item"));
-            if (result.Ok && result.Reason != "replay")
+            var result = Crafting.TryCraft(_content, Bag(actorId), actorId, recipeId, station, rank, key, () => NextId("item"), StationInReach(actorId, station));
+            if (!result.Ok)
+                return Reject(actorId, result);
+            if (result.Reason != "replay")
+            {
                 Skills(actorId).Practise(recipe.Skill == SkillId.None ? SkillId.Blacksmithing : recipe.Skill);
+                Events.Add(new SimEvent(SimEventKind.Crafted, Clock.Tick, actorId, arg: result.InstanceId, x: body.X, y: body.Y, z: body.Z));
+            }
+            return result;
+        }
+
+        CraftResult Reject(string actorId, CraftResult result)
+        {
+            Events.Add(new SimEvent(SimEventKind.Rejected, Clock.Tick, actorId, arg: "craft_" + result.Reason));
             return result;
         }
 
@@ -270,6 +378,8 @@ namespace Veyr.Sim
                 return false;
             var def = _content.Item(inst.DefId);
             var body = Actors[actorId];
+            if (def.Slot == EquipSlot.None)
+                return false;
             if (def.Slot == EquipSlot.OffHand && MainIsGreatsword(body, actorId))
                 return false;
             ClearSlot(actorId, def.Slot, body);
@@ -346,11 +456,19 @@ namespace Veyr.Sim
                 old.Equipped = false;
         }
 
-        public AttackResult TryAttack(string actorId, string targetId, bool heavy, bool flank, long? clientTick = null)
+        /// <summary>
+        /// Resolves one swing. Damage, flank, parry, and kills are the sim's call. The client may
+        /// name the tick it saw for rewind; anything older than the hurtbox buffer is refused.
+        /// </summary>
+        public AttackResult TryAttack(string actorId, string targetId, bool heavy, long? clientTick = null)
         {
-            var attacker = Actors[actorId];
-            var target = Actors[targetId];
+            if (!Actors.TryGetValue(actorId, out var attacker) || !Actors.TryGetValue(targetId, out var target) || actorId == targetId)
+            {
+                Events.Add(new SimEvent(SimEventKind.Rejected, Clock.Tick, actorId, targetId, "attack_target"));
+                return new AttackResult(false, "target", 0, false, false, false);
+            }
             long tick = clientTick ?? Clock.Tick;
+            bool flank = Reach.Flank(target, attacker);
             bool boss = _bosses.ContainsKey(targetId);
             RegionDef region;
             Element weakness;

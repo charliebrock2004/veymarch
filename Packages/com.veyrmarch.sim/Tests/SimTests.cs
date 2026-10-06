@@ -100,6 +100,7 @@ namespace Veyr.Tests.Sim
         public void TwoCraftKeysWithOneSetOfMaterialsMakeOneKnife()
         {
             var sim = ForestPrep();
+            sim.PlaceStation("bench", StationId.Bench, 1f, 0f, 0f);
             Assert.That(sim.TryCraft("p", "recipe_stone_knife", StationId.Hand, "a").Ok, Is.True);
             var again = sim.TryCraft("p", "recipe_stone_knife", StationId.Bench, "b");
             Assert.That(again.Ok, Is.False);
@@ -121,6 +122,7 @@ namespace Veyr.Tests.Sim
         {
             var sim = New();
             sim.SpawnPlayer("p");
+            sim.PlaceStation("bench", StationId.Bench, 1f, 0f, 0f);
             var bag = sim.Bag("p");
             bag.Add(sim.Content.Item("mat_copper"), 4, "p", "c");
             bag.Add(sim.Content.Item("mat_wood"), 2, "p", "w");
@@ -148,6 +150,7 @@ namespace Veyr.Tests.Sim
             sim.Bag("p").Add(sim.Content.Item("mat_iron"), 6, "p", "i");
             sim.Bag("p").Add(sim.Content.Item("mat_wood"), 2, "p", "w");
             sim.Bag("p").Add(sim.Content.Item("mat_leather"), 1, "p", "l");
+            sim.PlaceStation("forge", StationId.Forge, 0f, 0f, 1.5f);
             Assert.That(sim.TryCraft("p", "recipe_iron_sword", StationId.Forge, "ir").Reason, Is.EqualTo("skill"));
             sim.Skills("p").SetRank(SkillId.Blacksmithing, 2);
             Assert.That(sim.TryCraft("p", "recipe_iron_sword", StationId.Forge, "ir2").Ok, Is.True);
@@ -158,14 +161,15 @@ namespace Veyr.Tests.Sim
         {
             var sim = New();
             var body = sim.SpawnPlayer("p");
-            Assert.That(sim.TryGather("p", "node_iron").Reason, Is.EqualTo("sealed"));
+            sim.PlaceNode("iron", "node_iron", 1f, 0f, 0f);
+            Assert.That(sim.TryGather("p", "iron").Reason, Is.EqualTo("sealed"));
             sim.Flags.Set("seal_cookie");
             Give(sim, "wpn_copper_pick");
             sim.TryEquip("p", sim.Bag("p").Items[^1].InstanceId);
-            Assert.That(sim.TryGather("p", "node_iron").Reason, Is.EqualTo("tier"));
+            Assert.That(sim.TryGather("p", "iron").Reason, Is.EqualTo("tier"));
             Give(sim, "wpn_cookie_pick");
             sim.TryEquip("p", Last(sim));
-            Assert.That(sim.TryGather("p", "node_iron").Ok, Is.True);
+            Assert.That(sim.TryGather("p", "iron").Ok, Is.True);
             Assert.That(sim.Bag("p").CountOf("mat_iron"), Is.EqualTo(1));
             Assert.That(body.EquippedId, Is.Not.Empty);
         }
@@ -174,9 +178,11 @@ namespace Veyr.Tests.Sim
         {
             var sim = New();
             sim.SpawnPlayer("p");
-            sim.TryGather("p", "node_flint");
-            sim.TryGather("p", "node_flint");
-            sim.TryGather("p", "node_wood");
+            sim.PlaceNode("creek_flint", "node_flint", 1f, 0f, 0.5f);
+            sim.PlaceNode("fallen_limb", "node_wood", -1f, 0f, 0.5f);
+            Assert.That(sim.TryGather("p", "creek_flint").Ok, Is.True);
+            Assert.That(sim.TryGather("p", "creek_flint").Ok, Is.True);
+            Assert.That(sim.TryGather("p", "fallen_limb").Ok, Is.True);
             return sim;
         }
 
@@ -204,7 +210,7 @@ namespace Veyr.Tests.Sim
             while (wolf.Life == LifeState.Alive)
             {
                 sim.Actors["p"].Stamina = 60;
-                var hit = sim.TryAttack("p", wolf.Id, false, false);
+                var hit = sim.TryAttack("p", wolf.Id, false);
                 Assert.That(hit.Accepted, Is.True);
             }
             Assert.That(wolf.Health, Is.EqualTo(0));
@@ -217,7 +223,7 @@ namespace Veyr.Tests.Sim
             sim.SpawnPlayer("p");
             var wolf = sim.SpawnActor("mob_wolf", 1f, 0f);
             sim.Actors["p"].Stamina = 60;
-            sim.TryAttack("p", wolf.Id, false, false);
+            sim.TryAttack("p", wolf.Id, false);
             Assert.That(sim.Skills("p").Rank(SkillId.Sword), Is.EqualTo(0));
         }
 
@@ -233,7 +239,7 @@ namespace Veyr.Tests.Sim
                 sim.Actors["p"].Stamina = 60;
                 wolf.Health = wolf.MaxHealth;
                 wolf.Life = LifeState.Alive;
-                sim.TryAttack("p", wolf.Id, false, false);
+                sim.TryAttack("p", wolf.Id, false);
             }
             Assert.That(sim.Skills("p").Rank(SkillId.Sword), Is.EqualTo(1));
         }
@@ -245,7 +251,7 @@ namespace Veyr.Tests.Sim
             sim.SpawnPlayer("p");
             sim.Actors["p"].Stamina = 0;
             var wolf = sim.SpawnActor("mob_wolf", 1f, 0f);
-            var hit = sim.TryAttack("p", wolf.Id, true, false);
+            var hit = sim.TryAttack("p", wolf.Id, true);
             Assert.That(hit.Reason, Is.EqualTo("stamina"));
             Assert.That(wolf.Health, Is.EqualTo(wolf.MaxHealth));
         }
@@ -257,7 +263,7 @@ namespace Veyr.Tests.Sim
             var player = sim.SpawnPlayer("p");
             var wolf = sim.SpawnActor("mob_wolf", 1f, 0f);
             player.IFrameTicks = SimRates.DodgeIFrameTicks;
-            var fromWolf = sim.TryAttack(wolf.Id, "p", false, false);
+            var fromWolf = sim.TryAttack(wolf.Id, "p", false);
             Assert.That(fromWolf.Reason, Is.EqualTo("iframe"));
             Assert.That(fromWolf.Damage, Is.EqualTo(0));
             Assert.That(player.Health, Is.EqualTo(80));
@@ -282,13 +288,13 @@ namespace Veyr.Tests.Sim
             player.Blocking = true;
             player.BlockStartedTick = 0;
             sim.Clock.Advance(10);
-            var late = sim.TryAttack(wolf.Id, "p", false, false);
+            var late = sim.TryAttack(wolf.Id, "p", false);
             Assert.That(late.Parried, Is.False);
             Assert.That(late.Damage, Is.GreaterThan(0));
 
             player.Health = 80;
             player.BlockStartedTick = sim.Clock.Tick;
-            var parry = sim.TryAttack(wolf.Id, "p", false, false);
+            var parry = sim.TryAttack(wolf.Id, "p", false);
             Assert.That(parry.Parried, Is.True);
             Assert.That(parry.Damage, Is.EqualTo(0));
         }
@@ -305,7 +311,7 @@ namespace Veyr.Tests.Sim
             sim.Clock.Advance(1);
             sim.RecordHurt(wolf.Id);
             player.Stamina = 40;
-            var hit = sim.TryAttack("p", wolf.Id, false, false, then);
+            var hit = sim.TryAttack("p", wolf.Id, false, then);
             Assert.That(hit.Accepted, Is.True);
             Assert.That(hit.Reason, Is.Not.EqualTo("range"));
             Assert.That(hit.Damage, Is.GreaterThan(0));
@@ -317,7 +323,7 @@ namespace Veyr.Tests.Sim
             var sim = new WorldSimulation("w", DeathMode.Adventure, 1);
             sim.SpawnPlayer("p");
             var wolf = sim.SpawnActor("mob_wolf", 12f, 0f);
-            var hit = sim.TryAttack("p", wolf.Id, false, false);
+            var hit = sim.TryAttack("p", wolf.Id, false);
             Assert.That(hit.Reason, Is.EqualTo("range"));
         }
 
@@ -338,7 +344,7 @@ namespace Veyr.Tests.Sim
             player.X = 4;
             player.Health = 1;
             var wolf = sim.SpawnActor("mob_wolf", 4.5f, 0f);
-            var hit = sim.TryAttack(wolf.Id, "p", false, false);
+            var hit = sim.TryAttack(wolf.Id, "p", false);
             Assert.That(hit.Killed, Is.True);
             Assert.That(player.Life, Is.EqualTo(LifeState.Alive));
             Assert.That(player.X, Is.EqualTo(0));
@@ -353,7 +359,7 @@ namespace Veyr.Tests.Sim
                 ArmKnife(sim);
             var wolf = sim.SpawnActor("mob_wolf", 1f, 0f);
             sim.Actors["p"].Stamina = 30;
-            return sim.TryAttack("p", wolf.Id, false, false).Damage;
+            return sim.TryAttack("p", wolf.Id, false).Damage;
         }
 
         static void ArmKnife(WorldSimulation sim) => Arm(sim, "wpn_stone_knife");
@@ -461,7 +467,7 @@ namespace Veyr.Tests.Sim
             var boe = sim.SpawnBoss("boss_boe");
             sim.Actors["boss_boe"].X = 1;
             while (boe.State != BossState.Dead)
-                sim.TryAttack("p", "boss_boe", true, false);
+                sim.TryAttack("p", "boss_boe", true);
             Assert.That(sim.Flags.Has("seal_cookie"), Is.False);
             Assert.That(sim.Bag("p").CountOf("wpn_smacko"), Is.EqualTo(1));
             Assert.That(WorldFlags.GateOpen(sim.Flags, "gate_green"), Is.False);
@@ -536,7 +542,7 @@ namespace Veyr.Tests.Sim
             int guard = 0;
             while (boss.State != BossState.Dead)
             {
-                sim.TryAttack("p", "boss_cookie", true, true);
+                sim.TryAttack("p", "boss_cookie", true);
                 if (++guard > 80)
                     Assert.Fail("Cookie did not die");
             }

@@ -278,7 +278,7 @@ namespace Veyr.Tests.Sim
             sim.Actors["boss_cookie"].X = 1.2f;
             int guard = 0;
             while (boss.State != BossState.Dead && guard++ < 80)
-                sim.TryAttack("p", "boss_cookie", true, false);
+                sim.TryAttack("p", "boss_cookie", true);
 
             var drained = new List<SimEvent>();
             sim.Events.DrainInto(drained);

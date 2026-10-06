@@ -149,6 +149,8 @@ namespace Veyr.Sim
         {
             if (attacker.Life != LifeState.Alive)
                 return new AttackResult(false, "dead", 0, false, false, false);
+            if (attacker.StaggerTicks > 0)
+                return new AttackResult(false, "staggered", 0, false, false, false);
             if (target.Life == LifeState.Dead)
                 return new AttackResult(false, "dead", 0, false, false, false);
 

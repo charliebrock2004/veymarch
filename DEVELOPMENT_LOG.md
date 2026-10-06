@@ -93,3 +93,18 @@
 - A test caught the first version of the budget letting a sustained 9 m/s claim through (slack refilled every tick). Fixed before commit.
 - Not done: AI in the step (Phase 6), Unity physics sweep on a dedicated server (Phase 13).
 - Next legal task: repair the gather, craft-station, and flank authority holes.
+
+## 2026-10-06 — Repair sim authority holes (gather, station, flank, forged ids)
+
+- Task: repair of existing sim code against architecture §7.2, §8, and §40. Found in the takeover audit.
+- Found:
+  - `TryGather(actor, "node_flint")` took a node *type*, with no position, reach, or depletion. A client could mine anything from anywhere, forever.
+  - `TryCraft(..., StationId.Bench, ...)` believed the client's claim that a bench was there. Programme micro-milestone 5.5 (bench range check) was not met.
+  - `TryAttack(..., flank, ...)` took flank from the client, so any client could claim the +20 posture flank bonus.
+  - An unknown target, recipe, or actor id threw `KeyNotFoundException`, so a forged message could crash the authority.
+  - A staggered attacker could still swing. A material or key could be equipped as the main-hand weapon.
+- What changed: `NodeInstance` and `StationInstance` placed in the world with positions. Gathering takes an instance id and checks actor, life, reach (2.5 m plus a 2.5 m vertical allowance), and charges, then the existing seal and tier gates. Nodes have charges (default 3) and a respawn timer (default 90 s) restored in `Step`. Station crafts need a placed station of that kind in reach; the reach check runs after the idempotency replay, so a retried craft after walking away still returns the same item. Flank is `Reach.Flank` from the target's yaw. Unknown ids and self-targeting are refused. Every refusal writes a `Rejected` event with a reason.
+- Tests run: `dotnet test sim/Veyr.Tests.Sim` → 93 passed (12 new in `AuthorityTests`). `Veyr.Tests.UnityCheck` → 0 errors. `Veyr.Loop` exit 0.
+- Existing tests updated to place nodes and stations instead of naming node types; their assertions are unchanged.
+- Not done, logged as debt: swing recovery. The sim has no per-weapon attack interval, so a client can swing as fast as stamina allows (architecture §7.2 "cooldown skip"). It belongs to the Phase 7 combat spike (T027–T028) with the moveset timing.
+- Next legal task: `Veyr.Net`, `Veyr.Server` embedded host, and the pure client core.
