@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Compile check of a Unity assembly against Veyr.UnityStubs. References mirror the asmdef. -->
+  <PropertyGroup>
+    <AssemblyName>Veyr.Tests.Play</AssemblyName>
+    <NoWarn>$(NoWarn);NU1701;CS0649</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\Assets\Tests\PlayMode\**\*.cs" />
+    <ProjectReference Include="..\Veyr.Sim\Veyr.Sim.csproj" />
+    <ProjectReference Include="..\Veyr.Content\Veyr.Content.csproj" />
+    <ProjectReference Include="..\Veyr.Net\Veyr.Net.csproj" />
+    <ProjectReference Include="..\Veyr.Server\Veyr.Server.csproj" />
+    <ProjectReference Include="..\Veyr.Client.Core\Veyr.Client.Core.csproj" />
+    <ProjectReference Include="..\UnityCheck.Client\Veyr.Client.csproj" />
+    <ProjectReference Include="..\UnityCheck.App\Veyr.App.csproj" />
+    <ProjectReference Include="..\UnityStubs\Veyr.UnityStubs.csproj" />
+    <PackageReference Include="NUnit" Version="3.5.0" />
+  </ItemGroup>
+</Project>

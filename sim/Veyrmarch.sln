@@ -26,6 +26,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Client", "UnityCheck.C
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.App", "UnityCheck.App\Veyr.App.csproj", "{28DEE6A9-F110-485A-A2CD-91920DE4ACB4}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Editor", "UnityCheck.Editor\Veyr.Editor.csproj", "{A5DC29D2-15FC-4BC4-BA13-9DFE0CD16287}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Veyr.Tests.Play", "UnityCheck.Play\Veyr.Tests.Play.csproj", "{D33DD395-17C2-4C50-828D-C7A98EF4241F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -84,5 +88,13 @@ Global
 		{28DEE6A9-F110-485A-A2CD-91920DE4ACB4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{28DEE6A9-F110-485A-A2CD-91920DE4ACB4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{28DEE6A9-F110-485A-A2CD-91920DE4ACB4}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A5DC29D2-15FC-4BC4-BA13-9DFE0CD16287}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A5DC29D2-15FC-4BC4-BA13-9DFE0CD16287}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A5DC29D2-15FC-4BC4-BA13-9DFE0CD16287}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A5DC29D2-15FC-4BC4-BA13-9DFE0CD16287}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D33DD395-17C2-4C50-828D-C7A98EF4241F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D33DD395-17C2-4C50-828D-C7A98EF4241F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D33DD395-17C2-4C50-828D-C7A98EF4241F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D33DD395-17C2-4C50-828D-C7A98EF4241F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

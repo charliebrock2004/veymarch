@@ -1,0 +1,28 @@
+{
+    "name": "Veyr.Tests.Play",
+    "rootNamespace": "Veyr.Tests.Play",
+    "references": [
+        "Veyr.Sim",
+        "Veyr.Content",
+        "Veyr.Net",
+        "Veyr.Server",
+        "Veyr.Client.Core",
+        "Veyr.Client",
+        "Veyr.App",
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
