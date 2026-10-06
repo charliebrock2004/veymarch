@@ -63,7 +63,8 @@ public readonly record struct AttackResult(
     int Damage,
     bool Killed,
     bool Parried,
-    bool Staggered);
+    bool Staggered,
+    float Knockback = 0);
 
 public static class CombatMath
 {
@@ -87,6 +88,15 @@ public static class CombatMath
 
     public static bool CanBlock(ItemDef? offHand, int greatswordRank) =>
         (offHand != null && offHand.MovesetId == "shield") || greatswordRank >= 4;
+
+    public static float ElementAdjust(string targetDefId, Element element, Element weakness, float raw)
+    {
+        if (element != Element.None && element == weakness)
+            raw *= 1.25f;
+        if (targetDefId == "boss_cookie" && element == Element.Shadow)
+            raw *= 0.5f;
+        return raw;
+    }
 
     public static int BossHealth(int baseHealth, int playersPresent)
     {
@@ -117,7 +127,8 @@ public static class Attacks
         int defenceK,
         int targetGreatswordRank,
         Element targetWeakness,
-        int targetArmour)
+        int targetArmour,
+        DeathMode durabilityMode = DeathMode.Adventure)
     {
         if (attacker.Life != LifeState.Alive)
             return new AttackResult(false, "dead", 0, false, false, false);
@@ -125,6 +136,10 @@ public static class Attacks
             return new AttackResult(false, "dead", 0, false, false, false);
 
         var weapon = WeaponOf(content, attacker, attackerBag);
+        ItemInstance? held = attacker.EquippedId.Length == 0 ? null : attackerBag.Find(attacker.EquippedId);
+        if (DurabilityRules.IsBroken(held, weapon, durabilityMode))
+            return new AttackResult(false, "broken", 0, false, false, false);
+
         int cost = heavy ? weapon.StaminaHeavy : weapon.StaminaLight;
         if (attacker.Stamina < cost)
             return new AttackResult(false, "stamina", 0, false, false, false);
@@ -161,12 +176,39 @@ public static class Attacks
             return new AttackResult(true, "parry", 0, false, true, true);
         }
 
-        float raw = weapon.BaseDamage * (heavy ? 1.6f : 1f);
+        float chain = 1f;
+        if (!heavy)
+        {
+            if (simTick <= attacker.ComboExpireTick && attacker.Combo > 0)
+                attacker.Combo++;
+            else
+                attacker.Combo = 1;
+            if (attacker.Combo >= 3)
+            {
+                chain = 1.15f;
+                attacker.Combo = 0;
+            }
+
+            attacker.ComboExpireTick = simTick + 15;
+        }
+        else
+        {
+            attacker.Combo = 0;
+        }
+
+        float raw = weapon.BaseDamage * (heavy ? 1.6f : 1f) * chain;
         raw *= 1f + 0.05f * skills.Rank(weapon.Skill);
-        if (weapon.Element != Element.None && weapon.Element == targetWeakness)
-            raw *= 1.25f;
+        raw *= MaterialVerbs.SoftTax(MaterialVerbs.CombatRankSum(skills));
+        raw *= DurabilityRules.Scale(held, weapon);
+        raw = CombatMath.ElementAdjust(target.DefId, weapon.Element, targetWeakness, raw);
         if (target.StaggerTicks > 0)
             raw *= 1.25f;
+        if (target.DefId == "boss_wyrm" && weapon.Element == Element.Ice)
+        {
+            target.Health = MathF.Min(target.MaxHealth, target.Health + raw);
+            return new AttackResult(true, "heal", 0, false, false, false);
+        }
+
         raw = CombatMath.RegionCap(raw, attacker.Level, regionBand, bossTarget);
 
         var blockItem = OffHand(content, target, targetBag);
@@ -179,10 +221,10 @@ public static class Attacks
 
         raw = CombatMath.Mitigate(raw, legalBlock ? 0 : targetArmour, defenceK);
         int damage = Math.Max(1, (int)MathF.Round(raw));
-        if (target.IFrameTicks > 0)
-            damage = 0;
 
         target.Health -= damage;
+        if (held != null)
+            DurabilityRules.Chip(held, weapon, durabilityMode);
         int postureHit = weapon.PostureDamage * (heavy ? 2 : 1);
         if (flank && heavy)
             postureHit += 20;
@@ -202,7 +244,7 @@ public static class Attacks
             target.Life = LifeState.Dead;
         }
 
-        return new AttackResult(true, "", damage, killed, false, staggered);
+        return new AttackResult(true, "", damage, killed, false, staggered, weapon.Knockback);
     }
 
     public static ItemDef WeaponOf(ContentCatalog content, ActorBody body, Inventory bag)

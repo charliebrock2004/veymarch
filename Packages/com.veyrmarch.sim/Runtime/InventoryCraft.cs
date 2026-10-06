@@ -67,7 +67,8 @@ public sealed class Inventory
             OwnerId = owner,
             Count = count,
             Soulbound = def.Soulbound,
-            BirthKey = birthKey
+            BirthKey = birthKey,
+            Durability = def.DurabilityMax
         };
         _items.Add(created);
         if (birthKey.Length > 0)

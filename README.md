@@ -9,9 +9,10 @@ The rules live in `Veyr.Sim` and do not reference Unity. They are tested with th
 ```bash
 dotnet test sim/Veyr.Tests.Sim/Veyr.Tests.Sim.csproj
 dotnet run --project sim/Veyr.Loop/Veyr.Loop.csproj
+dotnet run --project sim/Veyr.Check/Veyr.Check.csproj
 ```
 
-The loop harness wakes a body, gathers flint and wood, crafts one stone knife, kills a wolf, and returns to the pad. It is a console over the same simulation. It is not a client.
+The loop harness wakes a body, gathers flint and wood, crafts one stone knife, kills a wolf, and returns to the pad. `Veyr.Check` audits the catalog and prints a content fingerprint. Neither is a client.
 
 ## What does not run here
 
@@ -29,4 +30,4 @@ Unity has not opened this project. There is no phone build, no frame time, and n
 
 ## Current phase
 
-Simulation and content for the slice loop are implemented and covered by automated tests. Unity integration is blocked, not done.
+Simulation and content for the slice are implemented and covered by automated tests. Unity integration is blocked, not done. Prefab names and the input map are prepared in `Docs/assets/SLICE_PREFAB_SPEC.md` and `Assets/_Project/Input/Veyr.inputactions`.

@@ -17,6 +17,10 @@ public sealed class ContentCatalog
     public required IReadOnlyList<SettlementTierDef> SettlementTiers { get; init; }
     public required IReadOnlyList<WorldEventDef> Events { get; init; }
     public required IReadOnlyList<SkillDef> Skills { get; init; }
+    public IReadOnlyDictionary<StatusId, StatusDef> Statuses { get; init; } = new Dictionary<StatusId, StatusDef>();
+    public IReadOnlyDictionary<string, LootTableDef> Loot { get; init; } = new Dictionary<string, LootTableDef>();
+    public IReadOnlyDictionary<string, ArmourSetDef> Sets { get; init; } = new Dictionary<string, ArmourSetDef>();
+    public IReadOnlyDictionary<string, DungeonKitDef> Dungeons { get; init; } = new Dictionary<string, DungeonKitDef>();
     public MoveTuning Move { get; init; } = new();
 
     public ItemDef Item(string id) => Items[id];

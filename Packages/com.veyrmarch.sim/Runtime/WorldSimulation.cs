@@ -8,6 +8,7 @@ public sealed class WorldSimulation
     readonly Dictionary<string, Inventory> _bags = new(StringComparer.Ordinal);
     readonly Dictionary<string, SkillSheet> _skills = new(StringComparer.Ordinal);
     readonly Dictionary<string, HurtboxHistory> _hurt = new(StringComparer.Ordinal);
+    readonly Dictionary<string, StatusSheet> _status = new(StringComparer.Ordinal);
     readonly Dictionary<string, BossController> _bosses = new(StringComparer.Ordinal);
     int _seq;
 
@@ -43,6 +44,7 @@ public sealed class WorldSimulation
         _bags[id] = new Inventory();
         _skills[id] = new SkillSheet();
         _hurt[id] = new HurtboxHistory();
+        _status[id] = new StatusSheet();
         return body;
     }
 
@@ -62,11 +64,21 @@ public sealed class WorldSimulation
         _bags[body.Id] = new Inventory();
         _skills[body.Id] = new SkillSheet();
         _hurt[body.Id] = new HurtboxHistory();
+        _status[body.Id] = new StatusSheet();
         return body;
     }
 
     public Inventory Bag(string actorId) => _bags[actorId];
     public SkillSheet Skills(string actorId) => _skills[actorId];
+    public StatusSheet Status(string actorId) => _status[actorId];
+
+    int DodgeCost(string actorId)
+    {
+        if (!_content.Sets.TryGetValue("set_knight", out var knight))
+            return 16;
+        string bonus = ArmourSets.Active(knight, ArmourSets.Worn(knight, Actors[actorId], Bag(actorId)));
+        return bonus == "dodge_cost" ? 20 : 16;
+    }
 
     public BossController SpawnBoss(string bossId, int players = 1)
     {
@@ -86,6 +98,7 @@ public sealed class WorldSimulation
         _bags[bossId] = new Inventory();
         _skills[bossId] = new SkillSheet();
         _hurt[bossId] = new HurtboxHistory();
+        _status[bossId] = new StatusSheet();
         boss.Begin();
         return boss;
     }
@@ -100,13 +113,18 @@ public sealed class WorldSimulation
             body.IFrameTicks--;
         if (body.StaggerTicks > 0)
             body.StaggerTicks--;
-        if (intent.Dodge && body.Stamina >= 16 && body.Life == LifeState.Alive)
+        if (intent.Dodge && body.Stamina >= DodgeCost(actorId) && body.Life == LifeState.Alive)
         {
-            body.Stamina -= 16;
+            body.Stamina -= DodgeCost(actorId);
             body.IFrameTicks = SimRates.DodgeIFrameTicks;
         }
         if (body.Life == LifeState.Alive)
-            Movement.Step(body, intent, _content.Move);
+        {
+            float scale = _status.TryGetValue(actorId, out var sheet) ? sheet.MoveScale : 1f;
+            if (_content.Sets.TryGetValue("set_hunter", out var hunter) && ArmourSets.Worn(hunter, body, Bag(actorId)) >= 2)
+                scale *= 1.05f;
+            Movement.Step(body, intent, _content.Move, scale);
+        }
         if (intent.Block && body.Life == LifeState.Alive)
         {
             if (!body.Blocking)
@@ -120,6 +138,8 @@ public sealed class WorldSimulation
 
         if (body.Stamina < body.MaxStamina)
             body.Stamina = Math.Min(body.MaxStamina, body.Stamina + 0.4f);
+        if (_status.TryGetValue(actorId, out var statuses))
+            statuses.Tick(body, _content.Statuses);
         Clock.Advance();
         Day.AdvanceTicks(1);
     }
@@ -159,12 +179,80 @@ public sealed class WorldSimulation
             return false;
         var def = _content.Item(inst.DefId);
         var body = Actors[actorId];
-        if (def.Slot == EquipSlot.OffHand)
-            body.OffHandId = instanceId;
-        else
-            body.EquippedId = instanceId;
+        if (def.Slot == EquipSlot.OffHand && MainIsGreatsword(body, actorId))
+            return false;
+        ClearSlot(actorId, def.Slot, body);
+        switch (def.Slot)
+        {
+            case EquipSlot.OffHand:
+                body.OffHandId = instanceId;
+                break;
+            case EquipSlot.Head:
+                body.HeadId = instanceId;
+                break;
+            case EquipSlot.Chest:
+                body.ChestId = instanceId;
+                break;
+            case EquipSlot.Hands:
+                body.HandsId = instanceId;
+                break;
+            case EquipSlot.Legs:
+                body.LegsId = instanceId;
+                break;
+            case EquipSlot.Cloak:
+                body.CloakId = instanceId;
+                break;
+            case EquipSlot.Trinket:
+                body.TrinketId = instanceId;
+                break;
+            default:
+                if (def.MovesetId == "greatsword")
+                    ClearOffhandShield(actorId, body);
+                body.EquippedId = instanceId;
+                break;
+        }
+
         inst.Equipped = true;
         return true;
+    }
+
+    bool MainIsGreatsword(ActorBody body, string actorId)
+    {
+        if (body.EquippedId.Length == 0)
+            return false;
+        var main = Bag(actorId).Find(body.EquippedId);
+        return main != null && _content.Item(main.DefId).MovesetId == "greatsword";
+    }
+
+    void ClearOffhandShield(string actorId, ActorBody body)
+    {
+        if (body.OffHandId.Length == 0)
+            return;
+        var off = Bag(actorId).Find(body.OffHandId);
+        if (off == null || _content.Item(off.DefId).MovesetId != "shield")
+            return;
+        off.Equipped = false;
+        body.OffHandId = "";
+    }
+
+    void ClearSlot(string actorId, EquipSlot slot, ActorBody body)
+    {
+        string previous = slot switch
+        {
+            EquipSlot.OffHand => body.OffHandId,
+            EquipSlot.Head => body.HeadId,
+            EquipSlot.Chest => body.ChestId,
+            EquipSlot.Hands => body.HandsId,
+            EquipSlot.Legs => body.LegsId,
+            EquipSlot.Cloak => body.CloakId,
+            EquipSlot.Trinket => body.TrinketId,
+            _ => body.EquippedId
+        };
+        if (previous.Length == 0)
+            return;
+        var old = Bag(actorId).Find(previous);
+        if (old != null)
+            old.Equipped = false;
     }
 
     public AttackResult TryAttack(string actorId, string targetId, bool heavy, bool flank, long? clientTick = null)
@@ -208,7 +296,8 @@ public sealed class WorldSimulation
             region.DefenceK,
             Skills(targetId).Rank(SkillId.Greatsword),
             weakness,
-            0);
+            Equipment.Defence(_content, target, Bag(targetId)),
+            Mode);
         if (boss && result.Damage > 0)
         {
             var def = _content.Boss(targetId);

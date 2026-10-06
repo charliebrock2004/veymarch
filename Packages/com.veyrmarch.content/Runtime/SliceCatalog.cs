@@ -4,13 +4,13 @@ public static class SliceCatalog
 {
     public static ContentCatalog Create()
     {
-        var items = Items().ToDictionary(i => i.Id);
-        var recipes = Recipes().ToDictionary(r => r.Id);
+        var items = Items().Concat(ExtendedCatalog.Items()).ToDictionary(i => i.Id);
+        var recipes = Recipes().Concat(ExtendedCatalog.Recipes()).ToDictionary(r => r.Id);
         var nodes = Nodes().ToDictionary(n => n.Id);
         var actors = Actors().ToDictionary(a => a.Id);
         var bosses = Bosses().ToDictionary(b => b.Id);
         var regions = Regions().ToDictionary(r => r.Id);
-        var spells = Spells().ToDictionary(s => s.Id);
+        var spells = Spells().Concat(ExtendedCatalog.Spells()).ToDictionary(s => s.Id);
         var pieces = Pieces().ToDictionary(p => p.Id);
         return new ContentCatalog
         {
@@ -28,7 +28,11 @@ public static class SliceCatalog
             Pieces = pieces,
             SettlementTiers = Tiers(),
             Events = Events(),
-            Skills = Skills()
+            Skills = Skills(),
+            Statuses = ExtendedCatalog.Statuses(),
+            Loot = ExtendedCatalog.Loot(),
+            Sets = ExtendedCatalog.Sets(),
+            Dungeons = ExtendedCatalog.Dungeons()
         };
     }
 
@@ -71,7 +75,8 @@ public static class SliceCatalog
         Element = element,
         Soulbound = soulbound,
         MovesetId = moveset,
-        MaxStack = 1
+        MaxStack = 1,
+        DurabilityMax = rarity == Rarity.Unique ? 40 : 20
     };
 
     static IEnumerable<ItemDef> Items()

@@ -4,15 +4,16 @@
 | --- | --- |
 | Date | 2026-10-06 |
 | Repo | [charliebrock2004/veymarch](https://github.com/charliebrock2004/veymarch) |
-| Verdict | Rules and slice content exist and are tested with `dotnet test`. Unity has not compiled anything. |
+| Verdict | Rules and slice content exist and are tested with `dotnet test`. 64 tests. Unity has not compiled anything. |
 
 ## What exists
 
 - Docs copies of the four bibles and the operating prompt.
 - `Packages/com.veyrmarch.content` and `Packages/com.veyrmarch.sim` with `noEngineReferences`.
 - `sim/Veyrmarch.sln` so the same sources build on .NET 8.
-- 47 passing edit-mode-style tests in `Packages/com.veyrmarch.sim/Tests`.
-- `tools/Veyr.Loop`, a console harness. Not a client.
+- 64 passing tests in `Packages/com.veyrmarch.sim/Tests`.
+- `tools/Veyr.Loop` and `tools/Veyr.Check`. Not clients.
+- `Assets/_Project/Input/Veyr.inputactions` and `Docs/assets/SLICE_PREFAB_SPEC.md`. Not imported.
 - `ProjectSettings/ProjectVersion.txt` naming 6000.3.25f1. Unlaunched.
 
 ## What is not done

@@ -49,6 +49,12 @@ public sealed class ActorBody
     public int DownedTicks { get; set; }
     public string EquippedId { get; set; } = "";
     public string OffHandId { get; set; } = "";
+    public string HeadId { get; set; } = "";
+    public string ChestId { get; set; } = "";
+    public string HandsId { get; set; } = "";
+    public string LegsId { get; set; } = "";
+    public string CloakId { get; set; } = "";
+    public string TrinketId { get; set; } = "";
     public long BlockStartedTick { get; set; } = -1;
     public bool Blocking { get; set; }
     public int Level { get; set; } = 1;
@@ -56,13 +62,15 @@ public sealed class ActorBody
     public string SpawnId { get; set; } = "pad_hearthfen";
     public float SpawnX { get; set; }
     public float SpawnZ { get; set; }
+    public int Combo { get; set; }
+    public long ComboExpireTick { get; set; } = -1;
 }
 
 public readonly record struct MoveResult(bool Accepted, string Reason, float X, float Z);
 
 public static class Movement
 {
-    public static MoveResult Step(ActorBody body, PlayerIntent intent, MoveTuning tuning)
+    public static MoveResult Step(ActorBody body, PlayerIntent intent, MoveTuning tuning, float moveScale = 1f)
     {
         if (intent.ClaimedSpeed > tuning.SpeedCapMetresPerSecond)
             return new MoveResult(false, "speed", body.X, body.Z);
@@ -72,6 +80,7 @@ public static class Movement
             return new MoveResult(true, "", body.X, body.Z);
 
         float speed = intent.Sprint ? tuning.SprintMetresPerSecond : tuning.WalkMetresPerSecond;
+        speed *= Math.Clamp(moveScale, 0.2f, 1f);
         if (speed > tuning.SpeedCapMetresPerSecond)
             return new MoveResult(false, "speed", body.X, body.Z);
 

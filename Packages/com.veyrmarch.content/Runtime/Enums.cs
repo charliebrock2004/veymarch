@@ -103,7 +103,8 @@ public enum Element
     Holy,
     Rot,
     Soul,
-    Void
+    Void,
+    Shadow
 }
 
 public enum DeathMode
@@ -130,3 +131,47 @@ public enum BossState
     Dead,
     Reset
 }
+
+public enum StatusId
+{
+    None,
+    Bleed,
+    Poison,
+    Burn,
+    Frost,
+    Shock,
+    Rot,
+    Curse,
+    Silence
+}
+
+public enum CleanseSource
+{
+    Potion,
+    Spell,
+    Campfire
+}
+
+public enum SchoolId
+{
+    None,
+    Fire,
+    Ice,
+    Lightning,
+    Earth,
+    Shadow,
+    Holy,
+    Forbidden
+}
+
+public enum RoomKind
+{
+    Corridor,
+    Entrance,
+    Trap,
+    Puzzle,
+    Elite,
+    Secret,
+    Boss
+}
+

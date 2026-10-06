@@ -19,6 +19,10 @@ public sealed record ItemDef
     public Element Element { get; init; }
     public bool Soulbound { get; init; }
     public string MovesetId { get; init; } = "";
+    public float Knockback { get; init; }
+    public int DurabilityMax { get; init; }
+    public int Heal { get; init; }
+    public StatusId OnHit { get; init; } = StatusId.None;
 }
 
 public sealed record RecipeInput(string ItemId, int Count);
@@ -127,6 +131,11 @@ public sealed record SpellDef
     public int CooldownTicks { get; init; }
     public int TtlTicks { get; init; }
     public int CapPerCaster { get; init; } = 8;
+    public SchoolId Discipline { get; init; } = SchoolId.None;
+    public int MinMagicRank { get; init; }
+    public int CorruptionCost { get; init; }
+    public string RequiredSeal { get; init; } = "";
+    public string Grade { get; init; } = "cantrip";
 }
 
 public sealed record PieceDef
@@ -164,7 +173,52 @@ public sealed record WorldEventDef
 
 public sealed record SkillDef(SkillId Id, string DisplayName, int SliceCap);
 
-public sealed record LootEntry(string ItemId, int Weight, bool Guaranteed);
+public sealed record LootEntry(string ItemId, int Weight, bool Guaranteed, bool Unique = false);
+
+public sealed record LootTableDef
+{
+    public required string Id { get; init; }
+    public LootEntry[] Entries { get; init; } = [];
+}
+
+public sealed record StatusDef
+{
+    public StatusId Id { get; init; }
+    public int BuildupMax { get; init; } = 30;
+    public int DurationTicks { get; init; } = 80;
+    public int DamagePerTick { get; init; }
+    public float MoveScale { get; init; } = 1f;
+    public bool Silences { get; init; }
+    public CleanseSource[] CleansedBy { get; init; } = [];
+}
+
+public sealed record ArmourSetDef
+{
+    public required string Id { get; init; }
+    public string[] PieceIds { get; init; } = [];
+    public string BonusTwo { get; init; } = "";
+    public string BonusFour { get; init; } = "";
+}
+
+public sealed record RoomKitDef
+{
+    public required string Id { get; init; }
+    public RoomKind Kind { get; init; }
+    public int TellTicks { get; init; }
+    public int TrapDamage { get; init; }
+    public string RequiredSchool { get; init; } = "";
+}
+
+public sealed record DungeonKitDef
+{
+    public required string Id { get; init; }
+    public required string RegionId { get; init; }
+    public int MinRooms { get; init; } = 6;
+    public int MaxRooms { get; init; } = 14;
+    public RoomKitDef[] Rooms { get; init; } = [];
+}
+
+public readonly record struct VerbProfile(int TelegraphTicks, int RecoverTicks, float Range, float Knockback);
 
 public sealed record MoveTuning
 {
