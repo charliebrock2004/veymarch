@@ -4,7 +4,9 @@ The Sealed Continent. A third-person medieval fantasy action RPG for iOS and And
 
 ## Where the project is
 
-**Programme Phase 2, waiting on checkpoint 1: movement on a real phone.**
+**Current milestone: the web build in `web/`, playable on an iPhone through Vercel.** Hearthfen, the Giant Forest, Cookie's Castle, Cookie, the Green Gate, and the edge of the Kingdom, with touch controls. See [The web build](#the-web-build).
+
+**Unity track: Programme Phase 2, waiting on checkpoint 1 (movement on a real phone).** Paused, not abandoned.
 
 The simulation, the offline authority, and the client logic are built and tested: 134 tests on .NET 8. The Unity project (client adapters, Boot composition root, editor setup, and a scene generator) is written and type-checked, but **has never been opened in Unity**. The next step needs a person with Unity 6.3 LTS and an Android phone: [`Docs/device/PHASE3.md`](Docs/device/PHASE3.md).
 
@@ -42,18 +44,30 @@ The libraries Unity shares with the tests build as `netstandard2.1` with C# 9, U
 | `Assets/_Project/Code` | Unity: `Client` (views and adapters), `App` (composition root), `Editor` (setup and scene generator) |
 | `Assets/Tests/PlayMode` | Play-mode smoke tests |
 | `sim/` | .NET solution: tests and compile checks |
-| `web/` | The earlier browser prototype. A behavioural reference, not the product. |
+| `web/` | The web build: Vite, React, Three.js. The current playable milestone (deployed to Vercel). |
 | `Docs/` | Copies of the bibles, the device script, asset spec |
 
 Architecture map: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-## The browser prototype
+## The web build
 
-`web/` is a Three.js build from a previous session that plays the Cookie slice in a browser. It re-implements the rules in TypeScript and is kept only as a reference for intended behaviour. Unity is the production target.
+`web/` is the playable slice in a browser: Three.js for the world, React for the interface, no downloads beyond the page (every texture, mesh, animation and sound is generated in code). It re-implements the slice rules in TypeScript (`web/src/game/rules.ts`, tested) and borrows the sim's tuning where it exists.
 
 ```bash
-cd web && npm ci && npm run dev
+cd web && npm ci && npm run dev      # http://localhost:5173
+npm test                             # rules tests
+npm run build                        # production bundle in web/dist
 ```
+
+Vercel builds `web/` using the root `vercel.json`. On an iPhone, open the URL in Safari, rotate to landscape, and use Share → Add to Home Screen for full screen.
+
+| Path | What |
+| --- | --- |
+| `web/src/game/Game.ts` | Game loop, player, camera, combat, quests, saves |
+| `web/src/game/play/` | Enemies (`mobs.ts`), Cookie (`boss.ts`), villagers (`npcs.ts`), held items |
+| `web/src/game/world/` | Map layout, Hearthfen and the forest (`overworld.ts`), the castle interior (`dungeon.ts`), building kit, collision |
+| `web/src/game/engine/` | Terrain, sky, instanced vegetation, skinned procedural characters, particles, telegraphs, synthesised audio |
+| `web/src/App.tsx`, `web/src/ui/` | Title, character creator, HUD, touch controls, bag and crafting, dialogue |
 
 ## Authority
 

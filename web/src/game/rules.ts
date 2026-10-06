@@ -17,7 +17,7 @@ export function countOf(items: readonly Stack[], def: string): number {
 export function addItem(items: Stack[], def: string, n: number, uid: () => string): Stack[] {
   const d = item(def);
   const next = items.map((s) => ({ ...s }));
-  if (d.stack > 1 && d.kind === "mat") {
+  if (d.stack > 1) {
     const stack = next.find((s) => s.def === def && s.count < d.stack);
     if (stack) {
       const room = d.stack - stack.count;
@@ -28,7 +28,11 @@ export function addItem(items: Stack[], def: string, n: number, uid: () => strin
     }
   }
   if (d.soulbound && next.some((s) => s.def === def)) return next;
-  next.push({ uid: uid(), def, count: n, equipped: false });
+  while (n > 0) {
+    const take = Math.min(n, Math.max(1, d.stack));
+    next.push({ uid: uid(), def, count: take, equipped: false });
+    n -= take;
+  }
   return next;
 }
 
@@ -48,12 +52,12 @@ export function consume(items: Stack[], def: string, n: number): Stack[] | null 
 export function tryCraft(
   items: Stack[],
   recipeId: string,
-  station: "hand" | "bench",
+  station: "hand" | "bench" | "forge",
   uid: () => string,
 ): { items: Stack[]; ok: boolean; reason: string; made?: string } {
   const recipe = RECIPES.find((r) => r.id === recipeId);
   if (!recipe) return { items, ok: false, reason: "recipe" };
-  if (recipe.station === "bench" && station !== "bench") return { items, ok: false, reason: "station" };
+  if (recipe.station !== "hand" && station !== recipe.station) return { items, ok: false, reason: "station" };
   let next = items.map((s) => ({ ...s }));
   for (const input of recipe.inputs) {
     const consumed = consume(next, input.id, input.n);

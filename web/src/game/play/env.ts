@@ -1,0 +1,42 @@
+import type * as THREE from "three";
+import type { Audio } from "../engine/audio";
+import type { DecalPool, Flashes, Beam } from "../engine/fx";
+import type { Particles } from "../engine/particles";
+import type { Colliders } from "../world/collide";
+
+export type PlayerState = {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  hp: number;
+  maxHp: number;
+  iframe: number;
+  blocking: boolean;
+  blockT: number;
+  shield: boolean;
+  dead: boolean;
+  inDungeon: boolean;
+};
+
+export type HurtOpts = { knock?: number; unblockable?: boolean; parryable?: boolean; source?: { stagger: (t: number) => void } };
+
+/** Everything an enemy or the boss may touch. They never write player state directly. */
+export interface Env {
+  time: number;
+  player: PlayerState;
+  hurtPlayer: (dmg: number, sx: number, sz: number, o?: HurtOpts) => boolean;
+  dust: Particles;
+  sparks: Particles;
+  decals: DecalPool;
+  flashes: Flashes;
+  beam: Beam;
+  audio: Audio;
+  col: Colliders;
+  groundAt: (x: number, z: number) => number;
+  blocked: (x: number, z: number) => boolean;
+  shake: (a: number) => void;
+  floater: (text: string, x: number, y: number, z: number, kind?: "dmg" | "heal" | "info" | "crit" | "fire") => void;
+  combat: (on: boolean) => void;
+  parent: (dungeon: boolean) => THREE.Object3D;
+}

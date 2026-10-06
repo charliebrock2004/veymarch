@@ -59,3 +59,32 @@ test("consume will not drive a stack negative", () => {
   const items = addItem([], "mat_wood", 1, uid);
   assert.equal(consume(items, "mat_wood", 2), null);
 });
+
+test("copper sword wants the forge, not the bench", () => {
+  n = 0;
+  let items = addItem([], "mat_copper", 5, uid);
+  items = addItem(items, "mat_wood", 1, uid);
+  items = addItem(items, "mat_flint", 1, uid);
+  assert.equal(tryCraft(items, "recipe_copper_sword", "bench", uid).reason, "station");
+  assert.equal(tryCraft(items, "recipe_copper_sword", "hand", uid).reason, "station");
+  const made = tryCraft(items, "recipe_copper_sword", "forge", uid);
+  assert.equal(made.ok, true);
+  assert.equal(made.made, "wpn_copper_sword");
+});
+
+test("hand recipes work at any station", () => {
+  n = 0;
+  const items = addItem([], "mat_fibre", 2, uid);
+  assert.equal(tryCraft(items, "recipe_bandage", "forge", uid).ok, true);
+});
+
+test("bandages stack, weapons do not", () => {
+  n = 0;
+  let items = addItem([], "cons_bandage", 2, uid);
+  items = addItem(items, "cons_bandage", 1, uid);
+  assert.equal(items.filter((s) => s.def === "cons_bandage").length, 1);
+  assert.equal(items[0].count, 3);
+  items = addItem(items, "wpn_stone_knife", 1, uid);
+  items = addItem(items, "wpn_stone_knife", 1, uid);
+  assert.equal(items.filter((s) => s.def === "wpn_stone_knife").length, 2);
+});
