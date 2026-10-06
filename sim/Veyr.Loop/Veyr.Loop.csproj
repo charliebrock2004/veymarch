@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Veyr.Loop</AssemblyName>
+    <RootNamespace>Veyr.Loop</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\tools\Veyr.Loop\**\*.cs" />
+    <ProjectReference Include="..\Veyr.Sim\Veyr.Sim.csproj" />
+    <ProjectReference Include="..\Veyr.Content\Veyr.Content.csproj" />
+  </ItemGroup>
+</Project>

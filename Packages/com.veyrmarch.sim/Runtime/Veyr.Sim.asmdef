@@ -1,0 +1,16 @@
+{
+  "name": "Veyr.Sim",
+  "rootNamespace": "Veyr.Sim",
+  "references": [
+    "Veyr.Content"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

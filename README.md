@@ -1,31 +1,32 @@
 # VEYRMARCH
 
-The Sealed Continent. Unity 6 LTS, URP. iOS and Android first.
+The Sealed Continent. Unity 6 LTS, URP, is the production engine. This repository is not a web game.
 
-This repository is the game project. It is not a web app and it does not run on Vercel.
+## What runs here
 
-## Current phase
+The rules live in `Veyr.Sim` and do not reference Unity. They are tested with the .NET 8 SDK.
 
-Phase 0, task T001 done. T002 not started.
+```bash
+dotnet test sim/Veyr.Tests.Sim/Veyr.Tests.Sim.csproj
+dotnet run --project sim/Veyr.Loop/Veyr.Loop.csproj
+```
 
-There is no Unity project yet. Do not treat this repo as a playable build.
+The loop harness wakes a body, gathers flint and wood, crafts one stone knife, kills a wolf, and returns to the pad. It is a console over the same simulation. It is not a client.
+
+## What does not run here
+
+Unity has not opened this project. There is no phone build, no frame time, and no scene test. See `Assets/_Project/INTEGRATION.md`.
 
 ## Authority
 
-Read in this order before editing code:
+1. `Docs/design/MASTER_GAME_DESIGN_BIBLE.md`
+2. `Docs/architecture/TECHNICAL_ARCHITECTURE_BIBLE.md`
+3. `Docs/programme/CLAUDE_IMPLEMENTATION_PROGRAMME.md`
+4. `Docs/ops/MASTER_CLAUDE_BUILD_PROMPT.md`
+5. `Docs/art/ART_DIRECTION_BIBLE.md`
 
-1. `Docs/design/MASTER_GAME_DESIGN_BIBLE.md` — what the game is
-2. `Docs/architecture/TECHNICAL_ARCHITECTURE_BIBLE.md` — how it works (wins on technical conflicts)
-3. `Docs/programme/CLAUDE_IMPLEMENTATION_PROGRAMME.md` — order and gates
-4. `Docs/ops/MASTER_CLAUDE_BUILD_PROMPT.md` — how to work
-5. `Docs/art/ART_DIRECTION_BIBLE.md` — look and feel
+`PROJECT_AUDIT.md` records conflicts. Architecture wins on technical matters. The programme wins on order.
 
-`Docs/SOURCE.md` says these are copies. `PROJECT_AUDIT.md` lists the conflicts and which document wins.
+## Current phase
 
-## Open the project
-
-Not possible yet. Install Unity 6.3 LTS (`6000.3.x`) and complete T002 before expecting a scene.
-
-## Tests
-
-None. The edit-mode test does not exist until the Unity project does.
+Simulation and content for the slice loop are implemented and covered by automated tests. Unity integration is blocked, not done.

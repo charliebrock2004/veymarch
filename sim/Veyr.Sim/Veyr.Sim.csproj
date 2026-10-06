@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Veyr.Sim</AssemblyName>
+    <RootNamespace>Veyr.Sim</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\Packages\com.veyrmarch.sim\Runtime\**\*.cs" />
+    <ProjectReference Include="..\Veyr.Content\Veyr.Content.csproj" />
+  </ItemGroup>
+</Project>

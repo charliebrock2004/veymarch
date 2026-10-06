@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Veyr.Tests.Sim</AssemblyName>
+    <RootNamespace>Veyr.Tests.Sim</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\Packages\com.veyrmarch.sim\Tests\**\*.cs" />
+    <ProjectReference Include="..\Veyr.Sim\Veyr.Sim.csproj" />
+    <ProjectReference Include="..\Veyr.Content\Veyr.Content.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Veyr.Content</AssemblyName>
+    <RootNamespace>Veyr.Content</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\Packages\com.veyrmarch.content\Runtime\**\*.cs" />
+  </ItemGroup>
+</Project>

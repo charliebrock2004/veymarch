@@ -1,0 +1,7 @@
+{
+  "name": "com.veyrmarch.content",
+  "version": "0.1.0",
+  "displayName": "Veyrmarch Content",
+  "description": "Item, recipe, actor, and world definitions. No UnityEngine types.",
+  "unity": "6000.3"
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Veyr.Tests.Sim",
+  "rootNamespace": "Veyr.Tests.Sim",
+  "references": [
+    "Veyr.Sim",
+    "Veyr.Content"
+  ],
+  "includePlatforms": [
+    "Editor"
+  ],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "optionalUnityReferences": [
+    "TestAssemblies"
+  ],
+  "noEngineReferences": true
+}

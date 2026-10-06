@@ -10,12 +10,17 @@
 /[Rr]ecordings/
 
 *.csproj
+!sim/**/*.csproj
 *.unityproj
 *.sln
+!sim/Veyrmarch.sln
 *.suo
 *.tmp
+**/bin/
+**/obj/
+TestResults/
 *.user
-*.userprefs
+.idea/
 *.pidb
 *.booproj
 *.svd
