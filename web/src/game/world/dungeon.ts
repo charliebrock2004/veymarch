@@ -151,8 +151,8 @@ export function buildDungeon(M: Mats, col: Colliders, state: { slab: () => boole
   sconce(X + 7.6, 50, -Math.PI / 2);
   // rails for the weight to run on
   for (const zz of [43.2, 44.8]) put(ctx, "metal", new THREE.BoxGeometry(12, 0.08, 0.12), new Frame(X, 0, zz, 0), 0, 0.04, 0, 0, 0, 0, 0x6a5a40, false);
-  const brass = new THREE.MeshPhongMaterial({ color: 0xb5893a, shininess: 60, specular: 0x665533 });
-  const weight = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1.8, 1.8), brass);
+  const brass = new THREE.MeshPhongMaterial({ color: 0x8a6428, shininess: 80, specular: 0xb08850 });
+  const weight = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 1.0, 1.8, 10), brass);
   weight.position.set(X - 4.5, 0.9, 44);
   weight.castShadow = true;
   root.add(weight);

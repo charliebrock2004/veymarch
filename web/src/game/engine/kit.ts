@@ -37,7 +37,7 @@ export function prep(geo: THREE.BufferGeometry, color: THREE.ColorRepresentation
   if (!geo.getAttribute("normal")) geo.computeVertexNormals();
   if (!geo.getAttribute("uv")) geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 2), 2));
   if (!geo.getAttribute("color")) tint(geo, color);
-  for (const k of Object.keys(geo.attributes)) if (!["position", "normal", "uv", "color"].includes(k)) geo.deleteAttribute(k);
+  for (const k of Object.keys(geo.attributes)) if (!["position", "normal", "uv", "color", "aSway"].includes(k)) geo.deleteAttribute(k);
   geo.morphAttributes = {};
   return geo;
 }
@@ -110,10 +110,81 @@ export function windy<T extends THREE.Material>(mat: T, strength: number, from: 
   return mat;
 }
 
+/** Wind for baked (merged) geometry: the sway weight is a per-vertex attribute, not local height. */
+export function windyBaked<T extends THREE.Material>(mat: T, strength: number): T {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = shared.time;
+    shader.uniforms.uWind = shared.wind;
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nuniform float uTime; uniform float uWind; attribute float aSway;")
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+        {
+          float ph = uTime * 1.4 + position.x * 0.21 + position.z * 0.17;
+          float sw = (sin(ph) * 0.7 + sin(ph * 2.3 + 1.7) * 0.3) * ${strength.toFixed(3)} * aSway * uWind;
+          transformed.x += sw;
+          transformed.z += sw * 0.6;
+        }`,
+      );
+  };
+  mat.customProgramCacheKey = () => `windyBaked${strength}`;
+  return mat;
+}
+
+export type Cullable = { cull: (x: number, z: number, d?: number) => void; maxDist: number };
+
+/**
+ * Static scatter baked into one mesh per chunk per material. All tree species share one
+ * atlas material, so a chunk of forest is a single draw call.
+ */
+export class ChunkBatch implements Cullable {
+  private buckets = new Map<string, { cx: number; cz: number; mat: THREE.Material; shadow: boolean; geos: THREE.BufferGeometry[] }>();
+  private meshes: { mesh: THREE.Mesh; cx: number; cz: number }[] = [];
+  constructor(private chunk = 64, public maxDist = 180) {}
+  add(key: string, mat: THREE.Material, geo: THREE.BufferGeometry, x: number, y: number, z: number, ry = 0, sc = 1, sy = sc, shadow = false, sway?: { from: number; scale: number }) {
+    const cx = Math.floor(x / this.chunk);
+    const cz = Math.floor(z / this.chunk);
+    const k = cx + "," + cz + "," + key;
+    let b = this.buckets.get(k);
+    if (!b) {
+      b = { cx: (cx + 0.5) * this.chunk, cz: (cz + 0.5) * this.chunk, mat, shadow, geos: [] };
+      this.buckets.set(k, b);
+    }
+    const g = geo.clone();
+    if (sway) {
+      const pos = g.getAttribute("position");
+      const a = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) a[i] = Math.max(0, pos.getY(i) - sway.from) / sway.scale;
+      g.setAttribute("aSway", new THREE.BufferAttribute(a, 1));
+    }
+    m4.compose(v.set(x, y, z), q.setFromEuler(e.set(0, ry, 0)), s.set(sc, sy, sc));
+    g.applyMatrix4(m4);
+    b.geos.push(prep(g));
+  }
+  build(parent: THREE.Object3D) {
+    for (const b of this.buckets.values()) {
+      const g = mergeGeometries(b.geos, false);
+      if (!g) continue;
+      g.computeBoundingSphere();
+      const mesh = new THREE.Mesh(g, b.mat);
+      mesh.castShadow = b.shadow;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      this.meshes.push({ mesh, cx: b.cx, cz: b.cz });
+    }
+    this.buckets.clear();
+  }
+  cull(px: number, pz: number, dist = this.maxDist) {
+    const lim = dist + this.chunk * 0.75;
+    for (const m of this.meshes) m.mesh.visible = Math.hypot(m.cx - px, m.cz - pz) < lim;
+  }
+}
+
 // ---------------------------------------------------------------- trees
 
 export type TreeKind = "oak" | "beech" | "pine" | "giant" | "young";
-export type TreeGeo = { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry; height: number; radius: number };
+export type TreeGeo = { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry; whole: THREE.BufferGeometry; height: number; radius: number };
 
 function limb(r0: number, r1: number, len: number, segs = 6) {
   const g = new THREE.CylinderGeometry(r1, r0, len, segs, 2, true);
@@ -122,7 +193,9 @@ function limb(r0: number, r1: number, len: number, segs = 6) {
 }
 
 /** Leaf cards around a set of cluster centres. Normals point out of the crown so it shades like a volume. */
-function crown(r: Rand, clusters: { x: number; y: number; z: number; rad: number }[], cards: number, size: number, centre: THREE.Vector3, hue: THREE.Color) {
+export const ATLAS: Record<string, [number, number]> = { oak: [0, 0], beech: [0.5, 0], pine: [0, 0.5], bush: [0.5, 0.5] };
+
+function crown(r: Rand, clusters: { x: number; y: number; z: number; rad: number }[], cards: number, size: number, centre: THREE.Vector3, hue: THREE.Color, quad: [number, number] = [0, 0], atlas = false) {
   const pos: number[] = [];
   const nor: number[] = [];
   const uv: number[] = [];
@@ -162,7 +235,8 @@ function crown(r: Rand, clusters: { x: number; y: number; z: number; rad: number
         n.y += 0.35;
         n.normalize();
         nor.push(n.x, n.y, n.z);
-        uv.push(sx < 0 ? 0 : 1, sy < 0 ? 0 : 1);
+        if (atlas) uv.push(quad[0] + (sx < 0 ? 0.035 : 0.465), quad[1] + (sy < 0 ? 0.035 : 0.465));
+        else uv.push(sx < 0 ? 0 : 1, sy < 0 ? 0 : 1);
         col.push(c.r, c.g, c.b);
       }
       idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
@@ -260,17 +334,21 @@ export function treeGeo(kind: TreeKind, seed: number): TreeGeo {
     kind === "pine" ? new THREE.Color(0xa8b8a0) : kind === "beech" ? new THREE.Color(0xf0f0d0) : kind === "giant" ? new THREE.Color(0xe0e8c8) : new THREE.Color(0xffffff);
   const cardSize = kind === "giant" ? 6.5 : kind === "pine" ? 3.0 : kind === "young" ? 2.0 : 3.6;
   const cards = kind === "giant" ? 18 : kind === "pine" ? 4 : kind === "young" ? 7 : 11;
-  const leaves = crown(r, clusters, cards, cardSize, top.setY((trunkTop + H) / 2), hue);
+  const quad = ATLAS[kind === "giant" || kind === "young" ? "oak" : kind];
+  const leaves = crown(r, clusters, cards, cardSize, top.setY((trunkTop + H) / 2), hue, quad, true);
   const trunkGeo = merge(parts);
-  return { trunk: trunkGeo, leaves, height: H, radius: R };
+  const tuv = trunkGeo.getAttribute("uv");
+  for (let i = 0; i < tuv.count; i++) tuv.setXY(i, 0.012, 0.012);
+  const whole = merge([trunkGeo, leaves]);
+  return { trunk: trunkGeo, leaves, whole, height: H, radius: R };
 }
 
-export function bushGeo(seed: number, size = 1) {
+export function bushGeo(seed: number, size = 1, atlas = false) {
   const r = rng(seed * 31 + 5);
   const clusters = [];
   const n = 2 + Math.floor(r() * 3);
   for (let i = 0; i < n; i++) clusters.push({ x: (r() - 0.5) * 1.6 * size, y: (0.6 + r() * 0.5) * size, z: (r() - 0.5) * 1.6 * size, rad: (0.8 + r() * 0.4) * size });
-  return crown(r, clusters, 9, 1.4 * size, new THREE.Vector3(0, 0, 0), new THREE.Color(0xffffff));
+  return crown(r, clusters, 9, 1.4 * size, new THREE.Vector3(0, 0, 0), new THREE.Color(0xffffff), ATLAS.bush, atlas);
 }
 
 /** Six crossed fern fronds leaning out from the centre. */
@@ -526,6 +604,24 @@ export class Batch {
     this.groups.clear();
     return out;
   }
+}
+
+/** Bake a group of meshes into one mesh with vertex colours: one draw call instead of hundreds. */
+export function flatten(group: THREE.Object3D, mat: THREE.Material) {
+  group.updateMatrixWorld(true);
+  const geos: THREE.BufferGeometry[] = [];
+  group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const g = m.geometry.clone();
+    g.applyMatrix4(m.matrixWorld);
+    if (!g.getAttribute("color")) {
+      const c = (m.material as THREE.MeshLambertMaterial).color ?? new THREE.Color(0xffffff);
+      tint(g, c);
+    }
+    geos.push(prep(g));
+  });
+  return new THREE.Mesh(merge(geos), mat);
 }
 
 export const rand = { range, rng };

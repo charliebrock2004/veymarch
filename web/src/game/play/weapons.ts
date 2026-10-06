@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import { flatten } from "../engine/kit";
+
+const heldMat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 50, specular: 0x444444 });
 
 /** Held-item models. Built along +y from the grip; the hand socket turns +y forward. */
 
@@ -27,6 +30,16 @@ function blade(len: number, w: number, color: number, shininess = 70) {
 }
 
 export function weaponModel(id: string): THREE.Group {
+  const raw = buildWeapon(id);
+  const out = new THREE.Group();
+  if (!raw.children.length) return out;
+  const m = flatten(raw, heldMat);
+  m.castShadow = true;
+  out.add(m);
+  return out;
+}
+
+function buildWeapon(id: string): THREE.Group {
   const g = new THREE.Group();
   const grip = lam(0x3c2a1c);
   switch (id) {

@@ -10,7 +10,7 @@ import { Poser, buildHuman, poseHuman, type HumanAction, type HumanLook, type Ri
 import { buildSky } from "./engine/sky";
 import { blockTex } from "./engine/textures";
 import { buildDungeon, type Dungeon } from "./world/dungeon";
-import { DUN, DUN_X, GATE, REGION_TITLE, SPAWN, VOSS, regionAt, type Region } from "./world/layout";
+import { BOUNDS, DUN, DUN_X, GATE, REGION_TITLE, SPAWN, VOSS, regionAt, type Region } from "./world/layout";
 import { buildOverworld, type NodeDef, type Overworld } from "./world/overworld";
 import { Cookie } from "./play/boss";
 import type { Env, HurtOpts, PlayerState } from "./play/env";
@@ -292,6 +292,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let deadMobs = new Set<string>();
   let ringT = 0;
   let bossDoneT = -1;
+  let revealT = 0;
+  let revealed = false;
   const good = { x: SPAWN.x, z: SPAWN.z, yaw: 0, cam: 0 };
   let nanWarned = false;
 
@@ -547,10 +549,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       station: stationNear,
       hour, night: hour >= 20.5 || hour < 5.5,
       reward, fade, stats: { time: playTime, deaths, kills }, hurtAt, quality, muted: audio.muted,
-      slots: readSlots(), combat: combatT > 0, charge: P.holding ? Math.min(1, P.holdT / 0.35) : 0, slot,
+      slots: mode === "title" || mode === "loading" || !slotCache ? (slotCache = readSlots()) : slotCache, combat: combatT > 0, charge: P.holding ? Math.min(1, P.holdT / 0.35) : 0, slot,
       inDungeon: P.inDungeon, fps: Math.round(fps),
     };
   }
+  let slotCache: SlotInfo[] | null = null;
   function push() {
     if (!subs.size) return;
     const s = snapshot();
@@ -628,7 +631,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     loading = 0.15;
     push();
     await tick();
-    world = buildOverworld(M);
+    world = buildOverworld(M, { gate: () => flags.gate || (gateOpening && gateT > 0.8) });
     env.col = world.col;
     scene.add(world.root);
     loading = 0.6;
@@ -1050,27 +1053,43 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     P.hitDone = false;
   }
 
-  function softLock(range = 4.8) {
-    let best: { x: number; z: number } | null = null;
+  function findTarget(range = 4.8): { x: number; z: number; r: number; y: number } | null {
+    let best: { x: number; z: number; r: number; y: number } | null = null;
     let bs = 1e9;
     const fx = Math.hypot(P.vx, P.vz) > 0.5 ? Math.atan2(P.vx, P.vz) : P.yaw;
-    const consider = (x: number, z: number) => {
+    const consider = (x: number, z: number, r: number, y: number) => {
       const d = Math.hypot(x - P.x, z - P.z);
-      if (d > range) return;
+      if (d > range + r) return;
       const ang = Math.abs(Math.atan2(Math.sin(Math.atan2(x - P.x, z - P.z) - fx), Math.cos(Math.atan2(x - P.x, z - P.z) - fx)));
       if (ang > 1.9) return;
-      const s = d + ang * 1.5;
-      if (s < bs) {
-        bs = s;
-        best = { x, z };
+      const sc = d + ang * 1.5;
+      if (sc < bs) {
+        bs = sc;
+        best = { x, z, r, y };
       }
     };
-    for (const m of mobs) if (m.alive && m.dungeon === P.inDungeon && m.kind !== "deer") consider(m.x, m.z);
+    for (const m of mobs) if (m.alive && m.dungeon === P.inDungeon && m.kind !== "deer") consider(m.x, m.z, m.cfg.radius, m.y);
     if (cookie && P.inDungeon && cookie.fighting) {
-      consider(cookie.x, cookie.z);
-      for (const m of cookie.toys) if (m.alive) consider(m.x, m.z);
+      consider(cookie.x, cookie.z, 1.1, cookie.y);
+      for (const m of cookie.toys) if (m.alive) consider(m.x, m.z, m.cfg.radius, m.y);
     }
-    if (best) P.yaw = Math.atan2((best as { x: number }).x - P.x, (best as { z: number }).z - P.z);
+    return best;
+  }
+
+  function softLock(range = 4.8) {
+    const t = findTarget(range);
+    if (t) P.yaw = Math.atan2(t.x - P.x, t.z - P.z);
+  }
+
+  let lockDecal: ReturnType<DecalPool["get"]> | null = null;
+  function updateLockRing() {
+    if (!lockDecal) lockDecal = decals.get();
+    const t = mode === "play" && combatT > 0 ? findTarget(4.8) : null;
+    if (!t) {
+      lockDecal.hide();
+      return;
+    }
+    lockDecal.show(0, t.x, t.y, t.z, 0, t.r + 0.45, 0, { color: 0xffd27a, alpha: 0.55 });
   }
 
   function attack(heavy: boolean) {
@@ -1307,14 +1326,15 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.kx = P.kz = 0;
       if (cookie && cookie.fighting) cookie.reset();
       if (P.inDungeon) setZone(false);
-      const at = respawnShrine && flags.shrine ? world!.anchors.shrine : world!.anchors.bed;
+      const atDoor = flags.entered && !flags.cookie;
+      const at = atDoor ? world!.anchors.castleDoor : respawnShrine && flags.shrine ? world!.anchors.shrine : world!.anchors.bed;
       P.x = at.x;
-      P.z = at.z + (respawnShrine ? 1.2 : 0.6);
-      P.yaw = respawnShrine ? Math.PI : 0.4;
+      P.z = at.z + (atDoor ? -3 : respawnShrine ? 1.2 : 0.6);
+      P.yaw = atDoor ? 0 : respawnShrine ? Math.PI : 0.4;
       camYaw = P.yaw;
       snapCam();
       mode = "play";
-      say(respawnShrine ? "You wake at the shrine." : "Hearthfen. Still breathing.");
+      say(atDoor ? "You wake at the castle door. The music box is still playing." : respawnShrine ? "You wake at the shrine." : "Hearthfen. Still breathing.");
       persist();
     });
   }
@@ -1447,6 +1467,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const diff = Math.atan2(Math.sin(tgtYaw - camYaw), Math.cos(tgtYaw - camYaw));
       if (Math.abs(diff) < 2.6) camYaw += diff * Math.min(1, rdt * 0.9);
     }
+    if (revealT > 0) {
+      revealT -= rdt;
+      const ty = Math.atan2(0 - P.x, 186 - P.z);
+      const diff = Math.atan2(Math.sin(ty - camYaw), Math.cos(ty - camYaw));
+      camYaw += diff * Math.min(1, rdt * 2.5);
+      camPitch += (-0.12 - camPitch) * Math.min(1, rdt * 2.5);
+      if (revealT <= 0) lookT = 0;
+    } else if (lookT > 2.5 && camPitch < 0.22) camPitch += (0.3 - camPitch) * Math.min(1, rdt * 1.2);
     if (bossOn && lookT > 1.2) {
       const by = Math.atan2(cookie!.x - P.x, cookie!.z - P.z);
       const diff = Math.atan2(Math.sin(by - camYaw), Math.cos(by - camYaw));
@@ -1596,6 +1624,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let last = performance.now();
   let raf = 0;
   let frames = 0;
+  let frameN = 0;
+  let autoT = 0;
+  let autoFrames = 0;
+  let autoTime = 0;
+  let autoDrops = 0;
   let fpsT = 0;
   let smokeT = 0;
   let ambT = 0;
@@ -1723,6 +1756,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const solved = env.col.resolve(P.x, P.z, 0.42);
     P.x = solved.x;
     P.z = solved.z;
+    if (!P.inDungeon) {
+      P.x = Math.min(BOUNDS.maxX - 6, Math.max(BOUNDS.minX + 6, P.x));
+      P.z = Math.min(BOUNDS.maxZ - 6, Math.max(BOUNDS.minZ + 6, P.z));
+    }
     if (P.inDungeon && dun && !flags.slab) {
       const wp = dun.weight.position;
       if (Math.abs(P.z - wp.z) < 1.35 && Math.abs(P.x - wp.x) < 1.35) {
@@ -1800,6 +1837,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }
     } else if (flags.gate) {
       world.gate.sealMat.uniforms.uOpen.value = 1.3;
+      world.gate.doorL.rotation.y = -1.45;
+      world.gate.doorR.rotation.y = 1.45;
+    } else {
+      world.gate.sealMat.uniforms.uOpen.value = 0;
       world.gate.doorL.rotation.y = -1.35;
       world.gate.doorR.rotation.y = 1.35;
     }
@@ -1961,15 +2002,36 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function frame(now: number) {
     if (disposed) return;
     raf = requestAnimationFrame(frame);
-    const rdt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
+    const real = Math.max(0.001, (now - last) / 1000);
+    const rdt = Math.min(0.05, real);
     last = now;
     frames++;
-    fpsT += rdt;
+    frameN++;
+    fpsT += real;
     if (fpsT > 1) {
       fps = frames / fpsT;
       frames = 0;
       fpsT = 0;
     }
+    // keep phones smooth: step graphics down once or twice if play stays under ~24 fps
+    if (mode === "play" && !document.hidden && fade === 0) {
+      autoT += real;
+      if (autoT > 6) {
+        autoFrames++;
+        autoTime += real;
+        if (autoTime > 5) {
+          const f = autoFrames / autoTime;
+          autoFrames = 0;
+          autoTime = 0;
+          if (f < 24 && quality !== "low" && autoDrops < 2) {
+            autoDrops++;
+            autoT = 0;
+            api.setQuality(quality === "high" ? "medium" : "low");
+            say("Graphics lowered to keep things smooth. Change it in the menu.");
+          }
+        }
+      }
+    } else autoT = 0;
     resize();
     let dt = rdt;
     if (hitStop > 0) {
@@ -2047,9 +2109,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           }
         nanCheck("mobs");
         updateBolts(dt);
+        updateLockRing();
         nearestInteract();
         const reg = P.inDungeon ? (P.z > DUN.galleryZ1 + 4 ? "nursery" : "dungeon") : regionAt(P.x, P.z);
         if (reg !== region) {
+          if (reg === "castle" && !revealed && !flags.cookie) {
+            revealed = true;
+            revealT = 3.2;
+          }
           region = reg;
           placeName = REGION_TITLE[reg][0];
           placeSub = REGION_TITLE[reg][1];
@@ -2160,6 +2227,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   window.addEventListener("blur", onBlur);
   document.addEventListener("visibilitychange", onVis);
   window.addEventListener("pagehide", persist);
+  const onLost = (e: Event) => {
+    e.preventDefault();
+    persist();
+  };
+  const onRestored = () => location.reload();
+  canvas.addEventListener("webglcontextlost", onLost);
+  canvas.addEventListener("webglcontextrestored", onRestored);
 
   function press(p: Press) {
     audio.unlock();
@@ -2385,6 +2459,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     },
     deleteSlot(s) {
       localStorage.removeItem(SAVE(s));
+      slotCache = null;
       push();
     },
     toTitle() {
@@ -2445,7 +2520,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   // test hooks for the browser harness (not used by the game)
   window.__veyr = {
-    state: () => ({ x: P.x, z: P.z, y: P.y, hp: P.hp, action: P.action, mode, region, dungeon: P.inDungeon, flags: { ...flags }, items: items.map((s) => s.def + ":" + s.count), seals: [...seals], cookie: cookie ? { hp: cookie.hp, st: cookie.st, phase: cookie.phaseN } : null, fps }),
+    state: () => ({ x: P.x, z: P.z, y: P.y, hp: P.hp, action: P.action, hold: P.holding, holdT: P.holdT, time: env.time, frameN, mode, region, dungeon: P.inDungeon, flags: { ...flags }, items: items.map((s) => s.def + ":" + s.count), seals: [...seals], cookie: cookie ? { hp: cookie.hp, st: cookie.st, phase: cookie.phaseN } : null, fps }),
     teleport: (x: number, z: number, dungeon?: boolean) => {
       if (dungeon !== undefined && dungeon !== P.inDungeon) setZone(dungeon);
       P.x = x;
@@ -2479,6 +2554,29 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       (P as { god?: boolean }).god = on;
     },
     prompt: () => prompt,
+    breakdown: () => {
+      const out: Record<string, number> = {};
+      const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      scene.traverseVisible((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh && !(o as THREE.Points).isPoints) return;
+        if (m.frustumCulled && m.geometry) {
+          if (!m.geometry.boundingSphere) m.geometry.computeBoundingSphere();
+          const bs = (m as THREE.InstancedMesh).isInstancedMesh ? (m as THREE.InstancedMesh).boundingSphere : m.geometry.boundingSphere;
+          if (bs) {
+            const sph = bs.clone().applyMatrix4(m.matrixWorld);
+            if (!frustum.intersectsSphere(sph)) return;
+          }
+        }
+        let k = (m as THREE.InstancedMesh).isInstancedMesh ? "instanced" : (m as THREE.SkinnedMesh).isSkinnedMesh ? "skinned" : (o as THREE.Points).isPoints ? "points" : "mesh";
+        let par = o.parent;
+        while (par && !par.name) par = par.parent;
+        k += ":" + (par?.name || "?") + (m.name ? "/" + m.name : "");
+        out[k] = (out[k] ?? 0) + 1;
+      });
+      return out;
+    },
+    perf: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures, progs: renderer.info.programs?.length ?? 0, fps }),
     cookiePos: () => (cookie ? { x: cookie.x, z: cookie.z, yaw: cookie.yaw, st: cookie.st } : null),
     npc: (id: string) => {
       const n = npcs.find((x) => x.def.id === id);

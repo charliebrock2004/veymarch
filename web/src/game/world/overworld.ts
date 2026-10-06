@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { Batch, Scatter, bushGeo, fernGeo, flowerGeo, grassGeo, logGeo, mushroomGeo, prep, rockGeo, rootGeo, stumpGeo, tint, treeGeo, wheatGeo, type TreeKind } from "../engine/kit";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { Batch, ChunkBatch, Scatter, bushGeo, flatten, type Cullable, fernGeo, flowerGeo, grassGeo, logGeo, mushroomGeo, prep, rockGeo, rootGeo, stumpGeo, tint, treeGeo, wheatGeo, type TreeKind } from "../engine/kit";
 import type { Mats } from "../engine/materials";
 import { distToPolyline, fbm, rng, smoothstep } from "../engine/noise";
 import { DOOR_H, buildTerrain, rawHeight, type Terrain } from "../engine/terrain";
@@ -21,7 +22,7 @@ export type Overworld = {
   root: THREE.Group;
   terrain: Terrain;
   col: Colliders;
-  scatters: Scatter[];
+  scatters: Cullable[];
   grass: Scatter[];
   nodes: NodeDef[];
   anchors: Record<string, THREE.Vector3>;
@@ -44,7 +45,7 @@ export type Overworld = {
   groundAt: (x: number, z: number) => number;
 };
 
-export function buildOverworld(M: Mats): Overworld {
+export function buildOverworld(M: Mats, state: { gate: () => boolean }): Overworld {
   const root = new THREE.Group();
   root.name = "overworld";
   const terrain = buildTerrain();
@@ -127,37 +128,28 @@ export function buildOverworld(M: Mats): Overworld {
     root.add(signpost(ctx, x, z, rr, new THREE.MeshLambertMaterial({ map: signTex(mark), vertexColors: true })));
 
   // ------------------------------------------------------------ the forest
-  const scatters: Scatter[] = [];
+  const scatters: Cullable[] = [];
   const kinds: TreeKind[] = ["oak", "beech", "pine", "young"];
-  const treeSets: Record<string, Scatter[]> = {};
-  for (const k of kinds) {
-    treeSets[k] = [];
-    for (let v = 0; v < 3; v++) {
-      const g = treeGeo(k, v + 1);
-      const leafMat = k === "pine" ? M.pine : k === "beech" ? M.beech : M.oak;
-      const sc = new Scatter([
-        { geo: g.trunk, mat: k === "beech" ? M.barkPale : M.bark, shadow: true },
-        { geo: g.leaves, mat: leafMat, shadow: true },
-      ], 40, 180);
-      treeSets[k].push(sc);
-      scatters.push(sc);
-    }
-  }
+  const forest = new ChunkBatch(64, 180);
+  const clutter = new ChunkBatch(64, 120);
+  scatters.push(forest, clutter);
+  const treeGeos: Record<string, ReturnType<typeof treeGeo>[]> = {};
+  for (const k of kinds) treeGeos[k] = [0, 1].map((v) => treeGeo(k, v + 1));
+  const sway = (k: TreeKind) => ({ from: k === "pine" ? 6 : k === "young" ? 2 : 5, scale: 10 });
   const giant = treeGeo("giant", 7);
-  const giantSet = new Scatter([{ geo: giant.trunk, mat: M.bark, shadow: true }, { geo: giant.leaves, mat: M.giantLeaves, shadow: true }], 80, 400);
-  scatters.push(giantSet);
   const radiusOf = (k: TreeKind) => (k === "oak" ? 0.7 : k === "pine" ? 0.4 : k === "beech" ? 0.3 : 0.2);
 
-  const fernSet = new Scatter([{ geo: fernGeo(), mat: M.fern }], 40, 70);
-  const bushSets = [0, 1, 2].map((i) => new Scatter([{ geo: bushGeo(i + 3, 1), mat: M.bush, shadow: true }], 40, 110));
-  const rockGeos = [0, 1, 2, 3].map((i) => rockGeo(i + 1));
-  const rockSets = rockGeos.map((g) => new Scatter([{ geo: g, mat: M.rock, shadow: true }], 48, 140));
-  const logSet = new Scatter([{ geo: logGeo(5, 0.42), mat: M.flat, shadow: true }], 48, 120);
-  const stumpSet = new Scatter([{ geo: stumpGeo(0.5, 0.6), mat: M.flat, shadow: true }], 48, 100);
-  const mushSet = new Scatter([{ geo: mushroomGeo(3), mat: M.flat }], 40, 45);
-  const flowerSets = [0, 1, 2].map((i) => new Scatter([{ geo: flowerGeo(i + 11), mat: M.flat }], 40, 55));
-  scatters.push(fernSet, ...bushSets, ...rockSets, logSet, stumpSet, mushSet, ...flowerSets);
-  const grassSets = [0, 1, 2].map((i) => new Scatter([{ geo: grassGeo(i + 21, 14, 0.34), mat: M.grass }], 32, 55));
+  const fernSet = new Scatter([{ geo: fernGeo(), mat: M.fern }], 64, 70);
+  const bushGeos = [0, 1].map((i) => bushGeo(i + 3, 1, true));
+  const rockGeos = [0, 1].map((i) => rockGeo(i + 1));
+  const logG = logGeo(5, 0.42);
+  const stumpG = stumpGeo(0.5, 0.6);
+  const mushG = mushroomGeo(3);
+  const flowerG = flowerGeo(11);
+  const bushAdd = (i: number, x: number, y: number, z: number, ry: number, sc: number) => forest.add("leaf", M.foliage, bushGeos[i % 2], x, y, z, ry, sc, sc, false, { from: 0.2, scale: 5 });
+  const flat = (g: THREE.BufferGeometry, x: number, y: number, z: number, ry: number, sc: number, sy = sc) => clutter.add("flat", M.clutter, g, x, y, z, ry, sc, sy);
+  scatters.push(fernSet);
+  const grassSets = [0, 1].map((i) => new Scatter([{ geo: grassGeo(i + 21, 14, 0.34), mat: M.grass }], 48, 55));
 
   const blockedForTree = (x: number, z: number) => {
     const dv = Math.hypot(x - VILLAGE.x, z - VILLAGE.z);
@@ -175,7 +167,7 @@ export function buildOverworld(M: Mats): Overworld {
 
   const giants: [number, number][] = [[-26, 134], [36, 62], [-48, 66], [28, 142], [-60, 120], [56, 100]];
   for (const [x, z] of giants) {
-    giantSet.add(x, h(x, z) - 0.6, z, r() * 6, 1, 1);
+    forest.add("leaf", M.foliage, giant.whole, x, h(x, z) - 0.6, z, r() * 6, 1, 1, true, { from: 14, scale: 12 });
     col.circle(x, z, giant.radius + 0.8);
   }
 
@@ -196,9 +188,9 @@ export function buildOverworld(M: Mats): Overworld {
       if (nearVillage && r() < 0.55) k = r() < 0.6 ? "young" : "beech";
       else if (edge < 22 || dh < HILL.r || r() < 0.12) k = "pine";
       else k = dens > 0.55 ? (r() < 0.3 ? "beech" : "oak") : r() < 0.55 ? "beech" : "oak";
-      const set = treeSets[k][Math.floor(r() * 3)];
+      const tg = treeGeos[k][Math.floor(r() * 2)];
       const s = k === "young" ? 0.8 + r() * 0.5 : 0.8 + r() * 0.45;
-      set.add(x, h(x, z) - 0.15, z, r() * Math.PI * 2, s, s * (0.9 + r() * 0.25));
+      forest.add("leaf", M.foliage, tg.whole, x, h(x, z) - 0.15, z, r() * Math.PI * 2, s, s * (0.9 + r() * 0.25), true, sway(k));
       col.circle(x, z, radiusOf(k) * s + 0.15);
     }
 
@@ -216,7 +208,7 @@ export function buildOverworld(M: Mats): Overworld {
     const y = h(x, z);
     const roll = r();
     if (roll < 0.56 && near > 2.6 && roll >= 0.53) {
-      flowerSets[i % 3].add(x, y, z, r() * 6, 0.8 + r() * 0.5);
+      flat(flowerG, x, y, z, r() * 6, 0.8 + r() * 0.5);
       continue;
     }
     if (path > 0.02 || near < 3.2) continue;
@@ -224,18 +216,18 @@ export function buildOverworld(M: Mats): Overworld {
       const sc = 0.8 + r() * 0.9;
       fernSet.add(x, y - 0.05, z, r() * 6, sc);
     } else if (roll < 0.44) {
-      bushSets[i % 3].add(x, y - 0.1, z, r() * 6, 0.7 + r() * 0.7);
+      bushAdd(i, x, y - 0.1, z, r() * 6, 0.7 + r() * 0.7);
     } else if (roll < 0.468) {
       const sc = 0.35 + r() * 0.85;
-      rockSets[i % 4].add(x, y - 0.1 * sc, z, r() * 6, sc, sc * (0.75 + r() * 0.5));
+      flat(rockGeos[i % 2], x, y - 0.1 * sc, z, r() * 6, sc, sc * (0.75 + r() * 0.5));
       if (sc > 0.8) col.circle(x, z, sc * 0.75);
     } else if (roll < 0.473) {
-      logSet.add(x, y + 0.3, z, r() * 6, 0.6 + r() * 0.6);
+      flat(logG, x, y + 0.3, z, r() * 6, 0.6 + r() * 0.6);
       col.circle(x, z, 0.8);
     } else if (roll < 0.479) {
-      stumpSet.add(x, y - 0.05, z, r() * 6, 0.5 + r() * 0.5);
+      flat(stumpG, x, y - 0.05, z, r() * 6, 0.5 + r() * 0.5);
     } else if (roll < 0.53) {
-      mushSet.add(x, y, z, r() * 6, 0.8 + r() * 0.8);
+      flat(mushG, x, y, z, r() * 6, 0.8 + r() * 0.8);
     }
   }
   // grass: village verges, clearings, path edges, the road
@@ -251,7 +243,7 @@ export function buildOverworld(M: Mats): Overworld {
     if (r() > keep) continue;
     if (fbm(x * 0.15, z * 0.15, 2) < 0.38) continue;
     const s = 0.75 + r() * 0.55;
-    grassSets[i % 3].add(x, h(x, z) - 0.02, z, r() * 6, s, s * (0.8 + r() * 0.5));
+    grassSets[i % 2].add(x, h(x, z) - 0.02, z, r() * 6, s, s * (0.8 + r() * 0.5));
   }
 
   // giant roots arching over the main path
@@ -279,11 +271,17 @@ export function buildOverworld(M: Mats): Overworld {
   const shaftMat = new THREE.MeshBasicMaterial({ map: shaftTex(), color: 0xffd28a, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
   const shaftGeo = new THREE.CylinderGeometry(1.8, 3.2, 22, 12, 1, true);
   shaftGeo.translate(0, 11, 0);
-  for (const [x, z] of [[18, 84], [-42, 96], [40, 114], [-26, 128], [-14, 56], [3, 66], [-4, 102], [6, 132], [12, 40], [-30, 80], [28, 98], [-8, 148]]) {
-    const m = new THREE.Mesh(shaftGeo, shaftMat);
-    m.position.set(x, h(x, z) - 1, z);
-    m.rotation.set(-0.35, 0.6, 0.25);
+  {
+    const parts: THREE.BufferGeometry[] = [];
+    for (const [x, z] of [[18, 84], [-42, 96], [40, 114], [-26, 128], [-14, 56], [3, 66], [-4, 102], [6, 132], [12, 40], [-30, 80], [28, 98], [-8, 148]]) {
+      const g = shaftGeo.clone();
+      g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x, h(x, z) - 1, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.35, 0.6, 0.25)), new THREE.Vector3(1, 1, 1)));
+      parts.push(g);
+    }
+    const merged = mergeGeometries(parts, false)!;
+    const m = new THREE.Mesh(merged, shaftMat);
     m.renderOrder = 3;
+    m.frustumCulled = false;
     root.add(m);
     shafts.push(m);
   }
@@ -465,6 +463,7 @@ export function buildOverworld(M: Mats): Overworld {
         gl_FragColor = vec4(col * a, a);
       }`,
   });
+  col.box(GATE.x, 0, 1.4, 6.8, 0, () => !state.gate(), "seal");
   const seal = new THREE.Mesh(new THREE.PlaneGeometry(6.4, 9.4), sealMat);
   seal.position.set(GATE.x - 0.4, gy + 4.6, 0);
   seal.rotation.y = Math.PI / 2;
@@ -545,10 +544,16 @@ export function buildOverworld(M: Mats): Overworld {
       for (let k = 0; k < c.count; k++) if (Math.sin(p.getX(k) * 6 - p.getY(k) * 8) > 0.7) c.setXYZ(k, 0.32, 0.36, 0.42);
       add(rg, 0, 0.8, 0, 0, 1.6);
     }
-    g.position.set(x, y, z);
-    root.add(g);
+    const baked = flatten(g, nodeMats.flint);
+    baked.castShadow = true;
+    baked.receiveShadow = true;
+    const holder = new THREE.Group();
+    holder.add(baked);
+    holder.position.set(x, y, z);
+    root.add(holder);
+    const gNode = holder;
     col.circle(x, z, kind === "stone" ? 1.0 : kind === "iron" ? 1.6 : kind === "fibre" ? 0.2 : 0.5);
-    nodes.push({ id, kind, item, tier, seal, x, z, y, max, mesh: g });
+    nodes.push({ id, kind, item, tier, seal, x, z, y, max, mesh: gNode });
   };
   const creekAt = (x: number, off: number): [number, number] => {
     let best: [number, number] = [x, 45];
@@ -718,11 +723,10 @@ export function buildOverworld(M: Mats): Overworld {
   }
 
   // ------------------------------------------------------------ the Kingdom beyond
-  const wheatSet = new Scatter([{ geo: wheatGeo(), mat: M.wheat }], 40, 140);
-  const hedgeSet = new Scatter([{ geo: bushGeo(91, 1.2), mat: M.bush, shadow: true }], 48, 220);
+  const wheatSet = new Scatter([{ geo: wheatGeo(), mat: M.wheat }], 64, 140);
+  const hedgeG = bushGeo(91, 1.2, true);
   const kTree = treeGeo("oak", 12);
-  const kTrees = new Scatter([{ geo: kTree.trunk, mat: M.bark, shadow: true }, { geo: kTree.leaves, mat: M.oak, shadow: true }], 60, 300);
-  scatters.push(wheatSet, hedgeSet, kTrees);
+  scatters.push(wheatSet);
   const plotWheat = (x: number, z: number) => {
     const plot = Math.floor((x - 110) / 24) * 7 + Math.floor((z + 200) / 19) * 13;
     return Math.abs((Math.sin(plot * 12.9898) * 43758.5453) % 1) > 0.45;
@@ -734,16 +738,41 @@ export function buildOverworld(M: Mats): Overworld {
     const fx = ((x - 110) % 24 + 24) % 24;
     const fz = ((z + 200) % 19 + 19) % 19;
     if (fx < 1.2 || fz < 1.2) {
-      if (r() < 0.1) hedgeSet.add(x, h(x, z) - 0.2, z, r() * 6, 0.9 + r() * 0.5);
+      if (r() < 0.1) forest.add("leaf", M.foliage, hedgeG, x, h(x, z) - 0.2, z, r() * 6, 0.9 + r() * 0.5, 0.9 + r() * 0.5, false, { from: 0.2, scale: 5 });
       continue;
     }
     if (plotWheat(x, z)) wheatSet.add(x, h(x, z) - 0.05, z, r() * 6, 0.9 + r() * 0.35, 0.85 + r() * 0.4);
-    else if (r() < 0.25) grassSets[i % 3].add(x, h(x, z) - 0.02, z, r() * 6, 1, 1);
+    else if (r() < 0.25) grassSets[i % 2].add(x, h(x, z) - 0.02, z, r() * 6, 1, 1);
   }
+  // farm fields along the road to the Kingsbridge
+  for (let i = 0; i < 2600; i++) {
+    const x = 38 + r() * 30;
+    const side = r() < 0.5 ? -1 : 1;
+    const z = side * (6.5 + r() * 16);
+    if (terrain.pathAt(x, z) > 0.02 || terrain.waterAt(x, z) > 0.1) continue;
+    if ((x > 50 && x < 51.5) || Math.abs(Math.abs(z) - 14.5) < 0.8) continue;
+    wheatSet.add(x, h(x, z) - 0.05, z, r() * 6, 0.85 + r() * 0.3, 0.8 + r() * 0.35);
+  }
+  fence(ctx, [[37, 5.2], [69, 5.2]]);
+  fence(ctx, [[37, -5.6], [69, -5.6]]);
+  cottage(ctx, 46, 29, 7.5, 5.5, Math.PI + 0.1, { roof: "thatch", seed: 41 });
+  hay(ctx, 55, 25, 0.4);
+  hay(ctx, 56.5, 26.2, 1.1);
+  cart(ctx, 60, 27, 0.8);
+  {
+    const f = new Frame(58, h(58, -16), -16, 0.3);
+    put(ctx, "flat", new THREE.BoxGeometry(0.12, 2.4, 0.12), f, 0, 1.2, 0, 0, 0, 0, 0x5b4632);
+    put(ctx, "flat", new THREE.BoxGeometry(1.5, 0.1, 0.1), f, 0, 1.85, 0, 0, 0, 0, 0x5b4632);
+    put(ctx, "flat", new THREE.BoxGeometry(0.7, 0.8, 0.3), f, 0, 1.55, 0, 0, 0, 0.05, 0x8a7a5a);
+    put(ctx, "flat", new THREE.SphereGeometry(0.22, 8, 6), f, 0, 2.2, 0, 0, 0, 0, 0xcdbba6);
+    put(ctx, "thatch", new THREE.ConeGeometry(0.4, 0.3, 8), f, 0, 2.45, 0, 0, 0, 0, 0xffe0b0);
+    col.circle(58, -16, 0.3);
+  }
+  root.add(signpost(ctx, 70, 3.4, -Math.PI / 2, new THREE.MeshLambertMaterial({ map: signTex("east"), vertexColors: true })));
   for (let i = 0; i < 40; i++) {
     const x = GATE.x + 10 + r() * 125;
     const z = (r() < 0.5 ? -1 : 1) * (14 + r() * 56);
-    kTrees.add(x, h(x, z) - 0.2, z, r() * 6, 0.9 + r() * 0.4);
+    forest.add("leaf", M.foliage, kTree.whole, x, h(x, z) - 0.2, z, r() * 6, 0.9 + r() * 0.4, 0.9 + r() * 0.4, true, { from: 5, scale: 10 });
     col.circle(x, z, 0.8);
   }
   cottage(ctx, 132, -22, 7, 5, 0.3, { roof: "thatch", seed: 31 });
@@ -891,8 +920,8 @@ export function buildOverworld(M: Mats): Overworld {
       }
       g.computeVertexNormals();
       const c = new THREE.Color();
-      const rock = new THREE.Color(snow ? 0x7d8698 : 0x5e6a52).lerp(new THREE.Color(0xb8c0c8), 0.5);
-      const ice = new THREE.Color(0xf0f0f2).lerp(new THREE.Color(0xc8d0d8), 0.25);
+      const rock = new THREE.Color(snow ? 0x7d8698 : 0x5e6a52).lerp(new THREE.Color(0xc0c8d0), 0.68);
+      const ice = new THREE.Color(0xf0f0f2).lerp(new THREE.Color(0xc8d0d8), 0.35);
       const cols = new Float32Array(pos.count * 3);
       for (let k = 0; k < pos.count; k++) {
         const t = (pos.getY(k) + hh / 2) / hh;
@@ -904,7 +933,7 @@ export function buildOverworld(M: Mats): Overworld {
       const m = new THREE.MeshLambertMaterial({ vertexColors: true, fog: false });
       hazeMats.push(m);
       const mesh = new THREE.Mesh(g, m);
-      mesh.position.set(x, hh / 2 - 30, z);
+      mesh.position.set(x, hh / 2 - 70, z);
       far.add(mesh);
     };
     mountain(60, 760, 220, 300, true, 1);
@@ -928,15 +957,16 @@ export function buildOverworld(M: Mats): Overworld {
       ring.add(m);
     }
     far.add(ring);
-    far.traverse((o) => {
-      (o as THREE.Mesh).castShadow = false;
-      (o as THREE.Mesh).receiveShadow = false;
-    });
-    root.add(far);
+    const farMat = new THREE.MeshLambertMaterial({ vertexColors: true, fog: false });
+    hazeMats.push(farMat);
+    const baked = flatten(far, farMat);
+    baked.name = "far";
+    baked.frustumCulled = false;
+    root.add(baked);
   }
 
   // ------------------------------------------------------------ finish
-  for (const s of scatters) s.build(root);
+  for (const s of scatters) (s as Scatter | ChunkBatch).build(root);
   for (const s of grassSets) s.build(root);
   batch.build(root);
 

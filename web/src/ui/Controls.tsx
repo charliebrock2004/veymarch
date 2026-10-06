@@ -20,7 +20,11 @@ export function Controls({ api, hud }: { api: GameApi; hud: Hud }) {
 
   const down = (e: RPE<HTMLDivElement>) => {
     const el = layer.current!;
-    el.setPointerCapture(e.pointerId);
+    try {
+      el.setPointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
     const w = el.clientWidth;
     if (e.pointerType !== "mouse" && e.clientX < w * 0.46 && !stick.current) {
       stick.current = { id: e.pointerId, ox: e.clientX, oy: e.clientY };
@@ -81,7 +85,11 @@ export function Controls({ api, hud }: { api: GameApi; hud: Hud }) {
   const btn = (p: Press, release?: Press) => ({
     onPointerDown: (e: RPE) => {
       e.stopPropagation();
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      try {
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      } catch {
+        /* capture is a nicety; the press still counts */
+      }
       api.press(p);
     },
     onPointerUp: (e: RPE) => {

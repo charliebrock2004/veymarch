@@ -334,7 +334,11 @@ input {
 .vm-settings {
   display: grid;
   gap: 12px;
-  overflow: auto;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 .vm-field {
   display: grid;
@@ -1296,5 +1300,95 @@ input {
   }
   .vm-bag {
     grid-template-columns: 130px 1fr 170px;
+  }
+}
+
+/* ------------------------------------------------ first-play hint and rotate hint */
+.vm-hint-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  background: rgba(10, 8, 7, 0.55);
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: end;
+  padding: 0 calc(20px + var(--sar)) calc(28px + var(--sab)) calc(20px + var(--sal));
+  animation: vm-in 0.6s ease;
+}
+.vm-hint-overlay b {
+  display: block;
+  font-family: var(--display);
+  letter-spacing: 0.12em;
+  color: var(--gold);
+  font-size: 15px;
+}
+.vm-hint-overlay span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--bone);
+  line-height: 1.5;
+}
+.vm-hint-left {
+  padding-bottom: 150px;
+}
+.vm-hint-mid {
+  text-align: center;
+  align-self: center;
+}
+.vm-hint-mid span {
+  justify-content: center;
+}
+.vm-hint-right {
+  justify-self: end;
+  padding-bottom: 250px;
+  display: grid;
+  gap: 2px;
+}
+.vm-hint-tap {
+  position: absolute;
+  top: 28%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: var(--display);
+  letter-spacing: 0.3em;
+  color: var(--bone);
+  animation: vm-pulse-text 1.6s ease-in-out infinite;
+}
+@keyframes vm-pulse-text {
+  50% {
+    opacity: 0.45;
+  }
+}
+.vm-rotate {
+  display: none;
+}
+@media (orientation: portrait) and (pointer: coarse) {
+  .vm-rotate {
+    display: block;
+    position: absolute;
+    left: 50%;
+    top: calc(50px + var(--sat));
+    transform: translateX(-50%);
+    z-index: 55;
+    padding: 6px 12px;
+    border-radius: 14px;
+    background: rgba(18, 15, 13, 0.75);
+    font-size: 12px;
+    color: var(--bone);
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .vm-hint-overlay {
+    grid-template-columns: 1fr;
+    align-content: center;
+    gap: 16px;
+  }
+  .vm-hint-left,
+  .vm-hint-right {
+    padding: 0;
+    justify-self: start;
   }
 }

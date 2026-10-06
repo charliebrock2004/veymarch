@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Web build (current playable milestone)
+
+- `web/` is now a real game for phones: procedural world (Hearthfen, Giant Forest, Cookie's Castle, Kingsbridge, Green Gate, Kingdom vista), animated characters, villagers on routes, combat with telegraphs, Cookie in three phases, crafting at stations, barter, three save slots, character creator, touch controls, day and night, synthesised sound. Deployed to Vercel production.
+
 ### Fixed
 
 - `Veyr.Sim` and `Veyr.Content` now compile under Unity 6's C# 9 / .NET Standard 2.1. They did not before.

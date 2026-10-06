@@ -57,6 +57,13 @@ function sample(x: number, z: number): Sample {
   const dh = Math.hypot(x - HILL.x, z - HILL.z);
   const hill = 1 - smoothstep(HILL.r * 0.25, HILL.r, dh);
   h += HILL.h * hill;
+  // a graded approach up the hill along the main path
+  if (z > 120 && z < 170) {
+    const dMain = distToPolyline(x, z, PATH_MAIN);
+    const k = (1 - smoothstep(3.5, 11, dMain)) * smoothstep(122, 134, z);
+    const rampH = roll * 0.85 * (1 - smoothstep(130, 160, z)) + DOOR_H * smoothstep(128, 163, z);
+    h = lerp(h, rampH, k);
+  }
   const dd = Math.hypot(x - CASTLE_DOOR.x, z - CASTLE_DOOR.z + 1);
   h = lerp(h, DOOR_H, 1 - smoothstep(5, 10, dd));
 

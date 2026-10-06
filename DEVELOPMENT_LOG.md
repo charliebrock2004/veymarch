@@ -163,3 +163,18 @@
 - CI: `.github/workflows/ci.yml` runs the .NET build (shared libraries under Unity's limits, Unity assemblies against the API declarations), all edit-mode tests, the content audit, the loop harness, and the web build. The same commands were run locally in Release: 0 errors, 0 warnings, 98 + 36 tests passed, audit clean, loop exit 0.
 - Performance numbers: none. No device.
 - Next legal task: T015/T016 on a mid Android phone by a human (checkpoint 1). The agent stops here. Phase 4+ Unity work waits for the checkpoint report or a written waiver from Charlie.
+
+## 2026-10-06 — Web build becomes the playable milestone
+
+- Task: Charlie changed tonight's priority: a playable VEYRMARCH on Vercel, opened on an iPhone. Unity work is paused at checkpoint 1, not removed.
+- What changed: `web/` rebuilt from a box prototype into a procedural Three.js game with a React interface. Terrain, Hearthfen, the Giant Forest, Cookie's hill and castle interior, the Broken Kingsbridge, the Green Gate, and a Kingdom vista. Skinned procedural characters with code-driven poses. Villagers on routes. Combat with soft lock, hit-stop, parry, roll i-frames, stamina, Ember. Seven enemy types with ground telegraphs. Cookie in three phases with an intro, back-stitch, fire weakness, a death sequence and the three uniques. Touch stick, drag-to-look, thumb buttons, safe areas, no page zoom or scroll. Three save slots, character creator, bag and crafting by station (hand, workbench, forge), barter, day and night, synthesised audio. Automatic graphics step-down below ~24 fps.
+- Files: `web/src/game/**`, `web/src/ui/**`, `web/src/App.tsx`, `web/src/styles.css`, `web/index.html`, `web/public/**`, `README.md`.
+- Tests run: `npm test` in `web/` (9 rules tests, all pass), `npm run build`. Scripted browser playthroughs in headless Chromium with software WebGL at 844×390 with touch: talk to Tanic, gather, craft the knife, learn Ember, kill a wolf, enter the castle, solve the weight door, kill the rocking horse, open the nursery, defeat Cookie through all three phases, receive Blade, Pickaxe and Core plus `seal_cookie`, leave, open the Green Gate, reach Castellan Voss and the ending. Touch stick, button taps, bag, pause, death and wake, save then reload and Continue.
+- Results: the full loop completes. Bugs found and fixed on the way: Cookie launched out of the arena when back-stitched mid-slam; a zero-length boss state divided by zero; several meshes rendered black for lack of a colour attribute; bandages did not stack; a gather and dodge race in the test exposed only harness timing.
+- Performance numbers: draw calls per frame from `renderer.info`, measured in the browser: 74 to 195 depending on view (928 before batching). About 0.8 million triangles in the densest forest view. No phone frame time yet: the agent has no iPhone, and software WebGL frame times mean nothing.
+- Decisions recorded:
+  - Cookie has 280 health in the browser (the sim has 180). Phone players have no lock-on and the fight should last long enough to see all three phases.
+  - Copper sword, copper pick and a new iron sword are forged at Mara's forge, not the bench.
+  - Cookie takes half damage while perched on the music box, except from fire. The slam's dizzy landing is the punish window.
+- Deployment: production deployment `dpl_DqGs6MED73e7C9VFri2DydCfN31B` built READY from this branch and is aliased to `veyrmarch.vercel.app`. The agent could not load the URL: the container's network policy blocks `*.vercel.app` and the Vercel connector's page fetch was refused for the team scope.
+- Next: Charlie plays it on an iPhone (checkpoint). Then tune feel and frame rate from that report.

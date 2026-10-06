@@ -231,8 +231,28 @@ export const barkTex = (pale = false) =>
 
 /** A cluster of leaves on transparent ground, for alpha-tested foliage cards. */
 export const leafTex = (kind: "oak" | "beech" | "pine" | "bush" = "oak") =>
-  make("leaf_" + kind, 256, 256, (g, w, h, r) => {
+  make("leaf_" + kind, 256, 256, (g, w, h, r) => paintLeaves(g, w, h, r, kind), { repeat: false });
+
+/** All foliage in one texture: oak, beech, pine, bush quadrants, plus a solid patch that trunks sample. */
+export const foliageTex = () =>
+  make("foliage", 512, 512, (g, w, h, r) => {
     g.clearRect(0, 0, w, h);
+    const quads: [string, number, number][] = [["oak", 0, 256], ["beech", 256, 256], ["pine", 0, 0], ["bush", 256, 0]];
+    for (const [k, x, y] of quads) {
+      g.save();
+      g.translate(x, y);
+      g.beginPath();
+      g.rect(0, 0, 256, 256);
+      g.clip();
+      paintLeaves(g, 256, 256, r, k as "oak");
+      g.restore();
+    }
+    g.fillStyle = "rgb(214,206,194)";
+    g.fillRect(0, h - 12, 12, 12);
+  }, { repeat: false });
+
+function paintLeaves(g: CanvasRenderingContext2D, w: number, h: number, r: Rand, kind: "oak" | "beech" | "pine" | "bush") {
+  {
     const palettes: Record<string, number[][]> = {
       oak: [[96, 120, 58], [124, 144, 68], [150, 160, 76], [82, 104, 50], [172, 168, 84]],
       beech: [[138, 156, 72], [164, 176, 84], [118, 138, 62], [188, 184, 96]],
@@ -264,7 +284,8 @@ export const leafTex = (kind: "oak" | "beech" | "pine" | "bush" = "oak") =>
       }
       g.restore();
     }
-  }, { repeat: false });
+  }
+}
 
 export const fernTex = () =>
   make("fern", 128, 256, (g, w, h, r) => {

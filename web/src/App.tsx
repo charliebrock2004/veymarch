@@ -73,6 +73,7 @@ export default function App() {
       {api && hud && <Screens api={api} hud={hud} />}
       {(!hud || hud.mode === "loading") && !error && <Loading progress={hud?.loading ?? 0} />}
       <div className="vm-fade" style={{ opacity: hud?.fade ?? 0 }} />
+      <div className="vm-rotate">Turn your phone sideways for the best view.</div>
     </div>
   );
 }
@@ -209,7 +210,7 @@ function Settings({ hud, api, back }: { hud: Hud; api: GameApi; back: () => void
 
 function SettingsBody({ hud, api }: { hud: Hud; api: GameApi }) {
   return (
-    <div className="vm-settings">
+    <div className="vm-settings vm-scroll">
       <div className="vm-field">
         <label>Graphics</label>
         <div className="vm-seg">
@@ -360,6 +361,26 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
     const t = setTimeout(() => setTitle(null), 3600);
     return () => clearTimeout(t);
   }, [hud.placeAt, hud.place, hud.placeSub]);
+  const [hint, setHint] = useState(() => {
+    try {
+      return localStorage.getItem("veyrmarch.hint") !== "1";
+    } catch {
+      return true;
+    }
+  });
+  const closeHint = () => {
+    setHint(false);
+    try {
+      localStorage.setItem("veyrmarch.hint", "1");
+    } catch {
+      /* private mode */
+    }
+  };
+  useEffect(() => {
+    if (!hint || hud.mode !== "play") return;
+    const t = setTimeout(closeHint, 12000);
+    return () => clearTimeout(t);
+  }, [hint, hud.mode]);
   const hurt = performance.now() - hud.hurtAt < 500;
   const low = hud.hp / hud.maxHp < 0.3;
   const showControls = hud.mode === "play";
@@ -417,6 +438,25 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
       {toast && hud.mode === "play" && (
         <div className="vm-toast" key={hud.toastId}>
           {toast}
+        </div>
+      )}
+      {hint && hud.mode === "play" && (
+        <div className="vm-hint-overlay" onPointerDown={closeHint}>
+          <div className="vm-hint-left">
+            <b>Move</b>
+            <span>Left thumb anywhere. Push to the edge to run.</span>
+          </div>
+          <div className="vm-hint-mid">
+            <b>Look</b>
+            <span>Drag with your right thumb.</span>
+          </div>
+          <div className="vm-hint-right">
+            <span><Glyph name="sword" size={18} /> Tap to strike, hold for a heavy blow</span>
+            <span><Glyph name="dodge" size={18} /> Roll through attacks</span>
+            <span><Glyph name="shield" size={18} /> Hold to block; time it to parry</span>
+            <span><Glyph name="hand" size={18} /> Gold button: talk, gather, enter</span>
+          </div>
+          <div className="vm-hint-tap">Tap to begin</div>
         </div>
       )}
       {hud.mode === "bag" && <Bag api={api} hud={hud} />}
