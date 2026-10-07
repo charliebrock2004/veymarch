@@ -61,7 +61,8 @@ export function getBackend(): Promise<Backend | null> {
       return localBackend(url);
     }
     const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
-    const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
+    // the publishable key (sb_publishable_…) is public by design; the legacy anon key also works
+    const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY) as string | undefined;
     if (!url || !key) return null;
     const { supabaseBackend } = await import("./supabase");
     return supabaseBackend(url, key);
