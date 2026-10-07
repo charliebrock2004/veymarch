@@ -3993,6 +3993,17 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       items = addItem(items, id, n, uid);
       push();
     },
+    /** build a zone now (as walking toward it would) */
+    loadZone: (z: ZoneId) => ensureZone(z),
+    /** a world flag as this client sees it; `set` asks the server like a lever would */
+    setWorldFlag: (f: string) => worldFlag(f).then(() => !!worldFlags[f]).catch((e: Error) => "refused: " + (e?.message ?? e)),
+    bossState: (id: string) => {
+      const b = bosses.get(id);
+      return b ? { x: b.x, y: b.y, z: b.z, yaw: b.yaw, hp: b.hp, max: b.max, st: b.st, phase: b.phaseN, puppet: b.puppet } : null;
+    },
+    hazards: () => hazards.map((h) => ({ x: h.h.x, z: h.h.z, r: h.h.r, left: h.left })),
+    theme: () => audio.theme,
+    zoneMobs: (z: ZoneId) => mobs.filter((m) => m.zone === z).map((m) => ({ key: mobKey.get(m) ?? m.key, k: m.kind, x: m.x, z: m.z, hp: m.hp, alive: m.alive, st: m.state })),
     face: (yaw: number) => {
       P.yaw = yaw;
       camYaw = yaw;
