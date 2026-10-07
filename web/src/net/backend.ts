@@ -46,15 +46,22 @@ let cached: Promise<Backend | null> | null = null;
 export function getBackend(): Promise<Backend | null> {
   if (cached) return cached;
   cached = (async () => {
-    const q = new URLSearchParams(location.search).get("realm");
-    let local = q;
-    try {
-      if (q) localStorage.setItem("veyrmarch.realm", q);
-      else local = localStorage.getItem("veyrmarch.realm");
-    } catch {
-      /* storage blocked */
+    // A development override, honoured only when the page itself is served from this machine:
+    // a link must never be able to point a player's key at someone else's server.
+    const dev = import.meta.env.DEV || /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+    let local: string | null = null;
+    if (dev) {
+      const q = new URLSearchParams(location.search).get("realm");
+      local = q;
+      try {
+        if (q) localStorage.setItem("veyrmarch.realm", q);
+        else local = localStorage.getItem("veyrmarch.realm");
+      } catch {
+        /* storage blocked */
+      }
+      if (local === "off" || local === "supabase") local = null;
+      if (local && local !== "local" && !/^wss?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/.test(local)) local = null;
     }
-    if (local === "off" || local === "supabase") local = null;
     if (local) {
       const url = local === "local" ? `ws://${location.hostname}:8787` : local;
       const { localBackend } = await import("./local");

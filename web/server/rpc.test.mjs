@@ -121,6 +121,11 @@ test("Cookie has one health pool and pays each fighter exactly once", async () =
   await call("vm_join", { ...b, p_code: w.code, p_char: cb.id });
   assert.equal(w.cookie, false);
 
+  // nobody can hit Cookie from outside the courtyard
+  await assert.rejects(call("vm_boss_hit", { ...a, p_world: w.id, p_char: ca.id, p_heavy: true, p_fire: false, p_behind: false, p_perched: false, p_dizzy: false }), /not within reach/);
+  for (const [who, id] of [[a, ca.id], [b, cb.id]]) await call("vm_heartbeat", { ...who, p_world: w.id, p_char: id, p_x: 1200, p_z: 100, p_yaw: 0, p_dungeon: true, p_hp: 100, p_play: 1 });
+  // Ember fire needs Ember
+  await assert.rejects(call("vm_boss_hit", { ...a, p_world: w.id, p_char: ca.id, p_heavy: false, p_fire: true, p_behind: false, p_perched: false, p_dizzy: false }), /Ember/);
   let hp = 280;
   let turn = 0;
   let last;
@@ -155,19 +160,27 @@ test("Cookie has one health pool and pays each fighter exactly once", async () =
 test("an old local save imports once", async () => {
   const a = await player();
   const payload = {
-    source: "slot0-123", name: "Old Hero", look: { body: 0, skin: 3, hair: 2, hairColor: 1, coat: 4 }, kills: 12, deaths: 3, time: 900,
-    flags: { talked: true, ember: true, cookie: false },
-    items: [{ def: "wpn_copper_sword", count: 1 }, { def: "mat_wood", count: 7 }, { def: "wpn_cookie_blade", count: 1 }, { def: "nope", count: 1 }],
+    source: "slot0:Old Hero", name: "Old Hero", look: { body: 0, skin: 3, hair: 2, hairColor: 1, coat: 4 }, kills: 12, deaths: 3, time: 900,
+    flags: { talked: true, ember: true, cookie: true },
+    items: [{ def: "wpn_copper_sword", count: 1 }, { def: "mat_wood", count: 70 }, { def: "wpn_cookie_blade", count: 1 }, { def: "key_cookie_core", count: 1 },
+      { def: "wpn_iron_sword", count: 1 }, { def: "mat_iron", count: 50 }, { def: "nope", count: 1 }],
   };
   const c1 = await call("vm_import_character", { ...a, p_payload: payload });
   const c2 = await call("vm_import_character", { ...a, p_payload: payload });
   assert.equal(c1.id, c2.id);
   assert.equal(c1.weapon, "Copper Sword");
-  assert.equal(c1.mana_max, 30);
-  assert.ok(!c1.items.some((s) => s.def === "wpn_cookie_blade"), "uniques need the boss flag");
-  assert.equal(c1.items.find((s) => s.def === "mat_wood").count, 7);
+  assert.equal(c1.mana_max, 0, "Ember is learned again in the world");
+  for (const def of ["wpn_cookie_blade", "key_cookie_core", "wpn_iron_sword", "mat_iron"]) assert.ok(!c1.items.some((s) => s.def === def), def + " is not importable");
+  assert.equal(c1.items.find((s) => s.def === "mat_wood").count, 20, "stacks are capped");
+  assert.notEqual(c1.flags.cookie, true);
   const prof = await call("vm_profile", a);
   assert.equal(prof.characters.length, 1);
+  // unsourced or odd payloads are refused; at most three imports per player, even after deleting
+  await assert.rejects(call("vm_import_character", { ...a, p_payload: { name: "X" } }), /cannot be imported/);
+  await call("vm_import_character", { ...a, p_payload: { ...payload, source: "slot1:B" } });
+  await call("vm_import_character", { ...a, p_payload: { ...payload, source: "slot2:C" } });
+  await call("vm_delete_character", { ...a, p_char: c1.id });
+  await assert.rejects(call("vm_import_character", { ...a, p_payload: { ...payload, source: "slot0:Again" } }), /already brought/);
 });
 
 test("the SQL grants exactly the client API", async () => {
@@ -179,4 +192,45 @@ test("the SQL grants exactly the client API", async () => {
   const granted = JSON.parse("[" + /api text\[\] := array\[([^\]]*)\]/.exec(src)[1].replace(/'/g, '"') + "]");
   assert.deepEqual([...granted].sort(), [...REALM_API].sort());
   for (const f of REALM_API) assert.ok(all.includes(f), f + " exists");
+});
+
+test("seats free up when players leave, are removed, or delete their character", async () => {
+  const owner = await player();
+  const co = await call("vm_create_character", { ...owner, p_name: "Owner", p_look: {} });
+  const w = await call("vm_create_world", { ...owner, p_name: "Seats" });
+  await call("vm_enter", { ...owner, p_world: w.id, p_char: co.id });
+  const guests = [];
+  for (let i = 0; i < 4; i++) {
+    const p = await player();
+    const c = await call("vm_create_character", { ...p, p_name: "G" + i, p_look: {} });
+    guests.push({ p, c });
+  }
+  for (const g of guests.slice(0, 3)) await call("vm_join", { ...g.p, p_code: w.code, p_char: g.c.id });
+  await assert.rejects(call("vm_join", { ...guests[3].p, p_code: w.code, p_char: guests[3].c.id }), /four players/);
+  // one leaves: the fourth gets in; the leaver's world disappears from their list
+  const after = await call("vm_leave_world", { ...guests[0].p, p_world: w.id });
+  assert.equal(after.worlds.length, 0);
+  await call("vm_join", { ...guests[3].p, p_code: w.code, p_char: guests[3].c.id });
+  await assert.rejects(call("vm_enter", { ...guests[0].p, p_world: w.id, p_char: guests[0].c.id }), /code first/);
+  // the owner removes one; a deleted character frees its seat too
+  await assert.rejects(call("vm_kick", { ...guests[1].p, p_world: w.id, p_name: "G2" }), /maker/);
+  await call("vm_kick", { ...owner, p_world: w.id, p_name: "G1" });
+  await call("vm_delete_character", { ...guests[2].p, p_char: guests[2].c.id });
+  const card = (await call("vm_profile", owner)).worlds[0];
+  assert.equal(card.players, 2, "owner and G3");
+  // the leaver can come back with the code
+  await call("vm_join", { ...guests[0].p, p_code: w.code, p_char: guests[0].c.id });
+});
+
+test("changing zone needs a door", async () => {
+  const a = await player();
+  const c = await call("vm_create_character", { ...a, p_name: "Walker", p_look: {} });
+  const w = await call("vm_create_world", { ...a, p_name: "Doors" });
+  await call("vm_enter", { ...a, p_world: w.id, p_char: c.id });
+  const beat = (x, z, d) => call("vm_heartbeat", { ...a, p_world: w.id, p_char: c.id, p_x: x, p_z: z, p_yaw: 0, p_dungeon: d, p_hp: 100, p_play: 1 });
+  assert.equal((await beat(0, 0, false)).ok, true);
+  assert.equal((await beat(1200, 100, true)).ok, false, "no stepping from Hearthfen into the courtyard");
+  assert.equal((await beat(1, 6, false)).ok, true);
+  await db.exec(`update vm_members set x = 0, z = 162, pos_at = now() - interval '1 second' where character_id = '${c.id}'`);
+  assert.equal((await beat(1200, 2.2, true)).ok, true, "through the castle door");
 });

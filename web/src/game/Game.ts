@@ -2441,6 +2441,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     persist();
   };
   const onVis = () => {
+    if (!document.hidden) online?.room.resume();
     if (document.hidden) {
       persist();
       if (mode === "play") {
@@ -2802,7 +2803,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       case "hit": {
         const m = findMob(ev.m);
         if (!m || !m.alive) return;
-        if (!m.puppet) {
+        // only the client that runs the world applies blows (a hidden tab that used to run it must not)
+        if (!m.puppet && o.room.isRunner) {
           m.takeHit(Math.min(80, Math.max(0, num(ev.d))), num(ev.x, m.x), num(ev.z, m.z), !!ev.hv, !!ev.f);
           if (!m.alive) o.room.event({ k: "kill", m: m.key, to: from }, true);
         } else m.flash = 0.12;
@@ -2902,6 +2904,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         o.day = h.day;
         for (const [f, on] of Object.entries(h.flags ?? {})) if (on) applyWorldFlag(f);
         if (h.boss?.cookie) o.boss = h.boss.cookie;
+        o.room.aloneHint = h.online <= 1;
       })
       .catch(() => {
         /* a missed beat: the next one retries */
@@ -2925,16 +2928,25 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
   }
 
+  /** Start or stop simulating enemies and Cookie (called the moment the role changes). */
+  function applyRole() {
+    const o = online;
+    if (!o) return;
+    const runner = o.room.isRunner;
+    if (runner === o.runner) return;
+    o.runner = runner;
+    for (const m of mobs) m.setPuppet(!runner);
+    cookie?.setPuppet(!runner);
+  }
+
   function netFrame(rdt: number) {
     const o = online!;
     const now = performance.now();
+    // a long gap between frames means the page slept (a locked phone): listen before taking over
+    if (rdt >= 1) o.room.resume();
     o.room.elect();
+    applyRole();
     const runner = o.room.isRunner;
-    if (runner !== o.runner) {
-      o.runner = runner;
-      for (const m of mobs) m.setPuppet(!runner);
-      cookie?.setPuppet(!runner);
-    }
     for (const r of o.remotes.values()) r.update(rdt, now, env.time, P.inDungeon);
     o.tickT -= rdt;
     if (o.tickT <= 0) {
@@ -3220,9 +3232,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         boss: w.boss?.cookie ?? null, arenaEmptyT: 0, wxSent: weightX, runner: false, lastBeat: 0,
         names: new Set(w.members.filter((m) => m.online && m.character_id !== c.id).map((m) => m.character_id)),
       };
+      room.aloneHint = !w.members.some((m) => m.online && m.character_id !== c.id);
       room.onBundle = onBundle;
       room.onPeers = syncPeers;
       room.onStatus = () => push();
+      room.onRole = () => applyRole();
       buildPlayer();
       fadeThen(() => {
         beginPlay();

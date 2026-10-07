@@ -20,36 +20,47 @@ export function supabaseBackend(url: string, key: string): Backend {
       let meta: PresenceMeta | null = null;
       let joined = false;
       let closed = false;
-      const ch: RealtimeChannel = sb.channel(topic, { config: { broadcast: { self: false, ack: false }, presence: { key: presenceKey } } });
-      ch.on("broadcast", { event: "m" }, (m) => {
-        for (const f of msgFns) f(m.payload);
-      });
-      ch.on("presence", { event: "sync" }, () => {
-        const state = ch.presenceState<PresenceMeta>();
-        const list: PresenceMeta[] = [];
-        for (const k of Object.keys(state)) {
-          const metas = state[k];
-          if (metas.length) list.push(metas[metas.length - 1] as unknown as PresenceMeta);
-        }
-        for (const f of presFns) f(list);
-      });
+      let ch: RealtimeChannel;
       const status = (s: ChannelStatus) => {
         for (const f of statusFns) f(s);
       };
-      ch.subscribe((s) => {
-        if (closed) return;
-        if (s === "SUBSCRIBED") {
-          joined = true;
-          status("connected");
-          if (meta) void ch.track(meta);
-        } else if (s === "CHANNEL_ERROR" || s === "TIMED_OUT") {
-          joined = false;
-          status("connecting");
-        } else if (s === "CLOSED") {
-          joined = false;
-          status("closed");
-        }
-      });
+      // one channel object per connection attempt; a server-side close opens a fresh one
+      const open = () => {
+        const c = sb.channel(topic, { config: { broadcast: { self: false, ack: false }, presence: { key: presenceKey } } });
+        ch = c;
+        c.on("broadcast", { event: "m" }, (m) => {
+          for (const f of msgFns) f(m.payload);
+        });
+        c.on("presence", { event: "sync" }, () => {
+          const state = c.presenceState<PresenceMeta>();
+          const list: PresenceMeta[] = [];
+          for (const k of Object.keys(state)) {
+            const metas = state[k];
+            if (metas.length) list.push(metas[metas.length - 1] as unknown as PresenceMeta);
+          }
+          for (const f of presFns) f(list);
+        });
+        c.subscribe((s) => {
+          if (closed || ch !== c) return;
+          if (s === "SUBSCRIBED") {
+            joined = true;
+            status("connected");
+            if (meta) void c.track(meta);
+          } else if (s === "CHANNEL_ERROR" || s === "TIMED_OUT") {
+            joined = false;
+            status("connecting");
+          } else if (s === "CLOSED") {
+            joined = false;
+            status("connecting");
+            setTimeout(() => {
+              if (closed || ch !== c) return;
+              void sb.removeChannel(c);
+              open();
+            }, 1500);
+          }
+        });
+      };
+      open();
       status("connecting");
       return {
         send(payload) {

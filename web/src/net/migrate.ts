@@ -74,7 +74,7 @@ export async function importLegacySolo(realm: Realm): Promise<number> {
     } catch {
       continue;
     }
-    const source = `solo:slot${i}:${s.name ?? ""}`;
+    const source = `slot${i}:${s.name ?? ""}`;
     const mark = `veyrmarch.solo.imported.${pid}.${i}`;
     try {
       if (localStorage.getItem(mark) === source) continue;
@@ -87,6 +87,14 @@ export async function importLegacySolo(realm: Realm): Promise<number> {
         source, name: s.name, look: s.look, items: s.items ?? [], flags: f,
         kills: Math.round(s.kills ?? 0), deaths: Math.round(s.deaths ?? 0), time: Math.round(s.time ?? 0),
       });
+      // this device's own database: restore the save exactly (the shared import keeps only early gear)
+      await backend.exec("delete from vm_items where character_id = $1::uuid", [c.id]);
+      for (const it of s.items ?? []) await backend.exec("select vm_add_item($1::uuid, $2, $3)", [c.id, it.def, Math.min(99, Math.max(1, it.count | 0))]);
+      for (const it of (s.items ?? []).filter((x) => x.equipped)) await backend.exec("select vm_equip_def($1::uuid, $2)", [c.id, it.def]);
+      await backend.exec(
+        "update vm_characters set flags = flags || $2::jsonb, mana_max = $3, kills = $4, deaths = $5, play_seconds = $6 where id = $1::uuid",
+        [c.id, JSON.stringify({ talked: !!f.talked, ember: !!f.ember, cookie: !!f.cookie, voss: !!f.voss, ended: !!f.ended }), f.ember ? 30 : 0, s.kills ?? 0, s.deaths ?? 0, Math.round(s.time ?? 0)],
+      );
       const w = await realm.createWorld(`${s.name ?? "Walker"}'s Hearthfen`);
       await realm.enter(w.id, c.id);
       const worldFlags = Object.fromEntries(["slab", "nursery", "cookie", "gate"].filter((k) => f[k]).map((k) => [k, true]));

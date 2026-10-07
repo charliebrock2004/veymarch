@@ -111,6 +111,12 @@ create table if not exists vm_grants (
   primary key (world_id, boss, character_id)
 );
 
+-- ------------------------------------------------------------------ migrations for existing databases (idempotent)
+-- a member who left (or was removed) keeps their history but frees the seat
+alter table vm_members add column if not exists left_at timestamptz;
+alter table vm_players add column if not exists imports int not null default 0;
+alter table vm_boss_hits add column if not exists fire boolean not null default false;
+
 do $$
 declare t text;
 begin
@@ -146,11 +152,19 @@ begin
   return v_c;
 end $$;
 
+-- Every function that changes a character's items or flags locks its row first, so two calls
+-- from the same player (a double tap, a script) run one after the other. Lock order is always
+-- world, then member, then character, so concurrent calls never deadlock.
+create or replace function vm_lock_char(p_char uuid) returns void
+language sql security definer set search_path = public as $$
+  select 1 from vm_characters where id = p_char for update
+$$;
+
 create or replace function vm_member(p_world uuid, p_char uuid) returns vm_members
 language plpgsql security definer set search_path = public as $$
 declare v_m vm_members;
 begin
-  select * into v_m from vm_members where world_id = p_world and character_id = p_char;
+  select * into v_m from vm_members where world_id = p_world and character_id = p_char and left_at is null;
   if not found then raise exception 'Not in this world'; end if;
   return v_m;
 end $$;
@@ -185,15 +199,22 @@ begin
     'last_world', v_c.last_world, 'place', v_place);
 end $$;
 
+-- Seats in use: players (other than the owner) with a current, undeleted character in the world.
+create or replace function vm_seats(p_world uuid) returns int
+language sql stable security definer set search_path = public as $$
+  select count(distinct m.player_id)::int from vm_members m join vm_characters c on c.id = m.character_id
+  where m.world_id = p_world and m.left_at is null and not c.deleted
+$$;
+
 create or replace function vm_world_card(p_world uuid, p_player uuid) returns jsonb
 language sql stable security definer set search_path = public as $$
   select jsonb_build_object(
     'id', w.id, 'code', w.code, 'name', w.name, 'mine', w.owner = p_player, 'day', w.day, 'hour', w.hour,
     'max', w.max_players, 'cookie', coalesce((w.flags->>'cookie')::boolean, false), 'gate', coalesce((w.flags->>'gate')::boolean, false),
-    'players', (select count(distinct m.player_id) from vm_members m where m.world_id = w.id),
-    'online', (select count(*) from vm_members m where m.world_id = w.id and m.last_seen > now() - interval '40 seconds'),
+    'players', vm_seats(w.id),
+    'online', (select count(*) from vm_members m where m.world_id = w.id and m.left_at is null and m.last_seen > now() - interval '40 seconds'),
     'members', coalesce((select jsonb_agg(jsonb_build_object('name', c.name, 'online', m.last_seen > now() - interval '40 seconds') order by m.joined_at)
-                         from vm_members m join vm_characters c on c.id = m.character_id where m.world_id = w.id and not c.deleted), '[]'::jsonb))
+                         from vm_members m join vm_characters c on c.id = m.character_id where m.world_id = w.id and m.left_at is null and not c.deleted), '[]'::jsonb))
   from vm_worlds w where w.id = p_world
 $$;
 
@@ -204,7 +225,7 @@ language sql stable security definer set search_path = public as $$
     'nodes', w.nodes, 'dead_mobs', w.dead_mobs, 'max', w.max_players, 'now', now(),
     'members', coalesce((select jsonb_agg(jsonb_build_object('character_id', c.id, 'name', c.name, 'look', c.look,
                                                              'online', m.last_seen > now() - interval '40 seconds') order by m.joined_at)
-                         from vm_members m join vm_characters c on c.id = m.character_id where m.world_id = w.id and not c.deleted), '[]'::jsonb))
+                         from vm_members m join vm_characters c on c.id = m.character_id where m.world_id = w.id and m.left_at is null and not c.deleted), '[]'::jsonb))
   from vm_worlds w where w.id = p_world
 $$;
 
@@ -251,22 +272,28 @@ begin
   return p_n;
 end $$;
 
+-- Removes p_n of an item or raises: callers hold the character lock, and nothing is taken unless all of it is there.
 create or replace function vm_take_item(p_char uuid, p_def text, p_n int) returns boolean
 language plpgsql security definer set search_path = public as $$
-declare v_have int; v_left int := p_n; v_r record;
+declare v_have int; v_left int := p_n; v_r record; v_rows int;
 begin
   select coalesce(sum(count), 0) into v_have from vm_items where character_id = p_char and def = p_def;
-  if v_have < p_n then return false; end if;
-  for v_r in select uid, count from vm_items where character_id = p_char and def = p_def order by equipped, length(uid), uid loop
+  if v_have < p_n then raise exception 'materials'; end if;
+  for v_r in select uid, count from vm_items where character_id = p_char and def = p_def order by equipped, length(uid), uid for update loop
     exit when v_left <= 0;
     if v_r.count <= v_left then
       delete from vm_items where character_id = p_char and uid = v_r.uid;
+      get diagnostics v_rows = row_count;
+      if v_rows <> 1 then raise exception 'materials'; end if;
       v_left := v_left - v_r.count;
     else
-      update vm_items set count = count - v_left where character_id = p_char and uid = v_r.uid;
+      update vm_items set count = count - v_left where character_id = p_char and uid = v_r.uid and count > v_left;
+      get diagnostics v_rows = row_count;
+      if v_rows <> 1 then raise exception 'materials'; end if;
       v_left := 0;
     end if;
   end loop;
+  if v_left > 0 then raise exception 'materials'; end if;
   return true;
 end $$;
 
@@ -316,10 +343,10 @@ language plpgsql security definer set search_path = public as $$
 declare v_online int;
 begin
   select count(*) into v_online from vm_members
-    where world_id = p_world and character_id <> p_char and player_id <> p_player and last_seen > now() - interval '40 seconds';
+    where world_id = p_world and character_id <> p_char and player_id <> p_player and left_at is null and last_seen > now() - interval '40 seconds';
   if v_online >= 4 then raise exception 'Four players are already in that world'; end if;
   insert into vm_members (world_id, character_id, player_id, last_seen) values (p_world, p_char, p_player, now())
-    on conflict (world_id, character_id) do update set last_seen = now();
+    on conflict (world_id, character_id) do update set last_seen = now(), left_at = null;
   update vm_characters set last_world = p_world, updated_at = now() where id = p_char;
   update vm_worlds set updated_at = now() where id = p_world;
   perform vm_tick(p_world);
@@ -348,7 +375,7 @@ begin
     'characters', coalesce((select jsonb_agg(vm_char_json(c.id) order by c.updated_at desc) from vm_characters c
                             where c.player_id = p_player and not c.deleted), '[]'::jsonb),
     'worlds', coalesce((select jsonb_agg(vm_world_card(w.id, p_player) order by w.updated_at desc) from vm_worlds w
-                        where w.owner = p_player or exists (select 1 from vm_members m where m.world_id = w.id and m.player_id = p_player)), '[]'::jsonb));
+                        where w.owner = p_player or exists (select 1 from vm_members m where m.world_id = w.id and m.player_id = p_player and m.left_at is null)), '[]'::jsonb));
 end $$;
 
 create or replace function vm_create_character(p_player uuid, p_secret text, p_name text, p_look jsonb) returns jsonb
@@ -372,27 +399,30 @@ declare v_id uuid; v_it jsonb; v_src text := left(p_payload->>'source', 80); v_f
         v_cookie boolean := coalesce((v_flags->>'cookie')::boolean, false); v_def vm_item_defs; v_best text; v_shield text;
 begin
   perform vm_auth(p_player, p_secret);
-  if v_src is not null then
-    select id into v_id from vm_characters where player_id = p_player and flags->>'imported' = v_src and not deleted;
-    if found then return vm_char_json(v_id); end if;
-  end if;
+  -- a local save is client data: it can bring a character's look, name and early gear, never
+  -- uniques, keys, late-tier items or boss progress (those are earned in a world)
+  v_cookie := false;
+  if v_src is null or v_src !~ '^slot[0-2]:' then raise exception 'That save cannot be imported'; end if;
+  select id into v_id from vm_characters where player_id = p_player and flags->>'imported' = v_src and not deleted;
+  if found then return vm_char_json(v_id); end if;
+  perform 1 from vm_players where id = p_player for update;
+  if (select imports from vm_players where id = p_player) >= 3 then raise exception 'This device has already brought in its saves'; end if;
   if (select count(*) from vm_characters where player_id = p_player and not deleted) >= 6 then
     raise exception 'You already have six characters';
   end if;
+  update vm_players set imports = imports + 1 where id = p_player;
   insert into vm_characters (player_id, name, look, flags, mana_max, kills, deaths, play_seconds)
   values (p_player, vm_clean_name(p_payload->>'name'), vm_clean_look(p_payload->'look'),
-          jsonb_build_object('talked', coalesce((v_flags->>'talked')::boolean, false), 'ember', coalesce((v_flags->>'ember')::boolean, false),
-                             'cookie', v_cookie, 'imported', v_src),
-          case when coalesce((v_flags->>'ember')::boolean, false) then 30 else 0 end,
-          least(greatest(coalesce((p_payload->>'kills')::int, 0), 0), 10000),
-          least(greatest(coalesce((p_payload->>'deaths')::int, 0), 0), 10000),
-          least(greatest(coalesce((p_payload->>'time')::int, 0), 0), 10000000))
+          jsonb_build_object('talked', coalesce((v_flags->>'talked')::boolean, false), 'imported', v_src),
+          0,
+          least(greatest(coalesce((p_payload->>'kills')::int, 0), 0), 100),
+          least(greatest(coalesce((p_payload->>'deaths')::int, 0), 0), 1000),
+          least(greatest(coalesce((p_payload->>'time')::int, 0), 0), 360000))
   returning id into v_id;
   for v_it in select * from jsonb_array_elements(coalesce(p_payload->'items', '[]'::jsonb)) loop
     select * into v_def from vm_item_defs where id = v_it->>'def';
-    continue when not found or v_def.id = 'arm_cloth' or v_def.kind = 'key' and not v_cookie;
-    continue when v_def.soulbound and not v_cookie;
-    perform vm_add_item(v_id, v_def.id, least(greatest(coalesce((v_it->>'count')::int, 1), 1), 99));
+    continue when not found or v_def.id = 'arm_cloth' or v_def.kind = 'key' or v_def.soulbound or v_def.tier >= 4 or v_def.id = 'mat_iron';
+    perform vm_add_item(v_id, v_def.id, least(greatest(coalesce((v_it->>'count')::int, 1), 1), 20));
   end loop;
   perform vm_add_item(v_id, 'arm_cloth', 1);
   update vm_items set equipped = true where character_id = v_id and def = 'arm_cloth';
@@ -410,7 +440,7 @@ begin
   perform vm_own_char(p_player, p_secret, p_char);
   -- soft delete: the row stays so world history (grants, hits) keeps its references
   update vm_characters set deleted = true, updated_at = now() where id = p_char;
-  update vm_members set last_seen = now() - interval '10 minutes' where character_id = p_char;
+  update vm_members set last_seen = now() - interval '10 minutes', left_at = coalesce(left_at, now()) where character_id = p_char;
   return vm_profile(p_player, p_secret);
 end $$;
 
@@ -448,11 +478,13 @@ language plpgsql security definer set search_path = public as $$
 declare v_w vm_worlds; v_code text := upper(regexp_replace(coalesce(p_code, ''), '[^A-Za-z0-9]', '', 'g')); v_players int;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  select * into v_w from vm_worlds where code = v_code;
+  -- lock the world so two people joining at once cannot both take the last seat
+  select * into v_w from vm_worlds where code = v_code for update;
   if not found then raise exception 'No world has that code'; end if;
-  if v_w.owner <> p_player and not exists (select 1 from vm_members where world_id = v_w.id and player_id = p_player) then
-    select count(distinct player_id) into v_players from vm_members where world_id = v_w.id and player_id <> v_w.owner;
-    if v_players + 1 >= v_w.max_players then raise exception 'That world already has four players'; end if;
+  if not exists (select 1 from vm_members m join vm_characters c on c.id = m.character_id
+                 where m.world_id = v_w.id and m.player_id = p_player and m.left_at is null and not c.deleted) then
+    v_players := vm_seats(v_w.id);
+    if v_w.owner <> p_player and v_players >= v_w.max_players then raise exception 'That world already has four players'; end if;
   end if;
   return vm_enter_internal(v_w.id, p_char, p_player);
 end $$;
@@ -462,7 +494,7 @@ language plpgsql security definer set search_path = public as $$
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   if not exists (select 1 from vm_worlds where id = p_world and owner = p_player)
-     and not exists (select 1 from vm_members where world_id = p_world and player_id = p_player) then
+     and not exists (select 1 from vm_members where world_id = p_world and player_id = p_player and left_at is null) then
     raise exception 'Join that world with its code first';
   end if;
   return vm_enter_internal(p_world, p_char, p_player);
@@ -476,10 +508,15 @@ language plpgsql security definer set search_path = public as $$
 declare v_m vm_members; v_dt double precision; v_ok boolean := true; v_w vm_worlds;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  select * into v_m from vm_members where world_id = p_world and character_id = p_char for update;
+  perform vm_tick(p_world);
+  select * into v_m from vm_members where world_id = p_world and character_id = p_char and left_at is null for update;
   if not found then raise exception 'Not in this world'; end if;
   v_dt := greatest(0.2, extract(epoch from now() - v_m.pos_at));
   if v_m.x is not null and v_m.dungeon = p_dungeon and sqrt((p_x - v_m.x) ^ 2 + (p_z - v_m.z) ^ 2) > 9.5 * v_dt + 8 then
+    v_ok := false;
+  end if;
+  -- changing zone needs a door: the castle door outside, the entry hall or the courtyard gate inside
+  if v_m.x is not null and v_m.dungeon <> p_dungeon and not vm_at_portal(v_m.dungeon, v_m.x, v_m.z, v_dt) then
     v_ok := false;
   end if;
   if v_ok then
@@ -491,17 +528,48 @@ begin
   update vm_characters set hp = least(greatest(coalesce(p_hp, hp), 0), max_hp),
                            play_seconds = play_seconds + least(greatest(coalesce(p_play, 0), 0), 60), updated_at = now()
     where id = p_char;
-  perform vm_tick(p_world);
   select * into v_w from vm_worlds where id = p_world;
   return jsonb_build_object('ok', v_ok, 'hour', v_w.hour, 'day', v_w.day, 'flags', v_w.flags, 'boss', v_w.boss, 'now', now(),
     'online', (select count(*) from vm_members where world_id = p_world and last_seen > now() - interval '40 seconds'));
 end $$;
+
+-- Doors between zones (static map data). Walking speed covers the gap since the last save.
+create or replace function vm_at_portal(p_dungeon boolean, p_x real, p_z real, p_dt double precision) returns boolean
+language sql immutable set search_path = pg_catalog as $$
+  select case when p_dungeon
+    then least(sqrt((p_x - 1200) ^ 2 + (p_z - 2.2) ^ 2), sqrt((p_x - 1200) ^ 2 + (p_z - 117.8) ^ 2)) < 12 + 9.5 * least(p_dt, 6)
+    else sqrt(p_x ^ 2 + (p_z - 163.5) ^ 2) < 12 + 9.5 * least(p_dt, 6) end
+$$;
 
 create or replace function vm_leave(p_player uuid, p_secret text, p_world uuid, p_char uuid) returns void
 language plpgsql security definer set search_path = public as $$
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   update vm_members set last_seen = now() - interval '10 minutes' where world_id = p_world and character_id = p_char;
+end $$;
+
+-- Leave a world for good (it disappears from your list and frees your seat). Rejoin with the code.
+create or replace function vm_leave_world(p_player uuid, p_secret text, p_world uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform vm_auth(p_player, p_secret);
+  if exists (select 1 from vm_worlds where id = p_world and owner = p_player) then raise exception 'You made this world: it stays in your list'; end if;
+  update vm_members set left_at = now(), last_seen = now() - interval '10 minutes' where world_id = p_world and player_id = p_player and left_at is null;
+  return vm_profile(p_player, p_secret);
+end $$;
+
+-- The owner frees a seat (a lost phone, a friend who will not be back).
+create or replace function vm_kick(p_player uuid, p_secret text, p_world uuid, p_name text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_target uuid;
+begin
+  perform vm_auth(p_player, p_secret);
+  if not exists (select 1 from vm_worlds where id = p_world and owner = p_player) then raise exception 'Only the world''s maker can do that'; end if;
+  select m.player_id into v_target from vm_members m join vm_characters c on c.id = m.character_id
+    where m.world_id = p_world and m.left_at is null and c.name = p_name and m.player_id <> p_player limit 1;
+  if v_target is null then raise exception 'Nobody by that name'; end if;
+  update vm_members set left_at = now(), last_seen = now() - interval '10 minutes' where world_id = p_world and player_id = v_target and left_at is null;
+  return vm_world_card(p_world, p_player);
 end $$;
 
 create or replace function vm_gather(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_node text) returns jsonb
@@ -513,6 +581,8 @@ begin
   select * into v_n from vm_nodes where id = p_node;
   if not found then raise exception 'Nothing to gather there'; end if;
   select * into v_w from vm_worlds where id = p_world for update;
+  perform vm_lock_char(p_char);
+  select * into v_c from vm_characters where id = p_char;
   if v_n.seal is not null and not coalesce((v_w.flags->>'cookie')::boolean, false) then raise exception 'sealed'; end if;
   if v_n.tier >= 2 and vm_pick_tier(p_char) < v_n.tier then raise exception 'tier'; end if;
   if (v_c.flags->>'gather_at') is not null and (v_c.flags->>'gather_at')::timestamptz > now() - interval '350 milliseconds' then
@@ -537,6 +607,7 @@ declare v_r vm_recipes; v_in record; v_m vm_members; v_d vm_item_defs;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   v_m := vm_member(p_world, p_char);
+  perform vm_lock_char(p_char);
   select * into v_r from vm_recipes where id = p_recipe;
   if not found then raise exception 'Unknown recipe'; end if;
   if v_r.station <> 'hand' then
@@ -549,7 +620,7 @@ begin
     if vm_count(p_char, v_in.item) < v_in.n then raise exception 'materials'; end if;
   end loop;
   for v_in in select item, n from vm_recipe_inputs where recipe = p_recipe loop
-    perform vm_take_item(p_char, v_in.item, v_in.n);
+    if not vm_take_item(p_char, v_in.item, v_in.n) then raise exception 'materials'; end if;
   end loop;
   perform vm_add_item(p_char, v_r.out_item, 1);
   select * into v_d from vm_item_defs where id = v_r.out_item;
@@ -561,6 +632,7 @@ create or replace function vm_equip(p_player uuid, p_secret text, p_char uuid, p
 language plpgsql security definer set search_path = public as $$
 begin
   perform vm_own_char(p_player, p_secret, p_char);
+  perform vm_lock_char(p_char);
   perform vm_equip_uid(p_char, p_uid);
   return jsonb_build_object('items', vm_items_json(p_char));
 end $$;
@@ -570,10 +642,11 @@ language plpgsql security definer set search_path = public as $$
 declare v_d vm_item_defs; v_hp real;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
+  perform vm_lock_char(p_char);
   select d.* into v_d from vm_items i join vm_item_defs d on d.id = i.def where i.character_id = p_char and i.uid = p_uid;
   if not found then raise exception 'You do not have that'; end if;
   if v_d.kind = 'consumable' and v_d.heal > 0 then
-    perform vm_take_item(p_char, v_d.id, 1);
+    if not vm_take_item(p_char, v_d.id, 1) then raise exception 'You do not have that'; end if;
     update vm_characters set hp = least(max_hp, hp + v_d.heal) where id = p_char returning hp into v_hp;
   elsif v_d.slot <> 'none' then
     perform vm_equip_uid(p_char, p_uid);
@@ -587,13 +660,14 @@ declare v_t vm_trades; v_in record;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   perform vm_member(p_world, p_char);
+  perform vm_lock_char(p_char);
   select * into v_t from vm_trades where id = p_trade;
   if not found then raise exception 'Unknown trade'; end if;
   for v_in in select item, n from vm_trade_inputs where trade = p_trade loop
     if vm_count(p_char, v_in.item) < v_in.n then raise exception 'You do not have enough'; end if;
   end loop;
   for v_in in select item, n from vm_trade_inputs where trade = p_trade loop
-    perform vm_take_item(p_char, v_in.item, v_in.n);
+    if not vm_take_item(p_char, v_in.item, v_in.n) then raise exception 'You do not have enough'; end if;
   end loop;
   perform vm_add_item(p_char, v_t.get_item, v_t.get_n);
   return jsonb_build_object('items', vm_items_json(p_char));
@@ -610,6 +684,7 @@ begin
   select * into v_s from vm_mob_spawns where key = p_mob;
   if not found then raise exception 'Unknown foe'; end if;
   select * into v_w from vm_worlds where id = p_world for update;
+  perform vm_lock_char(p_char);
   v_dead := v_w.dead_mobs -> p_mob;
   if v_dead is not null and (jsonb_typeof(v_dead) = 'null' or (v_dead #>> '{}')::timestamptz > now()) then
     return jsonb_build_object('items', vm_items_json(p_char), 'drops', '[]'::jsonb, 'dup', true);
@@ -651,6 +726,7 @@ language plpgsql security definer set search_path = public as $$
 declare v_c vm_characters;
 begin
   v_c := vm_own_char(p_player, p_secret, p_char);
+  perform vm_lock_char(p_char);
   if p_flag = 'ember' then
     if not exists (select 1 from vm_items where character_id = p_char
                    and def in ('wpn_stone_knife', 'wpn_copper_sword', 'wpn_iron_sword', 'wpn_cookie_blade', 'wpn_smacko')) then
@@ -670,8 +746,9 @@ language plpgsql security definer set search_path = public as $$
 declare v_m vm_members; v_r record; v_drops jsonb := '[]'::jsonb;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  select * into v_m from vm_members where world_id = p_world and character_id = p_char for update;
+  select * into v_m from vm_members where world_id = p_world and character_id = p_char and left_at is null for update;
   if not found then raise exception 'Not in this world'; end if;
+  perform vm_lock_char(p_char);
   if p_flag not in ('chest', 'hollow', 'shrine', 'entered') then raise exception 'Unknown flag'; end if;
   if not (v_m.flags ? p_flag) then
     for v_r in select item, n from vm_caches where cache = p_flag loop
@@ -694,8 +771,19 @@ declare v_w vm_worlds; v_b jsonb; v_hp int; v_max int; v_fight int; v_d vm_item_
         v_rec record; v_item text; v_granted boolean := false; v_m vm_members; v_dead boolean := false;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  v_m := vm_member(p_world, p_char);
   select * into v_w from vm_worlds where id = p_world for update;
+  v_m := vm_member(p_world, p_char);
+  -- the hitter must be in the castle courtyard, by its last save (every 5 s while playing)
+  if not v_m.dungeon or v_m.last_seen < now() - interval '20 seconds' or v_m.x is null
+     or sqrt((v_m.x - 1200) ^ 2 + (v_m.z - 104) ^ 2) > 34 then
+    raise exception 'Cookie is not within reach';
+  end if;
+  if p_fire then
+    if (select mana_max from vm_characters where id = p_char) <= 0 then raise exception 'You do not know Ember'; end if;
+    if exists (select 1 from vm_boss_hits where character_id = p_char and world_id = p_world and boss = 'cookie' and fire and at > now() - interval '900 milliseconds') then
+      return jsonb_build_object('hp', (v_w.boss->'cookie'->>'hp')::int, 'max', (v_w.boss->'cookie'->>'max')::int, 'dead', false, 'dealt', 0, 'throttled', true);
+    end if;
+  end if;
   v_b := coalesce(v_w.boss->'cookie', jsonb_build_object('hp', 280, 'max', 280, 'dead', false, 'fight', 1));
   v_hp := (v_b->>'hp')::int;
   v_max := (v_b->>'max')::int;
@@ -720,7 +808,7 @@ begin
   if p_dizzy then v_dmg := v_dmg * 1.3; end if;
   v_dmg := greatest(1, round(v_dmg));
   v_hp := greatest(0, v_hp - v_dmg::int);
-  insert into vm_boss_hits (world_id, boss, character_id, fight, dmg) values (p_world, 'cookie', p_char, v_fight, v_dmg::int);
+  insert into vm_boss_hits (world_id, boss, character_id, fight, dmg, fire) values (p_world, 'cookie', p_char, v_fight, v_dmg::int, p_fire);
   v_b := v_b || jsonb_build_object('hp', v_hp);
   if v_hp <= 0 then
     v_dead := true;
@@ -728,9 +816,11 @@ begin
     update vm_worlds set boss = boss || jsonb_build_object('cookie', v_b), flags = flags || '{"cookie": true}'::jsonb, updated_at = now()
       where id = p_world;
     for v_rec in
-      select distinct h.character_id from vm_boss_hits h where h.world_id = p_world and h.boss = 'cookie' and h.fight = v_fight
-      union
-      select m.character_id from vm_members m where m.world_id = p_world and m.dungeon and m.last_seen > now() - interval '60 seconds'
+      select character_id from (
+        select distinct h.character_id from vm_boss_hits h where h.world_id = p_world and h.boss = 'cookie' and h.fight = v_fight
+        union
+        select m.character_id from vm_members m where m.world_id = p_world and m.left_at is null and m.dungeon and m.last_seen > now() - interval '60 seconds'
+      ) f order by character_id
     loop
       insert into vm_grants (world_id, boss, character_id) values (p_world, 'cookie', v_rec.character_id) on conflict do nothing;
       if found then
@@ -757,6 +847,8 @@ begin
   select * into v_w from vm_worlds where id = p_world for update;
   v_b := v_w.boss->'cookie';
   if v_b is null or coalesce((v_b->>'dead')::boolean, false) then return v_w.boss; end if;
+  -- a fight that is still being fought is not reset (a client with stale state may ask)
+  if exists (select 1 from vm_boss_hits where world_id = p_world and boss = 'cookie' and at > now() - interval '15 seconds') then return v_w.boss; end if;
   v_b := v_b || jsonb_build_object('hp', (v_b->>'max')::int, 'fight', coalesce((v_b->>'fight')::int, 1) + 1);
   update vm_worlds set boss = boss || jsonb_build_object('cookie', v_b), updated_at = now() where id = p_world returning * into v_w;
   return v_w.boss;
@@ -766,6 +858,7 @@ create or replace function vm_died(p_player uuid, p_secret text, p_world uuid, p
 language plpgsql security definer set search_path = public as $$
 begin
   perform vm_own_char(p_player, p_secret, p_char);
+  perform vm_lock_char(p_char);
   update vm_characters set deaths = deaths + 1, hp = max_hp, updated_at = now() where id = p_char;
   -- waking somewhere else is allowed: the next position is not checked against the last one
   update vm_members set x = null, z = null where world_id = p_world and character_id = p_char;
@@ -776,7 +869,7 @@ end $$;
 do $$
 declare f record; api text[] := array['vm_register','vm_profile','vm_create_character','vm_import_character','vm_delete_character','vm_character',
   'vm_create_world','vm_join','vm_enter','vm_heartbeat','vm_leave','vm_gather','vm_craft','vm_equip','vm_use','vm_trade','vm_loot',
-  'vm_world_flag','vm_char_flag','vm_member_flag','vm_boss_hit','vm_boss_reset','vm_died'];
+  'vm_world_flag','vm_char_flag','vm_member_flag','vm_boss_hit','vm_boss_reset','vm_died','vm_leave_world','vm_kick'];
 begin
   for f in select p.oid::regprocedure as sig, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname like 'vm\_%' loop
