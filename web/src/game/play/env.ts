@@ -3,6 +3,7 @@ import type { Audio } from "../engine/audio";
 import type { DecalPool, Flashes, Beam } from "../engine/fx";
 import type { Particles } from "../engine/particles";
 import type { Colliders } from "../world/collide";
+import type { ZoneId } from "../data/zones";
 
 export type PlayerState = {
   x: number;
@@ -16,7 +17,8 @@ export type PlayerState = {
   blockT: number;
   shield: boolean;
   dead: boolean;
-  inDungeon: boolean;
+  /** the zone this player stands in */
+  zone: ZoneId;
   /** connection id of a remote player; undefined for the local one */
   cid?: string;
 };
@@ -46,8 +48,8 @@ export interface Env {
   blocked: (x: number, z: number) => boolean;
   shake: (a: number) => void;
   /** Whether the local player is close enough to hear (and feel) something at x, z. */
-  heard: (x: number, z: number, dungeon: boolean, r?: number) => boolean;
+  heard: (x: number, z: number, zone: ZoneId, r?: number) => boolean;
   floater: (text: string, x: number, y: number, z: number, kind?: "dmg" | "heal" | "info" | "crit" | "fire") => void;
   combat: (on: boolean) => void;
-  parent: (dungeon: boolean) => THREE.Object3D;
+  parent: (zone: ZoneId) => THREE.Object3D;
 }

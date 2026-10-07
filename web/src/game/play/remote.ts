@@ -1,6 +1,7 @@
 import type * as THREE from "three";
 import { Poser, buildHuman, poseHuman, type HumanAction, type HumanLook, type Rig } from "../engine/rig";
 import type { PlayerState } from "./env";
+import type { ZoneId } from "../data/zones";
 import { weaponModel } from "./weapons";
 
 /** What a client sends about its own player every tick. */
@@ -19,7 +20,8 @@ export type NetPlayer = {
   sp: number;
   b: number;
   d: number;
-  dn: number;
+  /** zone */
+  zn: ZoneId;
   hp: number;
   mh: number;
   w: string;
@@ -52,12 +54,12 @@ export class RemotePlayer {
   private held: THREE.Object3D | null = null;
   private off: THREE.Object3D | null = null;
 
-  constructor(public cid: string, public charId: string, public name: string, look: HumanLook, private parent: (dungeon: boolean) => THREE.Object3D, overlay: HTMLElement) {
+  constructor(public cid: string, public charId: string, public name: string, look: HumanLook, private parent: (zone: ZoneId) => THREE.Object3D | null, overlay: HTMLElement) {
     this.rig = buildHuman(look);
     this.poser = new Poser(this.rig);
-    this.state = { x: 0, y: 0, z: 0, yaw: 0, hp: 100, maxHp: 100, iframe: 0, blocking: false, blockT: 0, shield: false, dead: false, inDungeon: false, cid };
+    this.state = { x: 0, y: 0, z: 0, yaw: 0, hp: 100, maxHp: 100, iframe: 0, blocking: false, blockT: 0, shield: false, dead: false, zone: "over", cid };
     this.rig.group.visible = false;
-    parent(false).add(this.rig.group);
+    parent("over")?.add(this.rig.group);
     this.plate = document.createElement("div");
     this.plate.className = "vm-plate";
     this.plate.innerHTML = `<span></span><i><b></b></i>`;
@@ -74,11 +76,12 @@ export class RemotePlayer {
   apply(n: NetPlayer, now: number) {
     if (this.seen) this.gap += (Math.min(400, now - this.seen) - this.gap) * 0.2;
     this.seen = now;
-    const zoneChanged = !this.net || this.net.dn !== n.dn;
+    const zoneChanged = !this.net || this.net.zn !== n.zn;
     this.net = n;
     if (zoneChanged) {
       this.buf.length = 0;
-      this.parent(!!n.dn).add(this.rig.group);
+      this.rig.group.parent?.remove(this.rig.group);
+      this.parent(n.zn)?.add(this.rig.group);
     }
     const last = this.buf[this.buf.length - 1];
     if (last && Math.hypot(last.x - n.x, last.z - n.z) > 12) this.buf.length = 0;
@@ -114,7 +117,7 @@ export class RemotePlayer {
     s.hp = n.hp;
     s.maxHp = n.mh;
     s.dead = !!n.d;
-    s.inDungeon = !!n.dn;
+    s.zone = n.zn;
     s.blocking = !!n.b;
     s.shield = !!n.sh;
   }
@@ -139,7 +142,7 @@ export class RemotePlayer {
     return b[b.length - 1];
   }
 
-  update(dt: number, now: number, time: number, localZone: boolean) {
+  update(dt: number, now: number, time: number, localZone: ZoneId) {
     const n = this.net;
     const g = this.rig.group;
     if (!n || !this.live(now)) {
@@ -155,7 +158,7 @@ export class RemotePlayer {
     this.state.z = s.z;
     this.state.y = s.y;
     this.state.yaw = s.yaw;
-    g.visible = !!n.dn === localZone;
+    g.visible = n.zn === localZone && !!g.parent;
     if (!g.visible) return;
     g.position.set(s.x, s.y, s.z);
     g.rotation.y = s.yaw;

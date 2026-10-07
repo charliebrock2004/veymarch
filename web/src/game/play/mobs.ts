@@ -5,6 +5,7 @@ import {
 } from "../engine/rig";
 import { MOB_LOOT } from "../content";
 import { SILENT, type Env, type PlayerState } from "./env";
+import type { ZoneId } from "../data/zones";
 import { weaponModel } from "./weapons";
 
 /**
@@ -208,14 +209,14 @@ export class Mob {
 
   /** The local player is near enough to hear this foe and feel its blows land. */
   get heard() {
-    return this.env.heard(this.x, this.z, this.dungeon);
+    return this.env.heard(this.x, this.z, this.zone);
   }
 
   private get sfx() {
     return this.heard ? this.env.audio : SILENT;
   }
 
-  constructor(public kind: MobKind, public homeX: number, public homeZ: number, public dungeon: boolean, private env: Env, public respawns = true) {
+  constructor(public kind: MobKind, public homeX: number, public homeZ: number, public zone: ZoneId, private env: Env, public respawns = true) {
     this.cfg = MOBS[kind];
     const made = makeRig(kind);
     this.rig = made.rig;
@@ -226,7 +227,7 @@ export class Mob {
     this.z = this.wz = homeZ;
     this.yaw = Math.random() * Math.PI * 2;
     this.hp = this.cfg.hp;
-    env.parent(dungeon).add(this.rig.group);
+    env.parent(zone).add(this.rig.group);
     this.y = env.groundAt(this.x, this.z);
     this.rig.group.position.set(this.x, this.y, this.z);
   }
@@ -314,7 +315,7 @@ export class Mob {
   private choose(dt: number): PlayerState {
     const env = this.env;
     const all = env.players();
-    const ok = (q: PlayerState) => !q.dead && q.inDungeon === this.dungeon;
+    const ok = (q: PlayerState) => !q.dead && q.zone === this.zone;
     if (this.target && (!ok(this.target) || !all.includes(this.target))) this.target = null;
     this.retargetT -= dt;
     if (!this.target || this.retargetT <= 0) {
@@ -451,11 +452,11 @@ export class Mob {
       if (this.deadT > 3.5) this.rig.group.position.y = this.y - (this.deadT - 3.5) * 0.6;
       if (this.deadT > 5) this.rig.group.visible = false;
       this.respawnT -= dt;
-      if (this.respawnT <= 0 && env.players().every((q) => this.distTo(q.x, q.z) > 45 || q.inDungeon !== this.dungeon)) this.reset();
+      if (this.respawnT <= 0 && env.players().every((q) => this.distTo(q.x, q.z) > 45 || q.zone !== this.zone)) this.reset();
       this.animate(dt);
       return;
     }
-    const sameZone = p.inDungeon === this.dungeon && !p.dead;
+    const sameZone = p.zone === this.zone && !p.dead;
     const d = this.distTo(p.x, p.z);
     const cfg = this.cfg;
     this.cd -= dt;
@@ -594,7 +595,7 @@ export class Mob {
           const oz = atk.ground ? this.z + Math.cos(this.yaw) * 1.4 : this.z;
           // each player is struck at most once per attack
           for (const q of env.players()) {
-            if (q.dead || q.inDungeon !== this.dungeon || this.hitSet.has(q)) continue;
+            if (q.dead || q.zone !== this.zone || this.hitSet.has(q)) continue;
             if (!this.inAttack(atk, ox, oz, q.x, q.z)) continue;
             this.hitSet.add(q);
             env.hurt(q, atk.dmg, this.x, this.z, { knock: atk.knock, source: this, parryable: true, src: this.key });

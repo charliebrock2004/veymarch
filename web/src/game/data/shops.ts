@@ -1,4 +1,4 @@
-import type { ZoneId } from "./zones";
+import type { ZoneId } from "./zones.ts";
 
 /**
  * Shops sell for crowns at the item's value (or the listed price) and buy anything that is not

@@ -1,6 +1,7 @@
 import type * as THREE from "three";
 import { Poser, buildHuman, poseHuman, type HumanAction, type HumanLook, type Rig } from "../engine/rig";
 import { weaponModel } from "./weapons";
+import type { ZoneId } from "../data/zones";
 
 /**
  * Hearthfen's people. Each walks a loop of stops and does something at each one
@@ -19,6 +20,8 @@ export type NpcDef = {
   night?: { x: number; z: number } | "stay";
   hold?: string;
   speed?: number;
+  /** where they live (Hearthfen's people when omitted) */
+  zone?: ZoneId;
 };
 
 export const NPCS: NpcDef[] = [
@@ -138,6 +141,10 @@ export class Npc {
   act: HumanAction = "none";
   private stuck = 0;
   private lastD = 0;
+
+  get zone(): ZoneId {
+    return this.def.zone ?? "over";
+  }
 
   constructor(public def: NpcDef, parent: THREE.Object3D) {
     this.rig = buildHuman(def.look);

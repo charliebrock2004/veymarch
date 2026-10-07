@@ -1259,6 +1259,173 @@ input {
 }
 
 /* ------------------------------------------------ small phones in portrait */
+/* ------------------------------------------------ progression, shops, journal */
+.vm-lvl {
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  background: var(--gold);
+  text-shadow: none;
+}
+.vm-xp {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.vm-xp i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a0c8ff, #e8f0ff);
+}
+.vm-crowns {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--gold);
+}
+.vm-crowns.big {
+  margin: 0 8px 0 auto;
+  font-size: 16px;
+}
+.vm-shopname {
+  margin: 0 0 0 12px;
+  font-size: 15px;
+}
+.vm-slots {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.vm-slots .vm-gslot {
+  padding: 4px;
+  min-height: 52px;
+  color: inherit;
+  cursor: pointer;
+}
+.vm-slots .vm-gslot.on {
+  border-color: var(--gold);
+}
+.vm-slots .vm-empty {
+  width: 30px;
+  height: 30px;
+}
+.vm-gear.vm-scroll {
+  overflow-y: auto;
+  touch-action: pan-y;
+}
+.vm-setbonus {
+  color: var(--gold);
+}
+.vm-rarity {
+  margin: -4px 0 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+.vm-passive {
+  font-style: italic;
+  color: #e8d6a6;
+}
+.vm-banner {
+  position: absolute;
+  top: 20%;
+  left: 0;
+  right: 0;
+  text-align: center;
+  pointer-events: none;
+  z-index: 30;
+  animation: vm-banner 5.2s ease forwards;
+}
+.vm-banner div {
+  display: inline-block;
+  padding: 6px 28px;
+  font-family: var(--display);
+  font-size: clamp(24px, 5vw, 46px);
+  letter-spacing: 0.24em;
+  color: #fff3d0;
+  text-shadow: 0 0 24px rgba(215, 164, 65, 0.8), 0 2px 10px #000;
+  border-top: 1px solid rgba(215, 164, 65, 0.6);
+  border-bottom: 1px solid rgba(215, 164, 65, 0.6);
+  background: linear-gradient(90deg, transparent, rgba(20, 17, 14, 0.55), transparent);
+}
+.vm-banner small {
+  display: block;
+  margin: 8px auto 0;
+  max-width: 70vw;
+  font-size: 14px;
+  color: var(--bone);
+  text-shadow: 0 1px 6px #000;
+}
+@keyframes vm-banner {
+  0% {
+    opacity: 0;
+    transform: scale(1.08);
+  }
+  10% {
+    opacity: 1;
+    transform: none;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.vm-journal {
+  overflow-y: auto;
+  touch-action: pan-y;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+.vm-journal h3 {
+  margin: 8px 0 0;
+  font-family: var(--display);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+}
+.vm-quest {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(231, 220, 200, 0.05);
+  border-left: 3px solid rgba(231, 220, 200, 0.25);
+}
+.vm-quest.main {
+  border-left-color: var(--gold);
+}
+.vm-quest b {
+  font-family: var(--display);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: var(--bone);
+}
+.vm-quest span {
+  color: var(--parch);
+}
+.vm-quest em {
+  font-style: normal;
+  color: var(--gold);
+  margin-left: 6px;
+}
+.vm-quest small {
+  color: var(--muted);
+}
+.vm-quest.done {
+  opacity: 0.55;
+}
+
 @media (orientation: portrait) {
   .vm-vitals {
     width: 44vw;

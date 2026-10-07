@@ -1,4 +1,4 @@
-import type { Station } from "./zones";
+import type { Station } from "./zones.ts";
 
 /**
  * Every item in the slice. Shared with the server (server/gen-seed.mjs writes vm_item_defs and

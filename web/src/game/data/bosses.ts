@@ -1,4 +1,4 @@
-import type { ZoneId } from "./zones";
+import type { ZoneId } from "./zones.ts";
 
 /**
  * Bosses share one shape on the server: a health pool per world, priced hits from the arena,

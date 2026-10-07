@@ -1,5 +1,10 @@
 import * as THREE from "three";
-import { DESCRIPTIONS, ITEMS, MOB_SPAWNS, MORE_LINES, RECIPES, SPEEDS, TRADES } from "./content";
+import { DESCRIPTIONS, ITEMS, MOB_SPAWNS, MORE_LINES, RECIPES, SET_BONUS, SPEEDS, TRADES, type ItemDef } from "./content";
+import { BOSSES } from "./data/bosses.ts";
+import { LEVEL_XP, armourCut, levelOf, statsFor } from "./data/progression.ts";
+import { QUEST_BY_ID, type QuestStep } from "./data/quests.ts";
+import { SELL_RATE, SHOPS } from "./data/shops.ts";
+import { autoStarts, journal, npcBusiness, readyToStep, tracked, type JournalEntry, type QuestBook, type QuestCtx } from "./systems/quests.ts";
 import { addItem, canMine, consume, countOf, equip, equipped, gateOpen, grantUniques, item, recipeHint, strikeDamage, tryCraft, type Stack } from "./rules";
 import { Audio } from "./engine/audio";
 import { Beam, DecalPool, Flashes } from "./engine/fx";
@@ -10,15 +15,16 @@ import { Poser, buildHuman, poseHuman, type HumanAction, type HumanLook, type Ri
 import { buildSky } from "./engine/sky";
 import { blockTex } from "./engine/textures";
 import { buildDungeon, type Dungeon } from "./world/dungeon";
-import { BOUNDS, DUN, DUN_X, GATE, REGION_TITLE, SPAWN, VOSS, regionAt, type Region } from "./world/layout";
+import { DUN, GATE, REGION_TITLE, SPAWN, VOSS, regionAt } from "./world/layout";
+import { PORTALS, STATIONS, STATION_NAMES, ZONES, toWorld, zoneAt, type PortalDef, type Station, type ZoneId } from "./data/zones";
 import { buildOverworld, type NodeDef, type Overworld } from "./world/overworld";
 import { Cookie, type BossSnap } from "./play/boss";
 import type { Env, HurtOpts, PlayerState } from "./play/env";
-import { Mob, type MobKind, type MobSnap } from "./play/mobs";
+import { MOBS, Mob, type MobKind, type MobSnap } from "./play/mobs";
 import { NPCS, Npc, VOSS_NPCS } from "./play/npcs";
 import { RemotePlayer, type NetPlayer } from "./play/remote";
 import { weaponModel } from "./play/weapons";
-import type { BossJson, EnterJson, HeartbeatJson, Realm, StackJson } from "../net/realm";
+import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Realm, StackJson } from "../net/realm";
 import { Room, type Bundle, type Ev } from "../net/room";
 
 // ------------------------------------------------------------------ public types
@@ -31,9 +37,10 @@ export const HAIR_STYLES = ["tied", "short", "long", "bald"] as const;
 export const BODY_NAMES = ["Slight", "Average", "Broad"];
 
 export type Quality = "low" | "medium" | "high";
-export type Mode = "loading" | "title" | "create" | "play" | "bag" | "talk" | "dead" | "reward" | "end" | "pause";
+export type Mode = "loading" | "title" | "create" | "play" | "bag" | "talk" | "dead" | "reward" | "end" | "pause" | "shop" | "journal";
 
-export type SlotInfo = { slot: number; name: string; place: string; progress: string; time: number } | null;
+/** Menus that sit over play (a shared world keeps running behind them). */
+export const MENU_MODES: Mode[] = ["bag", "talk", "pause", "shop", "journal"];
 
 /** Multiplayer status for the HUD; null in single player. */
 export type OnlineHud = {
@@ -73,11 +80,22 @@ export type Hud = {
   placeAt: number;
   toast: string;
   toastId: number;
-  talk: { name: string; role: string; text: string; more: boolean; trades: { id: string; label: string; ok: boolean }[] } | null;
+  talk: { name: string; role: string; text: string; more: boolean; trades: { id: string; label: string; ok: boolean }[]; shop: string | null } | null;
+  /** level, experience inside it (0..1), and the numbers behind it */
+  level: number;
+  xp: number;
+  xpLo: number;
+  xpHi: number;
+  crowns: number;
+  defence: number;
+  /** a full-screen announcement (KINGDOM UNLOCKED, a level, a finished quest) */
+  banner: { title: string; sub: string; at: number } | null;
+  journal: JournalEntry[];
+  shop: { id: string; name: string; buys: boolean; stock: { id: string; name: string; price: number; ok: boolean }[]; sell: { uid: string; id: string; name: string; count: number; price: number }[] } | null;
   boss: { name: string; hp: number; max: number; phase: number } | null;
-  items: { uid: string; id: string; name: string; count: number; equipped: boolean; kind: string; slot: string; desc: string; dmg: number }[];
+  items: { uid: string; id: string; name: string; count: number; equipped: boolean; kind: string; slot: string; desc: string; dmg: number; def: number; rarity: string; tier: number; passive: string; set: string }[];
   crafts: { id: string; name: string; out: string; ok: boolean; have: string; station: string; can: boolean }[];
-  station: "hand" | "bench" | "forge";
+  station: Station;
   hour: number;
   night: boolean;
   reward: { id: string; name: string; desc: string }[] | null;
@@ -86,11 +104,10 @@ export type Hud = {
   hurtAt: number;
   quality: Quality;
   muted: boolean;
-  slots: SlotInfo[];
   combat: boolean;
   charge: number;
-  slot: number;
   inDungeon: boolean;
+  zone: ZoneId;
   fps: number;
   online: OnlineHud | null;
 };
@@ -101,9 +118,6 @@ export type Press =
 export type GameApi = {
   dispose: () => void;
   subscribe: (fn: (h: Hud) => void) => () => void;
-  newGame: (slot: number, name: string, look: Look) => void;
-  continueGame: (slot: number) => void;
-  deleteSlot: (slot: number) => void;
   create: (look: Look) => void;
   preview: (look: Look) => void;
   toTitle: () => void;
@@ -115,15 +129,17 @@ export type GameApi = {
   use: (uid: string) => void;
   craft: (id: string) => void;
   trade: (id: string) => void;
+  openShop: (id: string) => void;
+  buy: (item: string, n: number) => void;
+  sell: (uid: string, n: number) => void;
+  journal: () => void;
   setQuality: (q: Quality) => void;
   setMuted: (m: boolean) => void;
   /** Enters a persistent world with a server character (the result of vm_join / vm_enter). */
   startOnline: (realm: Realm, enter: EnterJson) => void;
 };
 
-// ------------------------------------------------------------------ save format
-
-const SAVE = (slot: number) => `veyrmarch.v2.slot${slot}`;
+// ------------------------------------------------------------------ progress flags
 
 type Flags = {
   talked: boolean;
@@ -139,30 +155,6 @@ type Flags = {
   voss: boolean;
   ended: boolean;
   tanicKnife: boolean;
-};
-
-type Save = {
-  v: 2;
-  name: string;
-  look: Look;
-  x: number;
-  z: number;
-  yaw: number;
-  dungeon: boolean;
-  hp: number;
-  mana: number;
-  maxMana: number;
-  items: Stack[];
-  seals: string[];
-  flags: Flags;
-  nodes: Record<string, number>;
-  hour: number;
-  time: number;
-  deaths: number;
-  kills: number;
-  seq: number;
-  weightX: number;
-  deadMobs: string[];
 };
 
 const freshFlags = (): Flags => ({
@@ -187,9 +179,9 @@ function lookToHuman(l: Look): HumanLook {
 
 // ------------------------------------------------------------------ the game
 
-type Interact = { x: number; z: number; r: number; dungeon: boolean; label: () => string | null; act: () => void; facing?: boolean };
+type Interact = { x: number; z: number; r: number; zone: ZoneId; label: () => string | null; act: () => void; facing?: boolean };
 
-type Projectile = { x: number; y: number; z: number; vx: number; vz: number; life: number; dungeon: boolean };
+type Projectile = { x: number; y: number; z: number; vx: number; vz: number; life: number; zone: ZoneId };
 
 type Floater = { el: HTMLDivElement; x: number; y: number; z: number; life: number; max: number };
 
@@ -267,7 +259,42 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let cookie: Cookie | null = null;
   const mobs: Mob[] = [];
   const npcs: Npc[] = [];
-  let slot = 0;
+
+  // ------------------------------------------------------------ zones
+  /** A built zone: its scene root and what players and foes need to know about its ground. */
+  type ZoneBuild = {
+    root: THREE.Object3D;
+    groundAt: (x: number, z: number) => number;
+    blocked?: (x: number, z: number) => boolean;
+    waterAt?: (x: number, z: number) => number;
+    surfaceAt?: (x: number, z: number) => "wood" | "stone" | "dirt" | "grass";
+    regionAt?: (x: number, z: number) => string;
+    ceiling?: (x: number, z: number) => number;
+    fires: THREE.Vector3[];
+    lamps: THREE.Vector3[];
+    nodes: NodeDef[];
+    update?: (dt: number, t: number) => void;
+  };
+  const zones = new Map<ZoneId, ZoneBuild>();
+  /** every world flag the server has told us about (doors, gates, bosses); `flags` keeps the slice's named ones */
+  const worldFlags: Record<string, boolean> = {};
+  function zoneRoot(z: ZoneId): THREE.Object3D {
+    return (zones.get(z) ?? zones.get("over")!).root;
+  }
+  function groundAt(x: number, z: number) {
+    const b = zones.get(zoneAt(x));
+    return b ? b.groundAt(x, z) : 0;
+  }
+  function blockedAt(x: number, z: number) {
+    const b = zones.get(zoneAt(x));
+    return b?.blocked ? b.blocked(x, z) : false;
+  }
+  function regionTitle(reg: string): [string, string] {
+    const t = (REGION_TITLE as Record<string, [string, string]>)[reg];
+    if (t) return t;
+    const zn = ZONES[reg as ZoneId];
+    return zn ? [zn.name, zn.sub] : [reg, ""];
+  }
   let name = "Walker";
   let look: Look = { body: 1, skin: 1, hair: 0, hairColor: 1, coat: 0 };
   let items: Stack[] = [];
@@ -279,12 +306,27 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let playTime = 0;
   let deaths = 0;
   let kills = 0;
+  // progression (the server owns it; these mirror its last answer)
+  let xp = 0;
+  let level = 1;
+  let xpLo = 0;
+  let xpHi = LEVEL_XP[1];
+  let quests: QuestBook = {};
+  const killCounts: Record<string, number> = {};
+  /** quest calls in flight, or resting after a "not yet": id -> when it may be asked again */
+  const questWait = new Map<string, number>();
+  let questT = 0;
+  let banner: Hud["banner"] = null;
+  let shopId: string | null = null;
+  /** consecutive connecting hits (Smacko's fourth hit lands twice) and a riposte after a parry (Finlay's Longsword) */
+  let hitChain = 0;
+  let riposte = 0;
   let toast = "";
   let toastId = 0;
   let placeName = "";
   let placeSub = "";
   let placeAt = 0;
-  let region: Region | null = null;
+  let region: string | null = null;
   let talk: Hud["talk"] = null;
   let talkQueue: string[] = [];
   let talkTrades = false;
@@ -304,7 +346,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let weightX = 0;
   let respawnShrine = false;
   let introSeen = false;
-  let stationNear: "hand" | "bench" | "forge" = "hand";
+  let stationNear: Station = "hand";
   let prompt = "";
   let promptAct: (() => void) | null = null;
   let deadMobs = new Set<string>();
@@ -357,7 +399,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     holding: boolean; holdT: number; dodgeX: number; dodgeZ: number; stamT: number; hurtT: number; deadT: number; phase: number;
     lastStep: number; regenT: number; emberCd: number; sprint: boolean;
   } = {
-    x: SPAWN.x, y: 0, z: SPAWN.z, yaw: SPAWN.yaw, hp: 100, maxHp: 100, iframe: 0, blocking: false, blockT: 0, shield: false, dead: false, inDungeon: false,
+    x: SPAWN.x, y: 0, z: SPAWN.z, yaw: SPAWN.yaw, hp: 100, maxHp: 100, iframe: 0, blocking: false, blockT: 0, shield: false, dead: false, zone: "over" as ZoneId,
     stam: 100, maxStam: 100, mana: 0, maxMana: 0, vx: 0, vz: 0, kx: 0, kz: 0, speed: 0,
     action: "none", at: 0, dur: 1, hitAt: 0.4, hitDone: true, combo: 0, comboT: 0, queued: false,
     holding: false, holdT: 0, dodgeX: 0, dodgeZ: 0, stamT: 0, hurtT: 0, deadT: 0, phase: 0, lastStep: 0, regenT: 0, emberCd: 0, sprint: false,
@@ -400,13 +442,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     hurt: (q, d, sx, sz, o) => (q === P ? env.hurtPlayer(d, sx, sz, o) : netHurt(q, d, sx, sz, o)),
     dust, sparks, decals, flashes, beam, audio,
     col: null as unknown as Env["col"],
-    groundAt: (x, z) => (world ? world.groundAt(x, z) : 0),
-    blocked: (x, z) => (world ? world.inRiver(x, z) : false),
+    groundAt: (x, z) => groundAt(x, z),
+    blocked: (x, z) => blockedAt(x, z),
     shake: (a) => (shake = Math.max(shake, a)),
-    heard: (x, z, d, r = 45) => d === P.inDungeon && Math.hypot(x - P.x, z - P.z) < r,
+    heard: (x, z, zn, r = 45) => zn === P.zone && Math.hypot(x - P.x, z - P.z) < r,
     floater: (t, x, y, z, k) => floater(t, x, y, z, k),
     combat: () => (combatT = 3),
-    parent: (d) => (d ? dun!.root : world!.root),
+    parent: (zn) => zoneRoot(zn),
   };
 
   // ------------------------------------------------------------ helpers
@@ -453,7 +495,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const seen = new Set<number>();
     const list: { id: number; x: number; y: number; z: number; hp: number; max: number }[] = [];
     if (mode === "play") {
-      for (const m of mobs) if (m.alive && m.hp < m.max && m.dungeon === P.inDungeon && m.distTo(P.x, P.z) < 26) list.push({ id: m.id, x: m.x, y: m.y + m.cfg.height + 0.5, z: m.z, hp: m.hp, max: m.max });
+      for (const m of mobs) if (m.alive && m.hp < m.max && m.zone === P.zone && m.distTo(P.x, P.z) < 26) list.push({ id: m.id, x: m.x, y: m.y + m.cfg.height + 0.5, z: m.z, hp: m.hp, max: m.max });
       if (cookie) for (const m of cookie.toys) if (m.alive && m.hp < m.max) list.push({ id: m.id, x: m.x, y: m.y + m.cfg.height + 0.5, z: m.z, hp: m.hp, max: m.max });
     }
     for (const b of list) {
@@ -502,6 +544,25 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     return item(eq?.def ?? "wpn_fists");
   }
 
+  function equippedDefs(): ItemDef[] {
+    const out: ItemDef[] = [];
+    for (const s of items) if (s.equipped && ITEMS[s.def]) out.push(ITEMS[s.def]);
+    return out;
+  }
+  /** Body armour (not the shield, which works by blocking). */
+  function gearDefence() {
+    let d = 0;
+    for (const it of equippedDefs()) if (it.kind === "armour" && it.slot !== "off") d += it.defence;
+    return d;
+  }
+  function setWorn(set: string) {
+    return equippedDefs().filter((it) => it.set === set).length >= (SET_BONUS[set]?.pieces ?? 5);
+  }
+  /** Weapon speed by family: daggers are quick, greatswords take their time. */
+  function swingScale(w: ItemDef) {
+    return ({ dagger: 0.82, fists: 0.85, sword: 1, spear: 1.05, mace: 1.1, axe: 1.12, greatsword: 1.28, pick: 1 } as Record<string, number>)[w.family] ?? 1;
+  }
+
   function syncGear() {
     if (!playerRig) return;
     const w = mainWeapon();
@@ -511,12 +572,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       heldMain = weaponModel(w.id);
       playerRig.sockets.gripR.add(heldMain);
     }
-    const sh = items.some((s) => s.equipped && item(s.def).moveset === "shield");
+    const shield = items.find((s) => s.equipped && ITEMS[s.def]?.moveset === "shield");
+    const sh = !!shield;
     P.shield = sh;
     if (heldOff) heldOff.parent?.remove(heldOff);
     heldOff = null;
     if (sh) {
-      heldOff = weaponModel("shield");
+      heldOff = weaponModel(shield.def === "arm_stump_shield" ? "shield" : shield.def);
       heldOff.rotation.set(0, Math.PI / 2, 0);
       heldOff.position.set(0.06, 0.05, -0.1);
       playerRig.bones.foreL.add(heldOff);
@@ -528,7 +590,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (playerRig) playerRig.group.parent?.remove(playerRig.group);
     playerRig = buildHuman(lookToHuman(look));
     playerPoser = new Poser(playerRig);
-    (P.inDungeon ? dun!.root : world.root).add(playerRig.group);
+    zoneRoot(P.zone).add(playerRig.group);
     heldMain = heldOff = null;
     syncGear();
   }
@@ -552,8 +614,85 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const nodeState = new Map<string, { left: number; regrow: number }>();
 
   // ------------------------------------------------------------ objective
+  /** The first portal on the way from this zone toward another (doors form a small graph). */
+  function wayTo(target: ZoneId): THREE.Vector3 | null {
+    if (target === P.zone) return null;
+    const prev = new Map<ZoneId, PortalDef>();
+    const seen = new Set<ZoneId>([P.zone]);
+    const queue: ZoneId[] = [P.zone];
+    while (queue.length) {
+      const z = queue.shift()!;
+      for (const p of PORTALS) {
+        if (p.from !== z || seen.has(p.to)) continue;
+        seen.add(p.to);
+        prev.set(p.to, p);
+        queue.push(p.to);
+      }
+    }
+    let step = prev.get(target);
+    if (!step) return null;
+    while (step.from !== P.zone) step = prev.get(step.from)!;
+    const w = toWorld(step.from, step.x, step.z);
+    return new THREE.Vector3(w.x, 0, w.z);
+  }
+
+  /** Where a quest step points: its NPC, place, foe, boss arena or the door toward its zone. */
+  function stepTarget(step: QuestStep): THREE.Vector3 | null {
+    if (step.npc) {
+      const n = npcs.find((x) => x.def.id === step.npc);
+      if (n) return n.zone === P.zone ? new THREE.Vector3(n.x, 0, n.z) : wayTo(n.zone);
+    }
+    if (step.zone) {
+      if (step.zone !== P.zone) return wayTo(step.zone);
+      if (step.x !== undefined && step.z !== undefined) return new THREE.Vector3(ZONES[step.zone].ox + step.x, 0, step.z);
+      return null;
+    }
+    if (step.boss) {
+      const b = BOSSES[step.boss];
+      if (b) return b.zone === P.zone ? new THREE.Vector3(ZONES[b.zone].ox + b.x, 0, b.z) : wayTo(b.zone);
+    }
+    if (step.kind) {
+      let best: Mob | null = null;
+      for (const m of mobs) if (m.alive && m.kind === step.kind && m.zone === P.zone && (!best || m.distTo(P.x, P.z) < best.distTo(P.x, P.z))) best = m;
+      if (best) return new THREE.Vector3(best.x, 0, best.z);
+      const sp = MOB_SPAWNS.find((x) => x[1] === step.kind);
+      if (sp && sp[4] !== P.zone) return wayTo(sp[4]);
+    }
+    if (step.item) {
+      const want = step.item.split("|");
+      let best: NodeDef | null = null;
+      let bd = 1e9;
+      for (const n of zones.get(P.zone)?.nodes ?? [])
+        if (want.includes(n.item) && nodeLeft(n) > 0) {
+          const d = Math.hypot(n.x - P.x, n.z - P.z);
+          if (d < bd) {
+            bd = d;
+            best = n;
+          }
+        }
+      if (best) return new THREE.Vector3(best.x, 0, best.z);
+    }
+    return null;
+  }
+
   function objective(): { text: string; sub: string; at: THREE.Vector3 | null } {
     if (!world || !dun) return { text: "", sub: "", at: null };
+    const q = online ? tracked(quests) : null;
+    if (q) {
+      const st = quests[q.id];
+      const step = q.steps[st.s];
+      if (step) {
+        // the castle's own puzzle points at its pieces
+        if (step.k === "flag" && step.flag === "slab" && P.zone === "castle") return { text: step.text, sub: step.sub, at: dun.weight.position.clone() };
+        if (step.k === "flag" && step.flag === "nursery" && P.zone === "castle") {
+          const horse = mobs.find((m) => m.kind === "horse" && m.alive);
+          return { text: step.text, sub: step.sub, at: horse ? new THREE.Vector3(horse.x, 0, horse.z) : dun.anchors.nurseryDoor };
+        }
+        if (step.k === "flag" && step.flag === "gate") return { text: step.text, sub: step.sub, at: P.zone === "over" ? world.anchors.gate : wayTo("over") };
+        const prog = step.k === "kill" ? ` · ${Math.min(step.n ?? 1, Math.max(0, (killCounts[step.kind!] ?? 0) - st.b))}/${step.n ?? 1}` : (step.k === "have" || step.k === "give") && (step.n ?? 1) > 1 ? ` · ${Math.min(step.n ?? 1, step.item!.split("|").reduce((n, id) => Math.max(n, countOf(items, id)), 0))}/${step.n}` : "";
+        return { text: step.text, sub: step.sub + prog, at: stepTarget(step) };
+      }
+    }
     const a = world.anchors;
     const tanic = npcs.find((n) => n.def.id === "tanic");
     const tanicAt = tanic ? new THREE.Vector3(tanic.x, 0, tanic.z) : a.tanicDoor;
@@ -578,7 +717,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     if (!flags.ember) return { text: "Show Tanic your knife", sub: "Workshop lane", at: tanicAt };
     if (!flags.cookie) {
-      if (!P.inDungeon) return { text: "Find Cookie's Castle", sub: "North through the Giant Forest, up the hill", at: a.castleDoor };
+      if (P.zone !== "castle") return { text: "Find Cookie's Castle", sub: "North through the Giant Forest, up the hill", at: a.castleDoor };
       if (!flags.slab) return { text: "Move the brass weight", sub: "Push it onto the plate, or heave it", at: dun.weight.position.clone() };
       if (!flags.nursery) {
         const horse = mobs.find((m) => m.kind === "horse" && m.alive);
@@ -586,7 +725,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }
       return { text: "Defeat Cookie", sub: "The nursery courtyard. Dodge the bow.", at: dun.anchors.arena };
     }
-    if (P.inDungeon) return { text: "Leave the castle", sub: "The courtyard gate is open", at: dun.anchors.exitGate };
+    if (P.zone === "castle") return { text: "Leave the castle", sub: "The courtyard gate is open", at: dun.anchors.exitGate };
     if (!flags.gate) return { text: "Take the Core to the Green Gate", sub: "East of Hearthfen, over the Broken Kingsbridge", at: a.gate };
     if (!flags.voss) return { text: "Walk the wheat", sub: "Harrenvale road, to Castellan Voss", at: a.voss };
     return { text: "The Kingdom waits", sub: "End of the slice. Cookie's Pickaxe breaks the iron by the gate.", at: null };
@@ -598,12 +737,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const obj = objective();
     let bearing: number | null = null;
     let dist = 0;
-    if (obj.at && (obj.at.x > DUN_X - 200) === P.inDungeon) {
+    if (obj.at && zoneAt(obj.at.x) === P.zone) {
       const ang = Math.atan2(obj.at.x - P.x, obj.at.z - P.z);
       bearing = Math.atan2(Math.sin(ang - camYaw), Math.cos(ang - camYaw));
       dist = Math.hypot(obj.at.x - P.x, obj.at.z - P.z);
     }
-    const bossOn = cookie && cookie.fighting && P.inDungeon;
+    const bossOn = cookie && cookie.fighting && P.zone === "castle";
     return {
       mode, loading, name,
       hp: Math.ceil(P.hp), maxHp: P.maxHp, stam: P.stam, maxStam: P.maxStam, mana: P.mana, maxMana: P.maxMana,
@@ -612,10 +751,16 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       prompt, objective: obj.text, objectiveSub: obj.sub, bearing, dist, camYaw,
       place: placeName, placeSub, placeAt, toast, toastId, talk,
       boss: bossOn ? { name: "Evil Toy Penguin Caller Cookie", hp: cookie!.hp, max: cookie!.max, phase: cookie!.phaseN } : null,
-      items: items.map((s) => {
+      items: items.filter((s) => ITEMS[s.def] && ITEMS[s.def].kind !== "coin").map((s) => {
         const d = item(s.def);
-        return { uid: s.uid, id: s.def, name: d.name, count: s.count, equipped: s.equipped, kind: d.kind, slot: d.slot, desc: DESCRIPTIONS[s.def] ?? "", dmg: d.damage };
+        return {
+          uid: s.uid, id: s.def, name: d.name, count: s.count, equipped: s.equipped, kind: d.kind, slot: d.slot, desc: DESCRIPTIONS[s.def] ?? "",
+          dmg: d.damage, def: d.defence, rarity: d.rarity, tier: d.tier, passive: d.passive ?? "", set: d.set ?? "",
+        };
       }),
+      level, xp, xpLo, xpHi, crowns: countOf(items, "coin_crown"), defence: gearDefence(), banner,
+      journal: online && (mode === "journal" || mode === "pause") ? journal(quests, questCtx()) : [],
+      shop: mode === "shop" && shopId ? shopView(shopId) : null,
       crafts: RECIPES.map((r) => {
         const have = r.inputs.every((i) => countOf(items, i.id) >= i.n);
         const can = r.station === "hand" || r.station === stationNear;
@@ -624,78 +769,15 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       station: stationNear,
       hour, night: hour >= 20.5 || hour < 5.5,
       reward, fade, stats: { time: playTime, deaths, kills }, hurtAt, quality, muted: audio.muted,
-      slots: mode === "title" || mode === "loading" || !slotCache ? (slotCache = readSlots()) : slotCache, combat: combatT > 0, charge: P.holding ? Math.min(1, P.holdT / 0.35) : 0, slot,
-      inDungeon: P.inDungeon, fps: Math.round(fps),
+      combat: combatT > 0, charge: P.holding ? Math.min(1, P.holdT / 0.35) : 0,
+      inDungeon: ZONES[P.zone].indoor, zone: P.zone, fps: Math.round(fps),
       online: online ? onlineHud() : null,
     };
   }
-  let slotCache: SlotInfo[] | null = null;
   function push() {
     if (!subs.size) return;
     const s = snapshot();
     for (const f of subs) f(s);
-  }
-
-  // ------------------------------------------------------------ saves
-  function readSlots(): SlotInfo[] {
-    const out: SlotInfo[] = [];
-    for (let i = 0; i < 3; i++) {
-      try {
-        const raw = localStorage.getItem(SAVE(i));
-        if (!raw) {
-          out.push(null);
-          continue;
-        }
-        const s = JSON.parse(raw) as Save;
-        const progress = s.flags.voss ? "Reached the Kingdom" : s.flags.gate ? "The Green Gate is open" : s.flags.cookie ? "Cookie is defeated" : s.flags.entered ? "Inside Cookie's Castle" : s.flags.ember ? "Carries Ember" : s.flags.talked ? "Met Tanic" : "Just woke";
-        const reg = s.dungeon ? "Cookie's Castle" : REGION_TITLE[regionAt(s.x, s.z)][0];
-        out.push({ slot: i, name: s.name, place: reg, progress, time: s.time });
-      } catch {
-        out.push(null);
-      }
-    }
-    return out;
-  }
-
-  function persist() {
-    // online characters and worlds live on the server: important changes are sent as they happen
-    if (online) return;
-    if (mode === "title" || mode === "create" || mode === "loading" || !world) return;
-    const s: Save = {
-      v: 2, name, look, x: P.x, z: P.z, yaw: P.yaw, dungeon: P.inDungeon, hp: Math.max(1, P.hp), mana: P.mana, maxMana: P.maxMana,
-      items, seals, flags, nodes: Object.fromEntries([...nodeState].map(([k, v]) => [k, v.left])), hour, time: playTime, deaths, kills, seq,
-      weightX, deadMobs: [...deadMobs],
-    };
-    try {
-      localStorage.setItem(SAVE(slot), JSON.stringify(s));
-    } catch {
-      /* storage full or blocked: play on */
-    }
-  }
-
-  function load(s: Save) {
-    name = s.name;
-    look = s.look;
-    P.x = s.x;
-    P.z = s.z;
-    P.yaw = s.yaw;
-    P.inDungeon = s.dungeon;
-    P.hp = s.hp;
-    P.mana = s.mana;
-    P.maxMana = s.maxMana;
-    items = s.items;
-    seals = s.seals;
-    flags = { ...freshFlags(), ...s.flags };
-    nodeState.clear();
-    for (const [k, v] of Object.entries(s.nodes ?? {})) nodeState.set(k, { left: v, regrow: 0 });
-    hour = s.hour;
-    playTime = s.time;
-    deaths = s.deaths;
-    kills = s.kills;
-    seq = s.seq;
-    weightX = s.weightX ?? 0;
-    deadMobs = new Set(s.deadMobs ?? []);
-    deadLeft.clear();
   }
 
   // ------------------------------------------------------------ world build (async so the loader can paint)
@@ -713,11 +795,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     world = buildOverworld(M, { gate: () => flags.gate || (gateOpening && gateT > 0.8) });
     env.col = world.col;
     scene.add(world.root);
+    zones.set("over", { root: world.root, groundAt: world.groundAt, blocked: world.inRiver, fires: world.fires, lamps: world.lamps, nodes: world.nodes });
     loading = 0.6;
     push();
     await tick();
     dun = buildDungeon(M, world.col, { slab: () => flags.slab, nursery: () => flags.nursery, exit: () => flags.cookie });
     scene.add(dun.root);
+    zones.set("castle", { root: dun.root, groundAt: () => 0, fires: dun.fires, lamps: [], nodes: [] });
     const glows = buildGlows([...world.glows, ...dun.glows], pxScale, glowI);
     scene.add(glows.points);
     glowTime = glows.time;
@@ -750,17 +834,18 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     mobKey.clear();
     mobByKey.clear();
     // dungeon positions in the table are relative to the castle interior
-    for (const [key, k, x0, z, zone] of MOB_SPAWNS) {
-      if (zone !== "over" && zone !== "castle") continue;
-      const d = zone === "castle";
+    for (const [key, k, x0, z0, zone] of MOB_SPAWNS) {
+      // foes of zones not built yet, or of kinds this build cannot draw, wait for their zone
+      if (!zones.has(zone) || !(k in MOBS)) continue;
       const kind = k as MobKind;
-      const m = new Mob(kind, d ? DUN_X + x0 : x0, z, d, env, !d && kind !== "soldier");
+      const w = toWorld(zone, x0, z0);
+      const m = new Mob(kind, w.x, w.z, zone, env, !ZONES[zone].indoor && kind !== "soldier" && k !== "kennelmaster");
       m.key = key;
       mobs.push(m);
       mobKey.set(m, key);
       mobByKey.set(key, m);
       const left = deadLeft.get(key);
-      if (deadMobs.has(key) || left !== undefined || (online && flags.cookie && kind === "soldier" && !d)) {
+      if (deadMobs.has(key) || left !== undefined || (online && flags.cookie && kind === "soldier" && zone === "over")) {
         m.alive = false;
         m.state = "dead";
         m.deadT = 10;
@@ -783,25 +868,35 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (!world || !dun) return;
     const a = world.anchors;
     const d = dun.anchors;
-    for (const n of world.nodes) {
-      interacts.push({
-        x: n.x, z: n.z, r: 2.2, dungeon: false,
-        label: () => (nodeLeft(n) > 0 ? "Gather " + item(n.item).name : null),
-        act: () => gather(n),
-      });
-    }
+    for (const [zid, zb] of zones)
+      for (const n of zb.nodes) {
+        interacts.push({
+          x: n.x, z: n.z, r: 2.2, zone: zid,
+          label: () => (nodeLeft(n) > 0 ? "Gather " + item(n.item).name : null),
+          act: () => gather(n),
+        });
+      }
     for (const npc of npcs) {
       interacts.push({
-        x: 0, z: 0, r: 2.4, dungeon: false,
+        x: 0, z: 0, r: 2.4, zone: "over",
         label: () => (npc.rig.group.visible ? "Talk · " + npc.def.name : null),
         act: () => talkTo(npc),
       });
       (interacts[interacts.length - 1] as Interact & { npc?: Npc }).npc = npc;
     }
-    interacts.push({ x: a.bench.x, z: a.bench.z, r: 2.6, dungeon: false, label: () => "Workbench", act: () => openBag() });
-    interacts.push({ x: a.forge.x, z: a.forge.z, r: 2.8, dungeon: false, label: () => "Mara's Forge", act: () => openBag() });
+    for (const st of STATIONS) {
+      if (!zones.has(st.zone)) continue;
+      const w = toWorld(st.zone, st.x, st.z);
+      interacts.push({ x: w.x, z: w.z, r: Math.min(2.8, st.r), zone: st.zone, label: () => st.name, act: () => openBag() });
+    }
+    for (const p of PORTALS) {
+      if (p.edge || !zones.has(p.from)) continue;
+      const w = toWorld(p.from, p.x, p.z);
+      const label = p.id === "castle_over_gate" ? () => (flags.cookie && bossDoneT < 0 && mode === "play" ? p.label : null) : () => p.label;
+      interacts.push({ x: w.x, z: w.z, r: p.r, zone: p.from, label, act: () => travel(p) });
+    }
     interacts.push({
-      x: a.bed.x, z: a.bed.z, r: 2.0, dungeon: false, label: () => "Rest (your bedroll)",
+      x: a.bed.x, z: a.bed.z, r: 2.0, zone: "over", label: () => "Rest (your bedroll)",
       act: () => fadeThen(() => {
         if (!online) {
           if (hour > 18 || hour < 6) hour = 6.6;
@@ -824,11 +919,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         P.mana = P.maxMana;
         respawnShrine = false;
         say("You rest. Mended.");
-        persist();
       }),
     });
     interacts.push({
-      x: a.chest.x, z: a.chest.z, r: 1.8, dungeon: false, label: () => (flags.chest ? null : "Open your chest"),
+      x: a.chest.x, z: a.chest.z, r: 1.8, zone: "over", label: () => (flags.chest ? null : "Open your chest"),
       act: () => {
         flags.chest = true;
         if (online) memberFlag("chest");
@@ -837,7 +931,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       },
     });
     interacts.push({
-      x: a.hollow.x, z: a.hollow.z, r: 2.0, dungeon: false, label: () => (flags.hollow ? null : "Search the hollow"),
+      x: a.hollow.x, z: a.hollow.z, r: 2.0, zone: "over", label: () => (flags.hollow ? null : "Search the hollow"),
       act: () => {
         flags.hollow = true;
         if (online) memberFlag("hollow");
@@ -847,7 +941,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       },
     });
     interacts.push({
-      x: a.shrine.x, z: a.shrine.z, r: 2.6, dungeon: false, label: () => "Rest at the shrine",
+      x: a.shrine.x, z: a.shrine.z, r: 2.6, zone: "over", label: () => "Rest at the shrine",
       act: () => {
         if (online && !flags.shrine) memberFlag("shrine");
         flags.shrine = true;
@@ -857,11 +951,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         sparks.burst(30, a.shrine.x, world!.groundAt(a.shrine.x, a.shrine.z) + 1.2, a.shrine.z, 2, 0xffd28a, 1.2, 0.2, { up: 1.5, grav: -0.5 });
         audio.bell(0.12, 523);
         openTalkLines("Ruined shrine", "Giant Forest", MORE_LINES.shrine);
-        persist();
       },
     });
     interacts.push({
-      x: a.bell.x, z: a.bell.z, r: 2.6, dungeon: false, label: () => "Ring the bell",
+      x: a.bell.x, z: a.bell.z, r: 2.6, zone: "over", label: () => "Ring the bell",
       act: () => {
         ringT = 3;
         audio.bell(0.3, 330);
@@ -869,7 +962,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       },
     });
     interacts.push({
-      x: a.well.x, z: a.well.z, r: 2.0, dungeon: false, label: () => "Drink from the well",
+      x: a.well.x, z: a.well.z, r: 2.0, zone: "over", label: () => "Drink from the well",
       act: () => {
         const h = Math.min(P.maxHp - P.hp, 15);
         P.hp += h;
@@ -877,17 +970,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       },
     });
     interacts.push({
-      x: a.castleDoor.x, z: a.castleDoor.z, r: 3.2, dungeon: false, label: () => "Enter Cookie's Castle",
-      act: () => {
-        if (!hasEdge()) {
-          openTalkLines("", "", MORE_LINES.noEdge);
-          return;
-        }
-        fadeThen(() => enterDungeon());
-      },
-    });
-    interacts.push({
-      x: a.gate.x, z: a.gate.z, r: 4.5, dungeon: false, label: () => (flags.gate || gateOpening ? null : "The Green Gate"),
+      x: a.gate.x, z: a.gate.z, r: 4.5, zone: "over", label: () => (flags.gate || gateOpening ? null : "The Green Gate"),
       act: () => {
         if (gateOpen(seals)) startGate();
         else {
@@ -897,9 +980,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       },
     });
     // dungeon
-    interacts.push({ x: d.entry.x, z: d.entry.z - 1.6, r: 2.4, dungeon: true, label: () => "Leave the castle", act: () => fadeThen(() => leaveDungeon()) });
     interacts.push({
-      x: 0, z: 0, r: 2.6, dungeon: true, label: () => (flags.slab ? null : "Heave the weight"),
+      x: 0, z: 0, r: 2.6, zone: "castle", label: () => (flags.slab ? null : "Heave the weight"),
       act: () => {
         weightX = Math.min(9, weightX + 1.6);
         audio.thud();
@@ -909,16 +991,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     });
     (interacts[interacts.length - 1] as Interact & { weight?: boolean }).weight = true;
     interacts.push({
-      x: d.nurseryDoor.x, z: d.nurseryDoor.z, r: 2.8, dungeon: true, label: () => (flags.nursery ? null : "Painted door"),
+      x: d.nurseryDoor.x, z: d.nurseryDoor.z, r: 2.8, zone: "castle", label: () => (flags.nursery ? null : "Painted door"),
       act: () => {
         const horse = mobs.find((m) => m.kind === "horse");
         if (horse && horse.alive && (!online || !deadLeft.has("dh"))) openTalkLines("", "", MORE_LINES.horseDoor);
         else openNursery();
       },
-    });
-    interacts.push({
-      x: d.exitGate.x, z: d.exitGate.z, r: 3.0, dungeon: true, label: () => (flags.cookie && bossDoneT < 0 && mode === "play" ? "Out to the hill" : null),
-      act: () => fadeThen(() => leaveDungeon()),
     });
   }
 
@@ -927,7 +1005,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     promptAct = null;
     let best = 1e9;
     for (const it of interacts) {
-      if (it.dungeon !== P.inDungeon) continue;
+      if (it.zone !== P.zone) continue;
       let x = it.x;
       let z = it.z;
       const npc = (it as Interact & { npc?: Npc }).npc;
@@ -953,7 +1031,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     if (online)
       for (const r of online.remotes.values()) {
-        if (!r.state.dead || r.state.inDungeon !== P.inDungeon || !r.live(performance.now())) continue;
+        if (!r.state.dead || r.state.zone !== P.zone || !r.live(performance.now())) continue;
         const d = Math.hypot(r.state.x - P.x, r.state.z - P.z);
         if (d > 2.6 || d >= best) continue;
         best = d;
@@ -966,10 +1044,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         };
       }
     stationNear = "hand";
-    if (world && !P.inDungeon) {
-      if (Math.hypot(world.anchors.bench.x - P.x, world.anchors.bench.z - P.z) < 3.4) stationNear = "bench";
-      if (Math.hypot(world.anchors.forge.x - P.x, world.anchors.forge.z - P.z) < 3.6) stationNear = "forge";
-    }
+    for (const st of STATIONS)
+      if (st.zone === P.zone && Math.hypot(ZONES[st.zone].ox + st.x - P.x, st.z - P.z) < st.r) {
+        stationNear = st.kind;
+        break;
+      }
   }
 
   function loot(list: [string, number][]) {
@@ -1037,7 +1116,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   // ------------------------------------------------------------ talking
   function openTalkLines(nm: string, role: string, lines: string[], end?: () => void, trades = false) {
     talkQueue = [...lines];
-    talk = { name: nm, role, text: talkQueue.shift() ?? "", more: talkQueue.length > 0, trades: trades ? tradeList() : [] };
+    talk = { name: nm, role, text: talkQueue.shift() ?? "", more: talkQueue.length > 0, trades: trades ? tradeList() : [], shop: talkShop };
     talkTrades = trades;
     onTalkEnd = end ?? null;
     mode = "talk";
@@ -1050,7 +1129,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function advanceTalk() {
     if (!talk) return;
     if (talkQueue.length) {
-      talk = { ...talk, text: talkQueue.shift()!, more: talkQueue.length > 0, trades: talkTrades && !talkQueue.length ? tradeList() : [] };
+      talk = { ...talk, text: talkQueue.shift()!, more: talkQueue.length > 0, trades: talkTrades && !talkQueue.length ? tradeList() : [], shop: talkShop };
       audio.ui();
       push();
       return;
@@ -1065,10 +1144,44 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     push();
   }
 
+  let talkShop: string | null = null;
+
   function talkTo(npc: Npc) {
     talkNpc = npc;
     npc.talkT = 999;
     const id = npc.def.id;
+    const keeps = SHOPS.find((sh) => sh.keeper === id && sh.zone === npc.zone);
+    talkShop = keeps ? keeps.id : null;
+    // quests first: an offer, or a step that is about this NPC
+    const biz = online ? npcBusiness(quests, id, level, questCtx()) : null;
+    if (biz?.kind === "offer") {
+      const q = biz.quest;
+      openTalkLines(npc.def.name, npc.def.role, q.offer, () => questCall(q.id, "start"));
+      return;
+    }
+    if (biz?.kind === "step") {
+      const q = biz.quest;
+      const step = biz.step;
+      if (biz.ready) {
+        const lines = step.lines?.length ? step.lines : step.k === "give" ? [`You hand over ${step.n ?? 1} ${item(step.item!.split("|")[0]).name}.`] : [];
+        const after = () =>
+          questCall(q.id, "step", false, (r) => {
+            if (r.done && q.thanks.length) openTalkLines(npc.def.name, npc.def.role, q.thanks);
+          });
+        if (lines.length) openTalkLines(npc.def.name, npc.def.role, lines, after);
+        else {
+          after();
+          talkNpc = null;
+          npc.talkT = 0.5;
+        }
+        return;
+      }
+      if (step.k === "give") {
+        const have = step.item!.split("|").reduce((n, x) => Math.max(n, countOf(items, x)), 0);
+        openTalkLines(npc.def.name, npc.def.role, [`${step.text}. You have ${have} of ${step.n ?? 1}.`]);
+        return;
+      }
+    }
     const L = MORE_LINES;
     const pick = (a: string[]) => [a[Math.floor(Math.random() * a.length)]];
     let lines: string[];
@@ -1082,7 +1195,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           charFlag("talked");
           audio.quest();
           say("New task: gather flint and wood");
-          persist();
         };
       } else if (hasEdge() && !flags.ember) {
         lines = [...L.tanicKnife, "Tanic presses a warm coal into your palm. Ember. It spends a little breath, and it burns what is made of cloth and wax.", ...L.tanicAfter];
@@ -1093,7 +1205,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           P.mana = 30;
           audio.reward();
           say("Learned Ember · tap the flame button");
-          persist();
         };
       } else if (flags.cookie) lines = L.tanicCookie;
       else if (flags.ember) lines = L.tanicAfter;
@@ -1113,14 +1224,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           if (!flags.voss) {
             flags.voss = true;
             charFlag("voss");
-            persist();
           }
           if (!flags.ended) {
             flags.ended = true;
             charFlag("ended");
             mode = "end";
             audio.reward();
-            persist();
             push();
           }
         };
@@ -1135,40 +1244,87 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     fadeCb = cb;
   }
 
-  function setZone(inDungeon: boolean) {
-    P.inDungeon = inDungeon;
-    world!.root.visible = !inDungeon;
-    dun!.root.visible = inDungeon;
-    if (playerRig) (inDungeon ? dun!.root : world!.root).add(playerRig.group);
+  /** Shows one zone, hides the rest, and tells the room (each zone has its own runner). */
+  function setZone(z: ZoneId) {
+    P.zone = z;
+    for (const [id, b] of zones) b.root.visible = id === z;
+    if (playerRig) zoneRoot(z).add(playerRig.group);
     for (const p of bolts) p.life = 0;
+    if (online) {
+      online.room.setZone(z);
+      applyRole(true);
+    }
   }
 
-  function enterDungeon() {
-    setZone(true);
-    P.x = dun!.anchors.entry.x;
-    P.z = dun!.anchors.entry.z;
-    P.yaw = 0;
-    camYaw = 0;
-    snapCam();
-    if (!flags.entered) {
+  const portalOpen = (p: PortalDef) => !p.flag || !!worldFlags[p.flag];
+  let travelling = false;
+  let shutSaidAt = 0;
+
+  /** Through a door or along a road into the next zone. The server checks the doorway too. */
+  function travel(p: PortalDef) {
+    if (travelling) return;
+    if (!zones.has(p.to)) {
+      if (performance.now() - shutSaidAt > 4000) say("That road is not open yet.");
+      shutSaidAt = performance.now();
+      return;
+    }
+    if (!portalOpen(p)) {
+      if (p.edge) {
+        if (performance.now() - shutSaidAt > 4000) say(p.shut ?? "It will not open.");
+        shutSaidAt = performance.now();
+      } else openTalkLines(p.label, "", [p.shut ?? "It will not open."]);
+      return;
+    }
+    if (p.id === "over_castle" && !hasEdge()) {
+      openTalkLines("", "", MORE_LINES.noEdge);
+      return;
+    }
+    travelling = true;
+    fadeThen(() => {
+      travelling = false;
+      const from = P.zone;
+      setZone(p.to);
+      const w = toWorld(p.to, p.tx, p.tz);
+      P.x = w.x;
+      P.z = w.z;
+      P.y = groundAt(P.x, P.z);
+      P.yaw = p.tyaw;
+      camYaw = p.tyaw;
+      P.kx = P.kz = P.vx = P.vz = 0;
+      snapCam();
+      arrived(from, p.to);
+      void heartbeat();
+    });
+  }
+
+  function arrived(from: ZoneId, to: ZoneId) {
+    if (to === "castle" && !flags.entered) {
       flags.entered = true;
-      if (online) memberFlag("entered");
+      memberFlag("entered");
       audio.quest();
     }
-    persist();
+    if (from === "castle" && flags.cookie) say("The toys are still. The box has nothing left to call.");
+    region = null;
   }
-  function leaveDungeon() {
-    setZone(false);
-    const a = world!.anchors.castleDoor;
-    P.x = a.x;
-    P.z = a.z - 2.5;
-    P.yaw = Math.PI;
-    camYaw = Math.PI;
-    // a shared fight resets only when everyone has left the courtyard (see runnerDuties)
-    if (!online && cookie && cookie.fighting) cookie.reset();
-    snapCam();
-    if (flags.cookie) say("The toys are still. The box has nothing left to call.");
-    persist();
+
+  /** Roads out of a zone work by walking into them. */
+  function edgePortals() {
+    if (mode !== "play" || P.dead || travelling) return;
+    for (const p of PORTALS) {
+      if (!p.edge || p.from !== P.zone) continue;
+      const w = toWorld(p.from, p.x, p.z);
+      const d = Math.hypot(P.x - w.x, P.z - w.z);
+      if (d > p.r) continue;
+      if (zones.has(p.to) && portalOpen(p)) travel(p);
+      else {
+        travel(p);
+        // a shut road pushes you back a step
+        const l = d || 1;
+        P.x += ((P.x - w.x) / l) * (p.r - d + 0.4);
+        P.z += ((P.z - w.z) / l) * (p.r - d + 0.4);
+      }
+      return;
+    }
   }
   function openNursery() {
     flags.nursery = true;
@@ -1179,7 +1335,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       });
     audio.thud();
     say("The painted door swings in. A music box is playing.");
-    persist();
   }
 
   function startGate(local = true) {
@@ -1220,8 +1375,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         best = { x, z, r, y };
       }
     };
-    for (const m of mobs) if (m.alive && m.dungeon === P.inDungeon && m.kind !== "deer") consider(m.x, m.z, m.cfg.radius, m.y);
-    if (cookie && P.inDungeon && cookie.fighting) {
+    for (const m of mobs) if (m.alive && m.zone === P.zone && m.kind !== "deer") consider(m.x, m.z, m.cfg.radius, m.y);
+    if (cookie && P.zone === "castle" && cookie.fighting) {
       consider(cookie.x, cookie.z, 1.1, cookie.y);
       for (const m of cookie.toys) if (m.alive) consider(m.x, m.z, m.cfg.radius, m.y);
     }
@@ -1260,12 +1415,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     P.stamT = 0.7;
     softLock();
     if (heavy) {
-      startAction("heavy", 0.62, 0.3);
+      startAction("heavy", 0.62 * swingScale(w), 0.3);
       P.combo = 0;
     } else {
       P.combo = P.comboT > 0 ? (P.combo % 3) + 1 : 1;
       const a: HumanAction = P.combo === 1 ? "light1" : P.combo === 2 ? "light2" : "light3";
-      startAction(a, P.combo === 3 ? 0.5 : 0.38, P.combo === 3 ? 0.42 : 0.36);
+      startAction(a, (P.combo === 3 ? 0.5 : 0.38) * swingScale(w), P.combo === 3 ? 0.42 : 0.36);
     }
     audio.swing(heavy);
   }
@@ -1274,14 +1429,16 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const w = mainWeapon();
     const heavy = P.action === "heavy";
     const reach = w.range + (heavy ? 0.9 : 0.7);
-    const arc = heavy ? 1.7 : 1.2;
+    const arc = heavy ? (w.family === "axe" ? 2.3 : 1.7) : w.family === "spear" ? 0.8 : 1.2;
     const fx = Math.sin(P.yaw);
     const fz = Math.cos(P.yaw);
     const ax = P.x + fx * 0.5;
     const az = P.z + fz * 0.5;
     let hits = 0;
     const chain = P.action === "light3" ? 1.2 : 1;
-    const dmgBase = strikeDamage({ weapon: w, heavy, skillRank: 0, weakness: false, blocking: false, shield: false, defence: 0 });
+    // level, the Black Knight's Oath and a Finlay riposte all add to the weapon's own number
+    const ripo = riposte > 0 ? 2 : 1;
+    const dmgBase = strikeDamage({ weapon: w, heavy, skillRank: 0, weakness: false, blocking: false, shield: false, defence: 0 }) * statsFor(level).power * (setWorn("bk") ? 1.15 : 1) * ripo;
     const tryHit = (x: number, z: number, r: number, hit: (dmg: number) => number) => {
       const dx = x - P.x;
       const dz = z - P.z;
@@ -1289,22 +1446,29 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (d > reach + r) return;
       const ang = Math.abs(Math.atan2(Math.sin(Math.atan2(dx, dz) - P.yaw), Math.cos(Math.atan2(dx, dz) - P.yaw)));
       if (ang > arc && d > r + 0.4) return;
-      const dmg = Math.max(1, Math.round(dmgBase * chain * (0.92 + Math.random() * 0.16)));
+      let dmg = Math.max(1, Math.round(dmgBase * chain * (0.92 + Math.random() * 0.16)));
+      // Smacko: every fourth connecting hit lands twice
+      if (w.id === "wpn_smacko" && hits === 0 && (hitChain + 1) % 4 === 0) {
+        dmg *= 2;
+        floater("Smack!", x, P.y + 2.6, z, "crit");
+      }
       const dealt = hit(dmg);
       if (dealt <= 0) return;
+      if (hits === 0) hitChain++;
       hits++;
       const hx = P.x + (dx / (d || 1)) * Math.min(d, 1.2);
       const hz = P.z + (dz / (d || 1)) * Math.min(d, 1.2);
       sparks.burst(heavy ? 14 : 8, hx, P.y + 1.2, hz, heavy ? 6 : 4, 0xffe6b8, 0.35, 0.16, { up: 1, grav: 6 });
       floater(String(dealt), x, P.y + 2.0, z, heavy || chain > 1 ? "crit" : "dmg");
     };
-    for (const m of mobs) if (m.alive && m.dungeon === P.inDungeon) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy));
-    if (cookie && P.inDungeon) {
+    for (const m of mobs) if (m.alive && m.zone === P.zone) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy));
+    if (cookie && P.zone === "castle") {
       if (cookie.fighting) tryHit(cookie.x, cookie.z, 1.1, (d) => (online ? bossHit(d, heavy, false) : cookie!.takeHit(d, P.x, P.z, heavy, false)));
       for (const m of cookie.toys) if (m.alive) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy));
     }
     flashes.arc(ax, P.y + 1.15, az, P.yaw, reach * 0.8, P.action === "light3" || heavy, w.id === "wpn_cookie_blade" ? 0xffb0a0 : 0xffe6b8, P.action === "light2");
     if (hits) {
+      if (riposte > 0) riposte = 0;
       audio.hit(heavy);
       hitStop = heavy ? 0.09 : 0.055;
       shake = Math.max(shake, heavy ? 0.22 : 0.1);
@@ -1324,6 +1488,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       return d;
     }
     const dealt = m.takeHit(dmg, P.x, P.z, heavy, fire);
+    // Smacko's charged hits and a mace's heavy blows keep foes reeling
+    const w = mainWeapon();
+    if (heavy && m.alive && (w.id === "wpn_smacko" || w.family === "mace")) m.stagger(w.family === "mace" ? 1.4 : 1.1);
     if (online) {
       if (dealt > 0) online.room.event({ k: "hx", m: m.key });
       if (!m.alive) claimKill(m.key, m);
@@ -1332,7 +1499,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (!m.alive) {
       kills++;
       const key = mobKey.get(m);
-      if (key && m.dungeon) deadMobs.add(key);
+      if (key && ZONES[m.zone].indoor) deadMobs.add(key);
       const drops: [string, number][] = [];
       for (const [id, n, ch] of m.cfg.loot) if (Math.random() < ch) drops.push([id, n]);
       if (drops.length) loot(drops);
@@ -1340,7 +1507,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         say("The rocking horse is still. The painted door is free.");
         audio.quest();
       }
-      persist();
     }
     return dealt;
   }
@@ -1363,7 +1529,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function launchBolt() {
     const fx = Math.sin(P.yaw);
     const fz = Math.cos(P.yaw);
-    bolts.push({ x: P.x + fx * 0.8, y: P.y + 1.3, z: P.z + fz * 0.8, vx: fx * 19, vz: fz * 19, life: 0.9, dungeon: P.inDungeon });
+    bolts.push({ x: P.x + fx * 0.8, y: P.y + 1.3, z: P.z + fz * 0.8, vx: fx * 19, vz: fz * 19, life: 0.9, zone: P.zone });
   }
 
   function updateBolts(dt: number) {
@@ -1386,12 +1552,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       };
       const fireDmg = 14;
       for (const m of mobs)
-        if (!hit && m.alive && m.dungeon === b.dungeon && Math.hypot(m.x - b.x, m.z - b.z) < m.cfg.radius + 0.5) {
+        if (!hit && m.alive && m.zone === b.zone && Math.hypot(m.x - b.x, m.z - b.z) < m.cfg.radius + 0.5) {
           const d = onMobHit(m, fireDmg, false, true);
           floater(d + " fire", m.x, m.y + 1.8, m.z, "fire");
           boom();
         }
-      if (!hit && cookie && b.dungeon) {
+      if (!hit && cookie && b.zone === "castle") {
         if (cookie.fighting && Math.hypot(cookie.x - b.x, cookie.z - b.z) < 1.4) {
           const d = online ? bossHit(fireDmg, false, true) : cookie.takeHit(fireDmg, P.x, P.z, false, true);
           if (d) floater(d + " fire", cookie.x, cookie.y + 2.8, cookie.z, "fire");
@@ -1428,6 +1594,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (P.blocking && facing && !o.unblockable) {
       if (P.blockT < 0.22 && o.parryable && o.source) {
         o.source.stagger(1.3);
+        if (mainWeapon().id === "wpn_finlay_longsword") riposte = 3;
         audio.parry();
         sparks.burst(20, P.x + Math.sin(P.yaw) * 0.7, P.y + 1.3, P.z + Math.cos(P.yaw) * 0.7, 6, 0xfff0c0, 0.4, 0.2, { up: 1 });
         floater("Parried!", P.x, P.y + 2.2, P.z, "crit");
@@ -1436,7 +1603,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         return false;
       }
       d = Math.round(d * (P.shield ? 0.3 : 0.6));
-      P.stam -= dmg * (P.shield ? 0.9 : 1.3);
+      P.stam -= dmg * (P.shield ? 0.9 : 1.3) * (setWorn("bk") ? 0.5 : 1);
       P.stamT = 0.8;
       audio.block();
       sparks.burst(8, P.x + Math.sin(P.yaw) * 0.6, P.y + 1.2, P.z + Math.cos(P.yaw) * 0.6, 3, 0xffe0b0, 0.3, 0.15);
@@ -1447,6 +1614,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         say("Guard broken");
       }
     }
+    // armour takes its share of whatever got through
+    if (d > 0) d = Math.max(1, Math.round(d * (1 - armourCut(gearDefence()))));
     P.hp -= d;
     hurtAt = performance.now();
     combatT = 4;
@@ -1497,17 +1666,27 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.kx = P.kz = 0;
       if (online) rpc("vm_died").catch(() => {});
       else if (cookie && cookie.fighting) cookie.reset();
-      if (P.inDungeon) setZone(false);
-      const atDoor = flags.entered && !flags.cookie;
-      const at = atDoor ? world!.anchors.castleDoor : respawnShrine && flags.shrine ? world!.anchors.shrine : world!.anchors.bed;
-      P.x = at.x;
-      P.z = at.z + (atDoor ? -3 : respawnShrine ? 1.2 : 0.6);
-      P.yaw = atDoor ? 0 : respawnShrine ? Math.PI : 0.4;
+      const died = P.zone;
+      // a dungeon sends you back out of its front door; out in the open, back to your shrine or bed
+      const door = ZONES[died].indoor && died !== "castle" ? PORTALS.find((p) => p.to === died && !ZONES[p.from].indoor) : undefined;
+      const atDoor = died === "castle" ? flags.entered && !flags.cookie : !!door;
+      if (door) {
+        setZone(door.from);
+        const w = toWorld(door.from, door.x, door.z);
+        P.x = w.x;
+        P.z = w.z - 2.5;
+        P.yaw = 0;
+      } else {
+        setZone("over");
+        const at = atDoor ? world!.anchors.castleDoor : respawnShrine && flags.shrine ? world!.anchors.shrine : world!.anchors.bed;
+        P.x = at.x;
+        P.z = at.z + (atDoor ? -3 : respawnShrine ? 1.2 : 0.6);
+        P.yaw = atDoor ? 0 : respawnShrine ? Math.PI : 0.4;
+      }
       camYaw = P.yaw;
       snapCam();
       mode = "play";
       say(atDoor ? "You wake at the castle door. The music box is still playing." : respawnShrine ? "You wake at the shrine." : "Hearthfen. Still breathing.");
-      persist();
     });
   }
 
@@ -1524,7 +1703,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (!r) return;
     if (online) {
       if (r.station !== "hand" && r.station !== stationNear) {
-        say(r.station === "forge" ? "That needs Mara's forge." : "That needs the workbench.");
+        say("That needs a " + STATION_NAMES[r.station].toLowerCase() + ".");
         audio.block();
         return;
       }
@@ -1549,7 +1728,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         .catch(netError);
       return;
     }
-    const res = tryCraft(items, id, stationNear, uid);
+    const res = tryCraft(items, id, stationNear as "hand" | "bench" | "forge", uid);
     if (!res.ok) {
       say(res.reason === "station" ? (r.station === "forge" ? "That needs Mara's forge." : "That needs the workbench.") : "Missing materials.");
       audio.block();
@@ -1568,7 +1747,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       audio.quest();
       setTimeout(() => say("Show Tanic your knife."), 1800);
     }
-    persist();
     push();
   }
 
@@ -1605,7 +1783,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     audio.pickup();
     say(`Traded for ${t.get.n} ${item(t.get.id).name}`);
     if (talk) talk = { ...talk, trades: tradeList() };
-    persist();
     push();
   }
 
@@ -1632,7 +1809,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       syncGear();
       audio.ui();
     }
-    persist();
     push();
   }
 
@@ -1676,8 +1852,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       return;
     }
     const portrait = canvas.clientHeight > canvas.clientWidth;
-    const bossOn = cookie && cookie.fighting && P.inDungeon;
-    camDist += ((portrait ? 7.2 : bossOn ? 7.4 : P.inDungeon ? 5.4 : 5.8) - camDist) * Math.min(1, rdt * 2);
+    const bossOn = cookie && cookie.fighting && P.zone === "castle";
+    camDist += ((portrait ? 7.2 : bossOn ? 7.4 : ZONES[P.zone].indoor ? 5.4 : 5.8) - camDist) * Math.min(1, rdt * 2);
     lookT += rdt;
     const moving = Math.hypot(P.vx, P.vz) > 0.5;
     if (lookT > 1.6 && moving && P.action === "none") {
@@ -1719,9 +1895,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     let x = camTgt.x + dirX * dist + right.x * shoulder;
     let z = camTgt.z + dirZ * dist + right.z * shoulder;
     let y = camTgt.y + dirY * dist + lift;
-    const g = world.groundAt(x, z) + 0.5;
+    const g = groundAt(x, z) + 0.5;
     if (y < g) y = g;
-    if (P.inDungeon && !(P.z > DUN.galleryZ1 + 6)) y = Math.min(y, 6.6);
+    if (P.zone === "castle" && !(P.z > DUN.galleryZ1 + 6)) y = Math.min(y, 6.6);
+    else if (ZONES[P.zone].indoor && P.zone !== "castle") y = Math.min(y, zones.get(P.zone)?.ceiling?.(P.x, P.z) ?? 6.6);
     const k = 1 - Math.exp(-rdt * 10);
     camPos.x += (x - camPos.x) * k;
     camPos.y += (y - camPos.y) * k;
@@ -1775,8 +1952,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     let exposure = THREE.MathUtils.lerp(a.ex, b.ex, t);
     let density = 0.0065;
     const reg = region ?? "hearthfen";
-    if (P.inDungeon && mode !== "title") {
-      const court = P.z > DUN.galleryZ1 + 4;
+    if (ZONES[P.zone].indoor && mode !== "title") {
+      const court = P.zone === "castle" && P.z > DUN.galleryZ1 + 4;
       sun.color.setHex(court ? 0xffc890 : 0xffb070);
       sun.intensity = court ? 1.6 : 0.35;
       hemi.color.setHex(0x8a7a6a);
@@ -1808,20 +1985,20 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     sun.target.position.set(sx, 0, sz);
     sun.position.set(sx + sunDir.x * 100, sunDir.y * 100, sz + sunDir.z * 100);
     const night = 1 - dayK;
-    glowI.value = P.inDungeon ? 1.1 : 0.15 + night * 1.1;
+    glowI.value = ZONES[P.zone].indoor ? 1.1 : 0.15 + night * 1.1;
     const wm = world.root.children.find((c) => c.name === "window") as THREE.Mesh | undefined;
     if (wm) (wm.material as THREE.MeshLambertMaterial).emissiveIntensity = 0.15 + night * 1.6;
-    for (const s of world.shafts) s.visible = !P.inDungeon && dayK > 0.5 && quality !== "low";
+    for (const s of world.shafts) s.visible = P.zone === "over" && dayK > 0.5 && quality !== "low";
     (world.shafts[0]?.material as THREE.MeshBasicMaterial | undefined)?.opacity !== undefined &&
       ((world.shafts[0].material as THREE.MeshBasicMaterial).opacity = 0.1 * dayK * (reg === "forest" ? 1 : 0.5));
-    const bossLit = P.inDungeon && cookie && cookie.active && cookie.st !== "dead";
+    const bossLit = P.zone === "castle" && cookie && cookie.active && cookie.st !== "dead";
     stage.intensity += ((bossLit ? 60 : 0) - stage.intensity) * Math.min(1, rdt * 2);
     if (cookie) stage.position.set(cookie.x, cookie.y + 6.5, cookie.z - 1.5);
     // point lights: nearest fires (always) and lamps (at night)
     const cands: { p: THREE.Vector3; fire: boolean }[] = [];
-    const list = P.inDungeon ? dun!.fires : world.fires;
-    for (const p of list) cands.push({ p, fire: true });
-    if (!P.inDungeon && night > 0.3) for (const p of world.lamps) cands.push({ p, fire: false });
+    const zb = zones.get(P.zone);
+    for (const p of zb?.fires ?? []) cands.push({ p, fire: true });
+    if (!ZONES[P.zone].indoor && night > 0.3) for (const p of zb?.lamps ?? []) cands.push({ p, fire: false });
     cands.sort((u, v) => u.p.distanceToSquared(camTgt) - v.p.distanceToSquared(camTgt));
     const tnow = performance.now() / 1000;
     lightPool.forEach((l, k) => {
@@ -1833,7 +2010,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       l.position.copy(c.p);
       l.color.setHex(c.fire ? 0xff8a40 : 0xffb060);
       const flick = 0.85 + Math.sin(tnow * 11 + k * 3) * 0.08 + Math.sin(tnow * 23 + k) * 0.06;
-      l.intensity = (c.fire ? (P.inDungeon ? 14 : 9 + night * 8) : 10 * night) * flick;
+      l.intensity = (c.fire ? (ZONES[P.zone].indoor ? 14 : 9 + night * 8) : 10 * night) * flick;
       l.distance = c.fire ? 14 : 12;
     });
   }
@@ -1900,7 +2077,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         const sp = 9 * (1 - k * 0.55);
         const nx = P.x + P.dodgeX * sp * dt;
         const nz = P.z + P.dodgeZ * sp * dt;
-        if (!world.inRiver(nx, nz)) {
+        if (!blockedAt(nx, nz)) {
           P.x = nx;
           P.z = nz;
         }
@@ -1954,8 +2131,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (playing && canMove && mag > 0.08) {
       target = (P.sprint ? SPEEDS.sprint : SPEEDS.walk * Math.min(1, mag * 1.25)) * speedMul;
       if (P.blocking) target = Math.min(target, 2.0);
-      const wet = world.terrain.waterAt(P.x, P.z);
-      if (!P.inDungeon && wet > 0.3) target *= 0.7;
+      const wet = P.zone === "over" ? world.terrain.waterAt(P.x, P.z) : (zones.get(P.zone)?.waterAt?.(P.x, P.z) ?? 0);
+      if (wet > 0.3) target *= 0.7;
     }
     if (P.sprint && inCombat && target > 0) {
       P.stam = Math.max(0, P.stam - 11 * dt);
@@ -1967,7 +2144,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (P.action !== "dodge") {
       let nx = P.x + (P.vx + P.kx) * dt;
       let nz = P.z + (P.vz + P.kz) * dt;
-      if (world.inRiver(nx, nz)) {
+      if (blockedAt(nx, nz)) {
         nx = P.x;
         nz = P.z;
       }
@@ -1977,25 +2154,27 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     P.kx *= Math.exp(-dt * 9);
     P.kz *= Math.exp(-dt * 9);
     // the weight in the hall: push it by walking into it
-    if (P.inDungeon && dun && !flags.slab) {
+    if (P.zone === "castle" && dun && !flags.slab) {
       const wp = dun.weight.position;
       if (Math.abs(P.z - wp.z) < 1.3 && P.x < wp.x && P.x > wp.x - 1.6 && P.vx > 0.5) weightX = Math.min(9, weightX + P.vx * dt * 0.5);
     }
     const solved = env.col.resolve(P.x, P.z, 0.42);
     P.x = solved.x;
     P.z = solved.z;
-    if (!P.inDungeon) {
-      P.x = Math.min(BOUNDS.maxX - 6, Math.max(BOUNDS.minX + 6, P.x));
-      P.z = Math.min(BOUNDS.maxZ - 6, Math.max(BOUNDS.minZ + 6, P.z));
+    {
+      const zd = ZONES[P.zone];
+      const pad = zd.indoor ? 0.5 : 6;
+      P.x = Math.min(zd.ox + zd.bounds.maxX - pad, Math.max(zd.ox + zd.bounds.minX + pad, P.x));
+      P.z = Math.min(zd.bounds.maxZ - pad, Math.max(zd.bounds.minZ + pad, P.z));
     }
-    if (P.inDungeon && dun && !flags.slab) {
+    if (P.zone === "castle" && dun && !flags.slab) {
       const wp = dun.weight.position;
       if (Math.abs(P.z - wp.z) < 1.35 && Math.abs(P.x - wp.x) < 1.35) {
         if (Math.abs(P.x - wp.x) > Math.abs(P.z - wp.z)) P.x = wp.x + Math.sign(P.x - wp.x) * 1.35;
         else P.z = wp.z + Math.sign(P.z - wp.z) * 1.35;
       }
     }
-    P.y = world.groundAt(P.x, P.z);
+    P.y = groundAt(P.x, P.z);
     const sp = Math.hypot(P.vx, P.vz);
     P.speed = sp;
     if (sp > 0.3 && (P.action === "none" || P.action === "charge" || P.action === "cast")) {
@@ -2004,16 +2183,16 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.yaw += Math.sign(diff) * Math.min(Math.abs(diff), dt * 12);
     }
     // stamina, health, mana
-    if (P.stamT <= 0 && !(P.sprint && inCombat)) P.stam = Math.min(P.maxStam, P.stam + (P.blocking ? 10 : 32) * dt);
+    if (P.stamT <= 0 && !(P.sprint && inCombat)) P.stam = Math.min(P.maxStam, P.stam + (P.blocking ? 10 : 32) * dt * (setWorn("hound") ? 1.25 : 1));
     if (P.maxMana > 0) P.mana = Math.min(P.maxMana, P.mana + (inCombat ? 1.2 : 3) * dt);
     if (!inCombat && P.regenT <= 0 && P.hp > 0 && P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + 2 * dt);
     // footsteps
     P.phase += (sp / (P.sprint ? 1.6 : 1.15)) * dt * Math.PI;
     if (sp > 1 && Math.floor(P.phase / Math.PI) !== P.lastStep) {
       P.lastStep = Math.floor(P.phase / Math.PI);
-      const surf = P.inDungeon ? (P.z > DUN.doorZ && P.z < DUN.galleryZ1 ? "wood" : "stone") : world.decks.some((d) => P.x >= d.minX && P.x <= d.maxX && P.z >= d.minZ && P.z <= d.maxZ) ? "wood" : world.terrain.pathAt(P.x, P.z) > 0.3 ? "dirt" : "grass";
+      const surf = P.zone === "castle" ? (P.z > DUN.doorZ && P.z < DUN.galleryZ1 ? "wood" : "stone") : P.zone !== "over" ? (zones.get(P.zone)?.surfaceAt?.(P.x, P.z) ?? "stone") : world.decks.some((d) => P.x >= d.minX && P.x <= d.maxX && P.z >= d.minZ && P.z <= d.maxZ) ? "wood" : world.terrain.pathAt(P.x, P.z) > 0.3 ? "dirt" : "grass";
       audio.step(surf);
-      if (P.sprint && !P.inDungeon && Math.random() < 0.5) dust.emit({ x: P.x, y: P.y + 0.1, z: P.z, vx: (Math.random() - 0.5) * 0.6, vy: 0.5, vz: (Math.random() - 0.5) * 0.6, life: 0.7, size: 0.35, grow: 0.4, color: 0x9a8a70, a: 0.35, grav: 0 });
+      if (P.sprint && !ZONES[P.zone].indoor && Math.random() < 0.5) dust.emit({ x: P.x, y: P.y + 0.1, z: P.z, vx: (Math.random() - 0.5) * 0.6, vy: 0.5, vz: (Math.random() - 0.5) * 0.6, life: 0.7, size: 0.35, grow: 0.4, color: 0x9a8a70, a: 0.35, grav: 0 });
     }
     // pose
     const g = playerRig.group;
@@ -2033,7 +2212,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     shared.time.value = t;
     glowTime.value = t;
     // nodes regrow
-    for (const n of world.nodes) {
+    for (const n of zones.get(P.zone)?.nodes ?? []) {
       const st = nodeState.get(n.id);
       if (st && st.left < n.max) {
         st.regrow -= dt;
@@ -2061,7 +2240,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         gateOpening = false;
         audio.quest();
         say("The Green Gate is open. Walk the wheat.");
-        persist();
       }
     } else if (flags.gate) {
       world.gate.sealMat.uniforms.uOpen.value = 1.3;
@@ -2079,7 +2257,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     world.sails.rotation.z += dt * 0.5;
     if (!flags.cookie) world.key.rotation.y += dt * 0.35;
     for (const b of world.banners) b.rotation.y = -Math.PI / 2 + Math.sin(t * 2 + b.position.z) * 0.12;
-    if (!flags.cookie && !P.inDungeon) {
+    if (!flags.cookie && P.zone === "over") {
       for (const tb of world.toyBlocks) {
         const d = Math.hypot(tb.position.x - P.x, tb.position.z - P.z);
         if (d < 14) tb.rotation.z = 0.15 + Math.sin(t * 9 + tb.position.x) * 0.04 * (1 - d / 14);
@@ -2096,14 +2274,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       shake = 0.3;
       say("The weight settles. The slab grinds up.");
       audio.quest();
-      persist();
     }
     dun.slab.position.y += ((flags.slab ? 9.2 : 3.1) - dun.slab.position.y) * Math.min(1, dt * 1.5);
     dun.plate.position.y = flags.slab ? 0.0 : 0.06;
     dun.nurseryDoor.rotation.y += ((flags.nursery ? -1.6 : 0) - dun.nurseryDoor.rotation.y) * Math.min(1, dt * 2);
     dun.exitGate.position.y += ((flags.cookie ? 6.5 : 0) - dun.exitGate.position.y) * Math.min(1, dt * 1.2);
     // marked floor tiles
-    if (P.inDungeon && mode === "play") {
+    if (P.zone === "castle" && mode === "play") {
       for (const tile of dun.tiles) {
         const on = Math.abs(P.x - tile.x) < 0.7 && Math.abs(P.z - tile.z) < 0.7;
         const st = tile as typeof tile & { arm?: number; cd?: number; decal?: ReturnType<DecalPool["get"]> | null; block?: THREE.Mesh | null };
@@ -2136,7 +2313,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     // arena
     if (cookie) {
-      const arena = (q: PlayerState) => q.inDungeon && !q.dead && Math.hypot(q.x - DUN.arena.x, q.z - DUN.arena.z) < DUN.arena.r - 1.5;
+      const arena = (q: PlayerState) => q.zone === "castle" && !q.dead && Math.hypot(q.x - DUN.arena.x, q.z - DUN.arena.z) < DUN.arena.r - 1.5;
       // online, Cookie fights whoever is in the courtyard; only the world runner decides
       const inArena = online ? env.players().some(arena) : arena(P);
       const runs = !online || online.room.isRunner;
@@ -2145,7 +2322,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         // a new fight: full health on the server too
         if (online) rpc<Record<string, BossJson>>("vm_boss_reset").then((b) => online && (online.boss = b.cookie ?? online.boss)).catch(() => {});
       }
-      if (cookie.st === "intro" && lastCookieSt !== "intro" && P.inDungeon) {
+      if (cookie.st === "intro" && lastCookieSt !== "intro" && P.zone === "castle") {
         introSeen = true;
         audio.bell(0.2, 523);
         placeAt = performance.now();
@@ -2153,7 +2330,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         placeSub = "It bows. Then the toys stand up.";
       }
       lastCookieSt = cookie.st;
-      if (online ? runs || P.inDungeon : mode === "play" || cookie.st === "dying") cookie.update(dt, inArena);
+      if (online ? P.zone === "castle" : mode === "play" || cookie.st === "dying") cookie.update(dt, inArena);
       if (cookie.st === "dead" && (online ? !cookieFinished : !flags.cookie) && bossDoneT < 0) {
         bossDoneT = 1.4;
       }
@@ -2172,7 +2349,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     // ambience particles
     smokeT -= dt;
-    if (smokeT <= 0 && !P.inDungeon) {
+    if (smokeT <= 0 && P.zone === "over") {
       smokeT = 0.18;
       for (const s of world.smoke) {
         if (Math.abs(s.x - P.x) > 90 || Math.abs(s.z - P.z) > 90) continue;
@@ -2182,14 +2359,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     ambT -= dt;
     if (ambT <= 0) {
       ambT = 0.08;
-      const fires = P.inDungeon ? dun.fires : world.fires;
+      const fires = zones.get(P.zone)?.fires ?? [];
       for (const f of fires) {
         if (Math.abs(f.x - P.x) > 40 || Math.abs(f.z - P.z) > 40) continue;
         if (Math.random() < 0.6) sparks.emit({ x: f.x + (Math.random() - 0.5) * 0.4, y: f.y - 0.1, z: f.z + (Math.random() - 0.5) * 0.4, vx: (Math.random() - 0.5) * 0.5, vy: 1.2 + Math.random(), vz: (Math.random() - 0.5) * 0.5, life: 0.9, size: 0.12, color: 0xff9a40, grav: -0.3, drag: 0.5 });
       }
       const reg = region;
       const night = hour >= 20 || hour < 5.5;
-      if (!P.inDungeon && (reg === "forest" || reg === "castle")) {
+      if (P.zone === "over" && (reg === "forest" || reg === "castle")) {
         const a = Math.random() * Math.PI * 2;
         const r = 3 + Math.random() * 14;
         const x = P.x + Math.cos(a) * r;
@@ -2200,19 +2377,19 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           if (Math.random() < 0.5) sparks.emit({ x, y: y + 1 + Math.random() * 4, z, vx: 0.1, vy: 0.05, vz: 0.05, life: 4, size: 0.07, color: 0xffd890, a: 0.6, grav: 0, drag: 0 });
           if (Math.random() < 0.25) dust.emit({ x, y: y + 8 + Math.random() * 6, z, vx: 0.6, vy: -0.6, vz: 0.3, life: 9, size: 0.16, color: Math.random() < 0.5 ? 0x8a8a40 : 0xb08a40, grav: 0.02, drag: 0 });
         }
-      } else if (!P.inDungeon && night && reg === "hearthfen" && Math.random() < 0.3) {
+      } else if (P.zone === "over" && night && reg === "hearthfen" && Math.random() < 0.3) {
         const x = P.x + (Math.random() - 0.5) * 24;
         const z = P.z + (Math.random() - 0.5) * 24;
         sparks.emit({ x, y: world.groundAt(x, z) + 0.6 + Math.random(), z, vx: (Math.random() - 0.5) * 0.4, vy: 0.1, vz: (Math.random() - 0.5) * 0.4, life: 3, size: 0.13, color: 0xc8e070, grav: 0, drag: 0 });
-      } else if (P.inDungeon && P.z > DUN.galleryZ1 + 4 && Math.random() < 0.4) {
+      } else if (P.zone === "castle" && P.z > DUN.galleryZ1 + 4 && Math.random() < 0.4) {
         sparks.emit({ x: P.x + (Math.random() - 0.5) * 20, y: 1 + Math.random() * 6, z: P.z + (Math.random() - 0.5) * 20, vy: -0.2, life: 4, size: 0.08, color: 0xffd8a0, a: 0.6, grav: 0, drag: 0 });
       }
     }
     // npcs
     const night = hour >= 21 || hour < 5.6;
     for (const n of npcs) {
-      const vis = !P.inDungeon && Math.hypot(n.x - camera.position.x, n.z - camera.position.z) < 70;
-      n.update(dt, t, night, world.groundAt, (x, z) => world!.col.resolve(x, z, 0.38), P, vis);
+      const vis = n.zone === P.zone && Math.hypot(n.x - camera.position.x, n.z - camera.position.z) < 70;
+      n.update(dt, t, night, groundAt, (x, z) => world!.col.resolve(x, z, 0.38), P, vis);
     }
     void rdt;
   }
@@ -2226,11 +2403,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const blade = items.find((s) => s.def === "wpn_cookie_blade");
     if (blade) items = equip(items, blade.uid);
     syncGear();
-    for (const m of mobs) if (m.kind === "soldier" && !m.dungeon && m.alive) m.die();
+    for (const m of mobs) if (m.kind === "soldier" && m.zone === "over" && m.alive) m.die();
     reward = ["wpn_cookie_blade", "wpn_cookie_pick", "key_cookie_core"].map((id) => ({ id, name: item(id).name, desc: DESCRIPTIONS[id] ?? "" }));
     mode = "reward";
     audio.reward();
-    persist();
     push();
   }
 
@@ -2326,11 +2502,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (P.dead) P.deadT += rdt;
       if (sim) {
         const everyone = env.players();
-        const nearAny = (m: Mob) => everyone.some((q) => q.inDungeon === m.dungeon && (m.dungeon || Math.hypot(m.x - q.x, m.z - q.z) <= 110));
+        const nearAny = (m: Mob) => everyone.some((q) => q.zone === m.zone && (ZONES[m.zone].indoor || Math.hypot(m.x - q.x, m.z - q.z) <= 110));
         for (const m of mobs) {
-          const localNear = m.dungeon === P.inDungeon && (m.dungeon || Math.hypot(m.x - P.x, m.z - P.z) <= 110);
+          const localNear = m.zone === P.zone && (ZONES[m.zone].indoor || Math.hypot(m.x - P.x, m.z - P.z) <= 110);
           // the runner simulates every foe near any player; a puppet only needs to look right here
-          const relevant = m.puppet ? localNear : online ? nearAny(m) : localNear;
+          // each zone has its own runner: only foes in this client's zone are its business
+          const relevant = m.zone === P.zone && (m.puppet ? localNear : online ? nearAny(m) : localNear);
           if (!relevant && m.state !== "dead") {
             if (!localNear) m.rig.group.visible = false;
             continue;
@@ -2344,7 +2521,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           for (let j = i + 1; j < mobs.length; j++) {
             const a = mobs[i];
             const b = mobs[j];
-            if (!a.alive || !b.alive || a.dungeon !== b.dungeon || a.puppet || b.puppet) continue;
+            if (!a.alive || !b.alive || a.zone !== b.zone || a.puppet || b.puppet) continue;
             const dx = b.x - a.x;
             const dz = b.z - a.z;
             const d = Math.hypot(dx, dz);
@@ -2361,20 +2538,20 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         updateBolts(dt);
         updateLockRing();
         nearestInteract();
-        const reg = P.inDungeon ? (P.z > DUN.galleryZ1 + 4 ? "nursery" : "dungeon") : regionAt(P.x, P.z);
+        edgePortals();
+        const reg: string = P.zone === "castle" ? (P.z > DUN.galleryZ1 + 4 ? "nursery" : "dungeon") : P.zone === "over" ? regionAt(P.x, P.z) : zones.get(P.zone)?.regionAt?.(P.x, P.z) ?? P.zone;
         if (reg !== region) {
           if (reg === "castle" && !revealed && !flags.cookie) {
             revealed = true;
             revealT = 3.2;
           }
           region = reg;
-          placeName = REGION_TITLE[reg][0];
-          placeSub = REGION_TITLE[reg][1];
+          [placeName, placeSub] = regionTitle(reg);
           placeAt = performance.now();
           push();
         }
-        if (!P.inDungeon && world && Math.hypot(P.x - GATE.x, P.z) < 15 && gateOpen(seals) && !flags.gate && !gateOpening) startGate();
-        if (!P.inDungeon && flags.gate && !flags.voss && Math.hypot(P.x - VOSS.x, P.z - VOSS.z) < 9 && mode === "play") {
+        if (P.zone === "over" && world && Math.hypot(P.x - GATE.x, P.z) < 15 && gateOpen(seals) && !flags.gate && !gateOpening) startGate();
+        if (P.zone === "over" && flags.gate && !flags.voss && Math.hypot(P.x - VOSS.x, P.z - VOSS.z) < 9 && mode === "play") {
           const voss = npcs.find((n) => n.def.id === "voss");
           if (voss) talkTo(voss);
         }
@@ -2397,13 +2574,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       audio.tick({
         day: (hour > 6 && hour < 20) ? 1 : 0,
         forest: region === "forest" || region === "castle" ? 1 : 0,
-        water: world && !P.inDungeon ? Math.min(1, world.terrain.waterAt(P.x, P.z) * 2 + (Math.abs(P.x - 82) < 18 ? 0.6 : 0)) : 0,
-        forge: !P.inDungeon && mode !== "title" ? Math.max(0, 1 - Math.hypot(P.x - 11, P.z - 7) / 30) : mode === "title" ? 0.4 : 0,
-        box: !flags.cookie ? (P.inDungeon ? (P.z > DUN.galleryZ1 - 10 ? 0.9 : 0.25) : Math.max(0, 1 - Math.hypot(P.x - 0, P.z - 170) / 40) * 0.5) : 0,
+        water: world && P.zone === "over" ? Math.min(1, world.terrain.waterAt(P.x, P.z) * 2 + (Math.abs(P.x - 82) < 18 ? 0.6 : 0)) : 0,
+        forge: P.zone === "over" && mode !== "title" ? Math.max(0, 1 - Math.hypot(P.x - 11, P.z - 7) / 30) : mode === "title" ? 0.4 : 0,
+        box: !flags.cookie && (P.zone === "castle" || P.zone === "over") ? (P.zone === "castle" ? (P.z > DUN.galleryZ1 - 10 ? 0.9 : 0.25) : Math.max(0, 1 - Math.hypot(P.x - 0, P.z - 170) / 40) * 0.5) : 0,
         boxRate: cookie ? cookie.boxRate : 1,
-        indoor: P.inDungeon && P.z < DUN.galleryZ1 + 4,
-        boss: cookie && cookie.fighting && P.inDungeon && cookie.st !== "intro" ? 1 : 0,
-        music: mode === "title" ? 1 : P.inDungeon ? 0 : 0.6,
+        indoor: ZONES[P.zone].indoor && !(P.zone === "castle" && P.z >= DUN.galleryZ1 + 4),
+        boss: cookie && cookie.fighting && P.zone === "castle" && cookie.st !== "intro" ? 1 : 0,
+        music: mode === "title" ? 1 : ZONES[P.zone].indoor ? 0 : 0.6,
       });
       // network timers run on wall time, even when a slow frame stretches game time
       if (online) netFrame(Math.min(real, 1));
@@ -2420,7 +2597,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     saveT += rdt;
     if (saveT > 12 && mode === "play") {
       saveT = 0;
-      persist();
     }
   }
 
@@ -2465,12 +2641,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     stickX = stickY = 0;
     P.blocking = false;
     P.holding = false;
-    persist();
   };
   const onVis = () => {
     if (!document.hidden) online?.room.resume();
     if (document.hidden) {
-      persist();
       if (mode === "play") {
         mode = "pause";
         push();
@@ -2481,11 +2655,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   window.addEventListener("keyup", onKeyUp);
   window.addEventListener("blur", onBlur);
   document.addEventListener("visibilitychange", onVis);
-  window.addEventListener("pagehide", persist);
-  const onLost = (e: Event) => {
-    e.preventDefault();
-    persist();
-  };
+  const onLost = (e: Event) => e.preventDefault();
   const onRestored = () => location.reload();
   canvas.addEventListener("webglcontextlost", onLost);
   canvas.addEventListener("webglcontextrestored", onRestored);
@@ -2571,7 +2741,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         }
         return;
       case "close":
-        if (mode === "bag" || mode === "pause") mode = "play";
+        if (mode === "bag" || mode === "pause" || mode === "shop" || mode === "journal") mode = "play";
         else if (mode === "talk") {
           talkQueue = [];
           advanceTalk();
@@ -2581,7 +2751,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       case "pause":
         if (mode === "play") {
           mode = "pause";
-          persist();
           push();
         }
         return;
@@ -2678,6 +2847,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   /** World progress made by anyone (an event, or the server's answer to a heartbeat). */
   function applyWorldFlag(f: string) {
+    worldFlags[f] = true;
     if (f === "slab" && !flags.slab) {
       flags.slab = true;
       weightX = 9;
@@ -2692,8 +2862,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       // a Cookie nobody here is watching, or an idle one, just lies still
       if (cookie && cookie.st !== "dying" && cookie.st !== "dead") {
         if (cookie.fighting && !cookie.puppet) cookie.hp = 0;
-        else if (!cookie.fighting || !P.inDungeon) cookie.setDead();
-      } else if (cookie && cookie.st === "dying" && cookie.puppet && !P.inDungeon) cookie.setDead();
+        else if (!cookie.fighting || P.zone !== "castle") cookie.setDead();
+      } else if (cookie && cookie.st === "dying" && cookie.puppet && P.zone !== "castle") cookie.setDead();
     }
   }
 
@@ -2706,10 +2876,18 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       deadLeft.set("dh", Infinity);
     }
     if (!online || !mobByKey.has(key)) return;
-    rpc<{ items: StackJson[]; drops: { item: string; n: number }[]; dup: boolean }>("vm_loot", { p_mob: key })
+    rpc<{ items: StackJson[]; drops: { item: string; n: number }[]; dup: boolean; xp_gained?: number; level?: number }>("vm_loot", { p_mob: key })
       .then((r) => {
         setItems(r.items);
-        if (!r.dup) lootDrops(r.drops);
+        if (r.dup) return;
+        lootDrops(r.drops);
+        const kind = m?.kind ?? MOB_SPAWNS.find((x) => x[0] === key)?.[1];
+        if (kind) killCounts[kind] = (killCounts[kind] ?? 0) + 1;
+        if (r.xp_gained) {
+          xp += r.xp_gained;
+          if (m) floater(`+${r.xp_gained} XP`, m.x, m.y + m.cfg.height + 1.2, m.z, "info");
+          applyProgress({ xp, level: r.level });
+        }
       })
       .catch(netError);
   }
@@ -2744,7 +2922,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     cookieFinished = true;
     flags.cookie = true;
     if (!seals.includes("seal_cookie")) seals = [...seals, "seal_cookie"];
-    for (const m of mobs) if (m.kind === "soldier" && !m.dungeon && m.alive && !m.puppet) m.die();
+    for (const m of mobs) if (m.kind === "soldier" && m.zone === "over" && m.alive && !m.puppet) m.die();
     const o = online;
     if (!o) return;
     // decided at entry, not now: a refresh during the fall may already carry the blade
@@ -2753,6 +2931,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const c = await o.realm.character(o.charId);
       if (online !== o) return;
       setItems(c.items);
+      applyChar(c);
       const blade = c.items.find((s) => s.def === "wpn_cookie_blade");
       if (due && blade) {
         cookieRewardDue = false;
@@ -2773,7 +2952,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function netState(): NetPlayer {
     return {
       x: r2(P.x), z: r2(P.z), y: r2(P.y), yw: r2(P.yaw), a: P.action, at: r2(P.action === "dead" ? P.at : P.at / P.dur), du: r2(P.dur), ac: actionCount,
-      mv: r2(P.speed), sp: P.sprint ? 1 : 0, b: P.blocking ? 1 : 0, d: P.dead ? 1 : 0, dn: P.inDungeon ? 1 : 0,
+      mv: r2(P.speed), sp: P.sprint ? 1 : 0, b: P.blocking ? 1 : 0, d: P.dead ? 1 : 0, zn: P.zone,
       hp: Math.ceil(P.hp), mh: P.maxHp, w: mainWeapon().id, sh: P.shield ? 1 : 0,
     };
   }
@@ -2781,11 +2960,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   type WorldSnap = { m: MobSnap[]; b: BossSnap | null };
   function worldSnap(): WorldSnap {
     const ps = env.players();
-    const near = (m: Mob) => ps.some((q) => q.inDungeon === m.dungeon && Math.hypot(q.x - m.x, q.z - m.z) < 120);
-    const anyDun = ps.some((q) => q.inDungeon);
+    // this client runs only its own zone: snapshot that zone's foes (and its boss)
+    const near = (m: Mob) => ps.some((q) => q.zone === m.zone && Math.hypot(q.x - m.x, q.z - m.z) < 120);
     return {
-      m: mobs.filter((m) => near(m) || (m.state !== "idle" && m.state !== "dead")).map((m) => m.snap()),
-      b: cookie && (anyDun || cookie.active) ? cookie.snap() : null,
+      m: mobs.filter((m) => m.zone === P.zone && (near(m) || (m.state !== "idle" && m.state !== "dead"))).map((m) => m.snap()),
+      b: cookie && P.zone === "castle" ? cookie.snap() : null,
     };
   }
 
@@ -2798,10 +2977,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (r) {
         const wasDead = r.state.dead;
         r.apply(b.s as NetPlayer, now);
-        if (r.state.dead && !wasDead && r.state.inDungeon === P.inDungeon && Math.hypot(r.state.x - P.x, r.state.z - P.z) < 40) say(r.name + " is down. Reach them to pull them up.");
+        if (r.state.dead && !wasDead && r.state.zone === P.zone && Math.hypot(r.state.x - P.x, r.state.z - P.z) < 40) say(r.name + " is down. Reach them to pull them up.");
       }
     }
-    if (b.w && !o.room.isRunner) {
+    if (b.w && b.wz === P.zone && !o.room.isRunner) {
       const w = b.w as WorldSnap;
       for (const sn of w.m) {
         const m = mobByKey.get(sn[0]);
@@ -2875,7 +3054,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         return;
       case "bell":
         ringT = 3;
-        if (!P.inDungeon) audio.bell(0.22, 330);
+        if (P.zone === "over") audio.bell(0.22, 330);
         return;
       case "revive":
         if (ev.to === me && P.dead) {
@@ -2929,7 +3108,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     o.lastBeat = performance.now();
     const play = Math.floor(o.playAcc);
     o.playAcc -= play;
-    return rpc<HeartbeatJson>("vm_heartbeat", { p_x: r2(P.x), p_z: r2(P.z), p_yaw: r2(P.yaw), p_dungeon: P.inDungeon, p_hp: Math.max(1, Math.round(P.hp)), p_play: play })
+    return rpc<HeartbeatJson>("vm_heartbeat", { p_x: r2(P.x), p_z: r2(P.z), p_yaw: r2(P.yaw), p_dungeon: P.zone === "castle", p_zone: P.zone, p_hp: Math.max(1, Math.round(P.hp)), p_play: play })
       .then((h) => {
         if (online !== o) return;
         let dh = h.hour - hour;
@@ -2957,7 +3136,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       o.arenaEmptyT = 0;
       return;
     }
-    const anyone = env.players().some((q) => q.inDungeon && !q.dead && Math.hypot(q.x - DUN.arena.x, q.z - DUN.arena.z) < DUN.arena.r + 4);
+    const anyone = env.players().some((q) => q.zone === "castle" && !q.dead && Math.hypot(q.x - DUN.arena.x, q.z - DUN.arena.z) < DUN.arena.r + 4);
     o.arenaEmptyT = anyone ? 0 : o.arenaEmptyT + dt;
     if (o.arenaEmptyT > 6) {
       o.arenaEmptyT = 0;
@@ -2968,11 +3147,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
 
   /** Start or stop simulating enemies and Cookie (called the moment the role changes). */
-  function applyRole() {
+  function applyRole(force = false) {
     const o = online;
     if (!o) return;
     const runner = o.room.isRunner;
-    if (runner === o.runner) return;
+    if (runner === o.runner && !force) return;
     o.runner = runner;
     for (const m of mobs) m.setPuppet(!runner);
     cookie?.setPuppet(!runner);
@@ -2986,7 +3165,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     o.room.elect();
     applyRole();
     const runner = o.room.isRunner;
-    for (const r of o.remotes.values()) r.update(rdt, now, env.time, P.inDungeon);
+    for (const r of o.remotes.values()) r.update(rdt, now, env.time, P.zone);
     o.tickT -= rdt;
     if (o.tickT <= 0) {
       o.tickT = 1 / o.room.rate;
@@ -3000,22 +3179,188 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     o.beatT -= rdt;
     if (o.beatT <= 0) void heartbeat();
     if (runner) runnerDuties(rdt);
+    questT -= rdt;
+    if (questT <= 0) {
+      questT = 1;
+      questTick();
+    }
+    if (banner && performance.now() - banner.at > 5200) {
+      banner = null;
+      push();
+    }
+  }
+
+  // ------------------------------------------------------------ progression, quests and shops
+  function questCtx(): QuestCtx {
+    return {
+      level, zone: P.zone, x: P.x, z: P.z,
+      count: (id) => countOf(items, id),
+      charFlag: (f) => (f === "talked" ? flags.talked : f === "ember" ? flags.ember : false),
+      worldFlag: (f) => !!worldFlags[f] || !!(flags as Record<string, boolean>)[f],
+      kills: (k) => killCounts[k] ?? 0,
+      boss: (id) => !!worldFlags[BOSSES[id]?.flag ?? id],
+    };
+  }
+
+  function showBanner(title: string, sub: string) {
+    banner = { title, sub, at: performance.now() };
+    push();
+  }
+
+  /** Mirrors the server's view of this character's experience, level, health and quests. */
+  function applyProgress(p: { xp?: number; level?: number; xp_lo?: number; xp_hi?: number; max_hp?: number; quests?: QuestBook; kill_counts?: Record<string, number> }, announce = true) {
+    const before = level;
+    if (p.xp !== undefined) xp = p.xp;
+    level = p.level ?? levelOf(xp);
+    xpLo = p.xp_lo ?? LEVEL_XP[level - 1] ?? 0;
+    xpHi = p.xp_hi ?? LEVEL_XP[level] ?? xpLo;
+    const st = statsFor(level);
+    P.maxHp = p.max_hp ?? st.maxHp;
+    P.maxStam = st.maxStam;
+    if (P.maxMana > 0) P.maxMana = st.mana;
+    if (p.quests) quests = p.quests;
+    if (p.kill_counts) Object.assign(killCounts, p.kill_counts);
+    if (announce && level > before) {
+      P.hp = P.maxHp;
+      P.stam = P.maxStam;
+      sparks.burst(40, P.x, P.y + 1.2, P.z, 3, 0xffd86a, 1.2, 0.22, { up: 3, grav: -0.5 });
+      audio.reward();
+      showBanner("Level " + level, `Health ${P.maxHp} · Stamina ${P.maxStam} · Strikes ${Math.round((statsFor(level).power - 1) * 100)}% harder`);
+    }
+    push();
+  }
+
+  function applyChar(c: CharacterJson, announce = true) {
+    applyProgress({ xp: c.xp, level: c.level, xp_lo: c.xp_lo, xp_hi: c.xp_hi, max_hp: c.max_hp, quests: c.quests, kill_counts: c.kill_counts }, announce);
+  }
+
+  function questTick() {
+    if (!online || mode === "title" || mode === "create" || mode === "loading") return;
+    for (const id of autoStarts(quests, level)) questCall(id, "start");
+    const ctx = questCtx();
+    for (const id of readyToStep(quests, ctx)) {
+      const step = QUEST_BY_ID[id].steps[quests[id].s];
+      // a "reach" is checked against the saved position: save it first
+      questCall(id, "step", step?.k === "reach");
+    }
+  }
+
+  function questCall(id: string, op: "start" | "step", beatFirst = false, then?: (r: QuestJson) => void) {
+    const o = online;
+    if (!o) return;
+    const now = performance.now();
+    if ((questWait.get(id) ?? 0) > now) return;
+    questWait.set(id, now + 60000);
+    (beatFirst ? heartbeat() : Promise.resolve())
+      .then(() => rpc<QuestJson>("vm_quest", { p_quest: id, p_op: op }))
+      .then((r) => {
+        if (online !== o) return;
+        questWait.set(id, 0);
+        questResult(id, op, r);
+        then?.(r);
+      })
+      .catch((e: Error) => {
+        const step = QUEST_BY_ID[id]?.steps[quests[id]?.s ?? 0];
+        questWait.set(id, performance.now() + (/not yet/i.test(e?.message ?? "") ? (step?.k === "boss" ? 30000 : 4000) : 15000));
+      });
+  }
+
+  function questResult(id: string, op: "start" | "step", r: QuestJson) {
+    const q = QUEST_BY_ID[id];
+    const wasDone = !!quests[id]?.done;
+    quests = r.quests ?? quests;
+    if (r.items) setItems(r.items);
+    applyProgress({ xp: r.xp, level: r.level });
+    if (!q) return;
+    if (op === "start") {
+      audio.quest();
+      say((q.main ? "" : "New quest: ") + (q.steps[0]?.text ?? q.name));
+      return;
+    }
+    if (r.done && !wasDone) {
+      audio.reward();
+      const gifts = [q.rewards.xp ? q.rewards.xp + " XP" : "", q.rewards.crowns ? q.rewards.crowns + " crowns" : "", ...q.rewards.items.map(([it, n]) => (n > 1 ? n + " " : "") + item(it).name)].filter(Boolean).join(" · ");
+      if (id === "q_gate") showBanner("KINGDOM UNLOCKED", "Harrenvale opens its gates: smiths, armourers, a tavern, the Castellan's work.");
+      else showBanner(q.name, "Quest complete · " + gifts);
+      return;
+    }
+    const next = q.steps[r.step];
+    if (next) {
+      audio.quest();
+      say(next.text);
+    }
+  }
+
+  function shopView(id: string): Hud["shop"] {
+    const sh = SHOPS.find((x) => x.id === id);
+    if (!sh) return null;
+    const crowns = countOf(items, "coin_crown");
+    return {
+      id: sh.id, name: sh.name, buys: sh.buys,
+      stock: sh.stock.map(([it, price]) => {
+        const p = price ?? ITEMS[it]?.value ?? 1;
+        return { id: it, name: item(it).name, price: p, ok: crowns >= p };
+      }),
+      sell: sh.buys
+        ? items
+            .filter((s) => {
+              const d = ITEMS[s.def];
+              return d && !d.soulbound && d.kind !== "key" && d.kind !== "coin" && !s.equipped && d.value > 0;
+            })
+            .map((s) => ({ uid: s.uid, id: s.def, name: item(s.def).name, count: s.count, price: Math.max(1, Math.floor(item(s.def).value * SELL_RATE)) }))
+        : [],
+    };
+  }
+
+  function openShop(id: string) {
+    if (!SHOPS.some((x) => x.id === id)) return;
+    shopId = id;
+    talk = null;
+    talkQueue = [];
+    mode = "shop";
+    audio.ui();
+    // the server checks the counter from the saved position
+    void heartbeat();
+    push();
+  }
+
+  function buy(itemId: string, n: number) {
+    if (!shopId) return;
+    rpc<{ items: StackJson[]; crowns: number }>("vm_buy", { p_shop: shopId, p_item: itemId, p_n: n })
+      .then((r) => {
+        setItems(r.items);
+        audio.pickup();
+        say(`Bought ${n > 1 ? n + " " : ""}${item(itemId).name}`);
+      })
+      .catch(netError);
+  }
+
+  function sell(uid: string, n: number) {
+    if (!shopId) return;
+    const s = items.find((x) => x.uid === uid);
+    rpc<{ items: StackJson[]; crowns: number }>("vm_sell", { p_shop: shopId, p_uid: uid, p_n: n })
+      .then((r) => {
+        setItems(r.items);
+        audio.pickup();
+        if (s) say(`Sold ${n > 1 ? n + " " : ""}${item(s.def).name}`);
+      })
+      .catch(netError);
   }
 
   function onlineHud(): OnlineHud {
     const o = online!;
     const now = performance.now();
-    const zone = (dn: boolean, x: number, z: number) => (dn ? "Cookie's Castle" : REGION_TITLE[regionAt(x, z)][0]);
-    const players: OnlineHud["players"] = [{ name, hp: Math.ceil(P.hp), max: P.maxHp, dead: P.dead, me: true, away: false, zone: zone(P.inDungeon, P.x, P.z) }];
+    const zone = (zn: ZoneId, x: number, z: number) => (zn === "over" ? REGION_TITLE[regionAt(x, z)][0] : ZONES[zn]?.name ?? zn);
+    const players: OnlineHud["players"] = [{ name, hp: Math.ceil(P.hp), max: P.maxHp, dead: P.dead, me: true, away: false, zone: zone(P.zone, P.x, P.z) }];
     for (const r of o.remotes.values())
-      players.push({ name: r.name, hp: r.state.hp, max: r.state.maxHp, dead: r.state.dead, me: false, away: !r.live(now), zone: zone(r.state.inDungeon, r.state.x, r.state.z) });
+      players.push({ name: r.name, hp: r.state.hp, max: r.state.maxHp, dead: r.state.dead, me: false, away: !r.live(now), zone: zone(r.state.zone, r.state.x, r.state.z) });
     return { solo: o.realm.solo, code: o.code, world: o.worldName, day: o.day, status: o.room.status, runner: o.room.isRunner, players };
   }
 
   function leaveOnline() {
     const o = online;
     if (!o) return;
-    void rpc("vm_heartbeat", { p_x: r2(P.x), p_z: r2(P.z), p_yaw: r2(P.yaw), p_dungeon: P.inDungeon, p_hp: Math.max(1, Math.round(P.hp)), p_play: Math.floor(o.playAcc) })
+    void rpc("vm_heartbeat", { p_x: r2(P.x), p_z: r2(P.z), p_yaw: r2(P.yaw), p_dungeon: P.zone === "castle", p_zone: P.zone, p_hp: Math.max(1, Math.round(P.hp)), p_play: Math.floor(o.playAcc) })
       .catch(() => {})
       .finally(() => o.realm.call("vm_leave", { p_world: o.worldId, p_char: o.charId }).catch(() => {}));
     o.room.leave();
@@ -3045,8 +3390,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     if (online) online.runner = online.room.isRunner;
     spawnMobs();
-    setZone(P.inDungeon);
-    if (P.inDungeon && P.z > DUN.galleryZ1 && !flags.cookie) {
+    setZone(P.zone);
+    if (P.zone === "castle" && P.z > DUN.galleryZ1 && !flags.cookie) {
       P.x = dun!.anchors.nurseryDoor.x;
       P.z = dun!.anchors.nurseryDoor.z - 2;
     }
@@ -3057,13 +3402,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     dispose() {
       disposed = true;
       cancelAnimationFrame(raf);
-      persist();
       leaveOnline();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("pagehide", persist);
       renderer.dispose();
       delete window.__veyr;
     },
@@ -3079,8 +3422,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.x = -3.4;
       P.z = -1.2;
       P.yaw = 2.35;
-      P.inDungeon = false;
-      setZone(false);
+      setZone("over");
       buildPlayer();
       P.y = world ? world.groundAt(P.x, P.z) : 0;
       push();
@@ -3089,68 +3431,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       look = l;
       buildPlayer();
     },
-    newGame(s, nm, l) {
-      audio.unlock();
-      leaveOnline();
-      deadLeft.clear();
-      slot = s;
-      name = nm.trim().slice(0, 18) || "Walker";
-      look = l;
-      items = addItem([], "arm_cloth", 1, uid);
-      items[0].equipped = true;
-      seals = [];
-      flags = freshFlags();
-      nodeState.clear();
-      deadMobs.clear();
-      hour = 7.3;
-      playTime = 0;
-      deaths = 0;
-      kills = 0;
-      weightX = 0;
-      respawnShrine = false;
-      bossDoneT = -1;
-      gateOpening = false;
-      Object.assign(P, { x: SPAWN.x, z: SPAWN.z, yaw: SPAWN.yaw, hp: 100, stam: 100, mana: 0, maxMana: 0, dead: false, inDungeon: false, action: "none", kx: 0, kz: 0, vx: 0, vz: 0 });
-      buildPlayer();
-      fadeThen(() => {
-        beginPlay();
-        persist();
-        placeAt = performance.now();
-        setTimeout(() => say("Dawn on the palisade road. A bell. Tanic is in the workshop lane."), 1200);
-      });
-    },
-    continueGame(s) {
-      audio.unlock();
-      leaveOnline();
-      const raw = localStorage.getItem(SAVE(s));
-      if (!raw) return;
-      try {
-        const data = JSON.parse(raw) as Save;
-        if (data.v !== 2) return;
-        slot = s;
-        load(data);
-        Object.assign(P, { dead: false, action: "none", kx: 0, kz: 0, vx: 0, vz: 0, stam: P.maxStam });
-        buildPlayer();
-        fadeThen(() => {
-          beginPlay();
-          say("The road kept your pockets.");
-        });
-      } catch {
-        say("That save could not be read.");
-      }
-    },
-    deleteSlot(s) {
-      localStorage.removeItem(SAVE(s));
-      slotCache = null;
-      push();
-    },
     toTitle() {
-      persist();
       leaveOnline();
       mode = "title";
       talk = null;
       reward = null;
-      setZone(false);
+      setZone("over");
       titleCam();
       push();
     },
@@ -3173,12 +3459,21 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (online) rpc<{ items: StackJson[] }>("vm_equip", { p_uid: id }, false).then((r) => setItems(r.items)).catch(netError);
       syncGear();
       audio.ui();
-      persist();
       push();
     },
     use: useItem,
     craft: doCraft,
     trade: doTrade,
+    openShop,
+    buy,
+    sell,
+    journal() {
+      if (mode === "play" || mode === "pause") {
+        mode = "journal";
+        audio.ui();
+        push();
+      }
+    },
     setQuality(q) {
       quality = q;
       localStorage.setItem("veyrmarch.quality", q);
@@ -3206,7 +3501,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const c = e.character;
       const w = e.world;
       const mem = e.member;
-      slot = -1;
       name = c.name;
       look = c.look as Look;
       items = c.items.map((x) => ({ uid: x.uid, def: x.def, count: x.count, equipped: x.equipped }));
@@ -3247,11 +3541,24 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.hp = c.hp > 0 ? Math.min(c.hp, c.max_hp) : c.max_hp;
       P.maxMana = c.mana_max;
       P.mana = P.maxMana;
+      for (const k of Object.keys(killCounts)) delete killCounts[k];
+      quests = {};
+      questWait.clear();
+      banner = null;
+      level = c.level ?? 1;
+      applyChar(c, false);
+      for (const k of Object.keys(worldFlags)) delete worldFlags[k];
+      for (const [f, on] of Object.entries(w.flags ?? {})) if (on) worldFlags[f] = true;
       if (mem.x !== null && mem.z !== null) {
         P.x = mem.x;
         P.z = mem.z;
         P.yaw = mem.yaw;
-        P.inDungeon = mem.dungeon;
+        P.zone = mem.zone && mem.zone in ZONES ? (mem.zone as ZoneId) : mem.dungeon ? "castle" : "over";
+        if (!zones.has(P.zone)) {
+          P.zone = "over";
+          P.x = SPAWN.x;
+          P.z = SPAWN.z;
+        }
       } else {
         // first time in this world: wake by the bell, a step apart from whoever is already here
         const others = w.members.filter((m) => m.online && m.character_id !== c.id).length;
@@ -3259,7 +3566,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         P.x = SPAWN.x + (others ? Math.cos(a) * 2.2 : 0);
         P.z = SPAWN.z + (others ? Math.sin(a) * 2.2 : 0);
         P.yaw = SPAWN.yaw;
-        P.inDungeon = false;
+        P.zone = "over";
         if (world) {
           const r = world.col.resolve(P.x, P.z, 0.5);
           P.x = r.x;
@@ -3267,7 +3574,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         }
       }
       Object.assign(P, { dead: false, action: "none", kx: 0, kz: 0, vx: 0, vz: 0, stam: P.maxStam });
-      const room = new Room(realm.backend, w.id, { id: c.id, name: c.name, look: c.look });
+      const room = new Room(realm.backend, w.id, { id: c.id, name: c.name, look: c.look }, P.zone);
       online = {
         realm, room, worldId: w.id, code: w.code, worldName: w.name, charId: c.id, day: w.day, remotes: new Map(), tickT: 0, beatT: 5, playAcc: 0,
         boss: w.boss?.cookie ?? null, arenaEmptyT: 0, wxSent: weightX, runner: false, lastBeat: 0,
@@ -3289,12 +3596,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   // test hooks for the browser harness (not used by the game)
   window.__veyr = {
-    state: () => ({ x: P.x, z: P.z, y: P.y, hp: P.hp, action: P.action, hold: P.holding, holdT: P.holdT, time: env.time, frameN, mode, region, dungeon: P.inDungeon, flags: { ...flags }, items: items.map((s) => s.def + ":" + s.count), seals: [...seals], cookie: cookie ? { hp: cookie.hp, st: cookie.st, phase: cookie.phaseN } : null, fps }),
-    teleport: (x: number, z: number, dungeon?: boolean) => {
-      if (dungeon !== undefined && dungeon !== P.inDungeon) setZone(dungeon);
+    state: () => ({ x: P.x, z: P.z, y: P.y, hp: P.hp, action: P.action, hold: P.holding, holdT: P.holdT, time: env.time, frameN, mode, region, dungeon: P.zone === "castle", zone: P.zone, flags: { ...flags }, items: items.map((s) => s.def + ":" + s.count), seals: [...seals], cookie: cookie ? { hp: cookie.hp, st: cookie.st, phase: cookie.phaseN } : null, fps }),
+    teleport: (x: number, z: number, where?: boolean | ZoneId) => {
+      const zn: ZoneId = where === undefined ? zoneAt(x) : typeof where === "boolean" ? (where ? "castle" : "over") : where;
+      if (zn !== P.zone) setZone(zn);
       P.x = x;
       P.z = z;
-      P.y = world ? world.groundAt(x, z) : 0;
+      P.y = groundAt(x, z);
       snapCam();
       nearestInteract();
     },
@@ -3312,7 +3620,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       nearestInteract();
     },
     setHour: (h: number) => (hour = h),
-    mobs: () => mobs.filter((m) => m.alive && m.dungeon === P.inDungeon).map((m) => ({ k: m.kind, x: m.x, z: m.z, hp: m.hp })),
+    mobs: () => mobs.filter((m) => m.alive && m.zone === P.zone).map((m) => ({ k: m.kind, x: m.x, z: m.z, hp: m.hp })),
     toys: () => (cookie ? cookie.toys.filter((m) => m.alive).map((m) => ({ k: m.kind, x: m.x, z: m.z, hp: m.hp })) : []),
     heal: () => {
       P.hp = P.maxHp;
@@ -3362,7 +3670,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       online
         ? {
             cid: online.room.cid, runner: online.room.isRunner, code: online.code, status: online.room.status,
-            peers: [...online.remotes.values()].map((r) => ({ name: r.name, x: r.state.x, z: r.state.z, live: r.live(performance.now()), dead: r.state.dead, dn: r.state.inDungeon, visible: r.rig.group.visible })),
+            peers: [...online.remotes.values()].map((r) => ({ name: r.name, x: r.state.x, z: r.state.z, live: r.live(performance.now()), dead: r.state.dead, dn: r.state.zone === "castle", zone: r.state.zone, visible: r.rig.group.visible })),
             mobs: mobs.filter((m) => m.alive).map((m) => ({ key: m.key, k: m.kind, x: m.x, z: m.z, hp: m.hp, puppet: m.puppet, st: m.state })),
             boss: cookie ? { hp: cookie.hp, st: cookie.st, puppet: cookie.puppet, toys: cookie.toys.length } : null,
             kills,

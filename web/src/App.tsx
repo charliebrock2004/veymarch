@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { STATION_NAMES } from "./game/data/zones";
+import { RARITY_COLOR, SET_BONUS, type Rarity } from "./game/data/items";
 import type { GameApi, Hud, Look, Quality } from "./game/Game";
 import { Controls } from "./ui/Controls";
 import { Glyph, ItemIcon } from "./ui/icons";
@@ -11,7 +13,7 @@ const COATS = ["#7a6248", "#5e6b45", "#6a3b2a", "#3c4458", "#8a7a5a", "#2e2a26"]
 const STYLES = ["Tied", "Short", "Long", "Shaved"];
 const BODIES = ["Slight", "Average", "Broad"];
 
-const STATION_NAME: Record<string, string> = { hand: "By hand", bench: "Workbench", forge: "Mara's Forge" };
+const STATION_NAME: Record<string, string> = STATION_NAMES;
 
 function fmtTime(s: number) {
   const m = Math.floor(s / 60);
@@ -395,13 +397,20 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
       {showControls && <Controls api={api} hud={hud} />}
       <div className="vm-hud">
         <div className="vm-vitals">
-          <div className="vm-name">{hud.name}</div>
+          <div className="vm-name">
+            {hud.name}
+            <span className="vm-lvl">Lv {hud.level}</span>
+          </div>
           <Bar v={hud.hp} max={hud.maxHp} kind="hp" />
           <Bar v={hud.stam} max={hud.maxStam} kind="stam" />
           {hud.ember && <Bar v={hud.mana} max={hud.maxMana} kind="mana" />}
+          <div className="vm-xp" title={`${hud.xp - hud.xpLo} / ${hud.xpHi - hud.xpLo} XP`}>
+            <i style={{ width: `${hud.xpHi > hud.xpLo ? Math.min(100, ((hud.xp - hud.xpLo) / (hud.xpHi - hud.xpLo)) * 100) : 100}%` }} />
+          </div>
           <div className="vm-weapon">
             <ItemIcon id={hud.weaponId} size={22} />
             <span>{hud.weapon}</span>
+            <em className="vm-crowns">{hud.crowns}<ItemIcon id="coin_crown" size={16} /></em>
           </div>
           {hud.online && !hud.online.solo && <Party hud={hud} />}
         </div>
@@ -427,6 +436,11 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
           </div>
         )}
         <div className="vm-topright">
+          {hud.online && (
+            <button className="vm-icon" onClick={() => api.journal()} aria-label="Journal">
+              <Glyph name="book" size={24} />
+            </button>
+          )}
           <button className="vm-icon" onClick={() => api.press("bag")} aria-label="Bag">
             <Glyph name="bag" size={24} />
           </button>
@@ -467,6 +481,14 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
       )}
       {hud.mode === "bag" && <Bag api={api} hud={hud} />}
       {hud.mode === "talk" && hud.talk && <Talk api={api} hud={hud} />}
+      {hud.mode === "shop" && hud.shop && <Shop api={api} hud={hud} />}
+      {hud.mode === "journal" && <Journal api={api} hud={hud} />}
+      {hud.banner && hud.mode !== "title" && (
+        <div className="vm-banner" key={hud.banner.at}>
+          <div>{hud.banner.title}</div>
+          <small>{hud.banner.sub}</small>
+        </div>
+      )}
       {hud.mode === "dead" && (
         <div className="vm-dead">
           <div className="vm-dead-title">You fall</div>
@@ -493,6 +515,11 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
               <button className="vm-mbtn primary" onClick={() => api.press("resume")}>
                 Resume
               </button>
+              {hud.online && (
+                <button className="vm-mbtn" onClick={() => api.journal()}>
+                  Journal
+                </button>
+              )}
               <button className="vm-mbtn" onClick={() => api.toTitle()}>
                 {hud.online && !hud.online.solo ? "Leave world" : "Save and quit"}
               </button>
@@ -550,7 +577,8 @@ function Bag({ api, hud }: { api: GameApi; hud: Hud }) {
   const items = hud.items.filter((i) => i.id !== "arm_cloth");
   const selected = items.find((i) => i.uid === sel) ?? null;
   const main = hud.items.find((i) => i.equipped && i.slot === "main");
-  const off = hud.items.find((i) => i.equipped && i.slot === "off");
+  const worn = (slot: string) => hud.items.find((i) => i.equipped && i.slot === slot);
+  const sets = Object.entries(SET_BONUS).filter(([k, b]) => hud.items.filter((i) => i.equipped && i.set === k).length >= b.pieces);
   return (
     <div className="vm-panel-screen">
       <div className="vm-panel bag">
@@ -569,26 +597,32 @@ function Bag({ api, hud }: { api: GameApi; hud: Hud }) {
         </div>
         {tab === "bag" ? (
           <div className="vm-bag">
-            <div className="vm-gear">
-              <div className="vm-gslot">
-                <label>Main hand</label>
-                <ItemIcon id={main?.id ?? "wpn_fists"} size={40} />
-                <span>{main?.name ?? "Fists"}</span>
-              </div>
-              <div className="vm-gslot">
-                <label>Off hand</label>
-                {off ? <ItemIcon id={off.id} size={40} /> : <div className="vm-empty" />}
-                <span>{off?.name ?? "Empty"}</span>
+            <div className="vm-gear vm-scroll">
+              <div className="vm-slots">
+                {SLOTS.map(([slot, label]) => {
+                  const it = slot === "main" ? main : worn(slot);
+                  return (
+                    <button key={slot} className={`vm-gslot ${it && sel === it.uid ? "on" : ""}`} onClick={() => it && setSel(it.uid)} title={label}>
+                      <label>{label}</label>
+                      {it ? <ItemIcon id={it.id} size={30} /> : slot === "main" ? <ItemIcon id="wpn_fists" size={30} /> : <div className="vm-empty" />}
+                    </button>
+                  );
+                })}
               </div>
               <div className="vm-stats">
+                <span>Level {hud.level} · {hud.xp - hud.xpLo}/{Math.max(1, hud.xpHi - hud.xpLo)} XP</span>
                 <span>Health {hud.hp}/{hud.maxHp}</span>
-                <span>Damage {main?.dmg ?? 4}</span>
+                <span>Damage {main?.dmg ?? 4} · Defence {hud.defence}</span>
+                <span>Crowns {hud.crowns}</span>
+                {sets.map(([k, b]) => (
+                  <span key={k} className="vm-setbonus">{b.name}: {b.text}</span>
+                ))}
               </div>
             </div>
             <div className="vm-grid vm-scroll">
               {items.length === 0 && <p className="vm-sub">Empty. Gather flint and wood in the forest.</p>}
               {items.map((i) => (
-                <button key={i.uid} className={`vm-item ${sel === i.uid ? "on" : ""} ${i.equipped ? "eq" : ""}`} onClick={() => setSel(i.uid)}>
+                <button key={i.uid} className={`vm-item ${sel === i.uid ? "on" : ""} ${i.equipped ? "eq" : ""}`} style={{ borderColor: i.rarity !== "common" ? RARITY_COLOR[i.rarity as Rarity] : undefined }} onClick={() => setSel(i.uid)}>
                   <ItemIcon id={i.id} size={38} />
                   {i.count > 1 && <b>{i.count}</b>}
                   {i.equipped && <em>E</em>}
@@ -599,9 +633,13 @@ function Bag({ api, hud }: { api: GameApi; hud: Hud }) {
               {selected ? (
                 <>
                   <ItemIcon id={selected.id} size={56} />
-                  <h3>{selected.name}</h3>
+                  <h3 style={{ color: RARITY_COLOR[selected.rarity as Rarity] }}>{selected.name}</h3>
+                  <p className="vm-rarity">{selected.rarity} · tier {selected.tier}</p>
                   <p>{selected.desc}</p>
                   {selected.dmg > 0 && <p className="vm-sub">Damage {selected.dmg}</p>}
+                  {selected.def > 0 && <p className="vm-sub">Defence {selected.def}</p>}
+                  {selected.passive && <p className="vm-passive">{selected.passive}</p>}
+                  {selected.set && SET_BONUS[selected.set] && <p className="vm-sub">Set: {SET_BONUS[selected.set].name}, {SET_BONUS[selected.set].pieces} pieces. {SET_BONUS[selected.set].text}</p>}
                   {selected.kind === "consumable" && (
                     <button className="vm-mbtn primary small" onClick={() => api.use(selected.uid)}>
                       Use
@@ -641,6 +679,105 @@ function Bag({ api, hud }: { api: GameApi; hud: Hud }) {
   );
 }
 
+const SLOTS: [string, string][] = [["main", "Main"], ["off", "Off"], ["head", "Head"], ["chest", "Chest"], ["hands", "Hands"], ["legs", "Legs"], ["feet", "Feet"], ["trinket", "Trinket"]];
+
+function Shop({ api, hud }: { api: GameApi; hud: Hud }) {
+  const sh = hud.shop!;
+  const [tab, setTab] = useState<"buy" | "sell">("buy");
+  return (
+    <div className="vm-panel-screen">
+      <div className="vm-panel bag">
+        <div className="vm-panel-head">
+          <div className="vm-tabs">
+            <button className={tab === "buy" ? "on" : ""} onClick={() => setTab("buy")}>
+              Buy
+            </button>
+            {sh.buys && (
+              <button className={tab === "sell" ? "on" : ""} onClick={() => setTab("sell")}>
+                Sell
+              </button>
+            )}
+          </div>
+          <h2 className="vm-shopname">{sh.name}</h2>
+          <span className="vm-crowns big">{hud.crowns}<ItemIcon id="coin_crown" size={20} /></span>
+          <button className="vm-icon" onClick={() => api.press("close")} aria-label="Close">
+            <Glyph name="close" size={22} />
+          </button>
+        </div>
+        <div className="vm-crafts vm-scroll">
+          {tab === "buy"
+            ? sh.stock.map((it) => (
+                <div key={it.id} className={`vm-craft ${it.ok ? "ok" : ""}`}>
+                  <ItemIcon id={it.id} size={40} />
+                  <div className="vm-craft-text">
+                    <b>{it.name}</b>
+                    <span>{it.price} crowns</span>
+                  </div>
+                  <button className="vm-mbtn small primary" disabled={!it.ok} onClick={() => api.buy(it.id, 1)}>
+                    Buy
+                  </button>
+                </div>
+              ))
+            : sh.sell.length === 0
+              ? <p className="vm-sub">Nothing they want. Equipped and soulbound things stay with you.</p>
+              : sh.sell.map((it) => (
+                  <div key={it.uid} className="vm-craft ok">
+                    <ItemIcon id={it.id} size={40} />
+                    <div className="vm-craft-text">
+                      <b>{it.name}{it.count > 1 ? ` ×${it.count}` : ""}</b>
+                      <span>{it.price} crowns each</span>
+                    </div>
+                    <button className="vm-mbtn small" onClick={() => api.sell(it.uid, 1)}>
+                      Sell
+                    </button>
+                    {it.count > 1 && (
+                      <button className="vm-mbtn small" onClick={() => api.sell(it.uid, it.count)}>
+                        All
+                      </button>
+                    )}
+                  </div>
+                ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
+  const live = hud.journal.filter((j) => !j.done);
+  const done = hud.journal.filter((j) => j.done);
+  return (
+    <div className="vm-panel-screen">
+      <div className="vm-panel wide">
+        <div className="vm-panel-head">
+          <h2>Journal</h2>
+          <button className="vm-icon" onClick={() => api.press("close")} aria-label="Close">
+            <Glyph name="close" size={22} />
+          </button>
+        </div>
+        <div className="vm-journal vm-scroll">
+          {live.length === 0 && <p className="vm-sub">No open quests. People in towns have work; talk to them.</p>}
+          {live.map((j) => (
+            <div key={j.id} className={`vm-quest ${j.main ? "main" : ""}`}>
+              <b>{j.name}</b>
+              <span>
+                {j.step} {j.progress && <em>{j.progress}</em>}
+              </span>
+              <small>{j.sub} · step {j.stepN} of {j.steps}</small>
+            </div>
+          ))}
+          {done.length > 0 && <h3>Done</h3>}
+          {done.map((j) => (
+            <div key={j.id} className="vm-quest done">
+              <b>{j.name}</b>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Talk({ api, hud }: { api: GameApi; hud: Hud }) {
   const t = hud.talk!;
   const [shown, setShown] = useState(0);
@@ -660,6 +797,13 @@ function Talk({ api, hud }: { api: GameApi; hud: Hud }) {
           </div>
         )}
         <p>{t.text.slice(0, shown)}</p>
+        {t.shop && done && !t.more && (
+          <div className="vm-trades" onClick={(e) => e.stopPropagation()}>
+            <button className="vm-mbtn small primary" onClick={() => api.openShop(t.shop!)}>
+              Trade
+            </button>
+          </div>
+        )}
         {t.trades.length > 0 && done && (
           <div className="vm-trades" onClick={(e) => e.stopPropagation()}>
             {t.trades.map((tr) => (

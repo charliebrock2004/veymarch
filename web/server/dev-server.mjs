@@ -37,6 +37,26 @@ const server = createServer((req, res) => {
     });
     return;
   }
+  // Test harness only (this server never runs in production): put a character's saved position
+  // somewhere, as if it had walked there, so a test can skip the walk.
+  if (req.method === "POST" && req.url === "/dev/place") {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", async () => {
+      try {
+        const { char, x, z, zone } = JSON.parse(body);
+        const hasZone = (await db.pg.query("select 1 from information_schema.columns where table_name = 'vm_members' and column_name = 'zone'")).rows.length > 0;
+        if (hasZone) await db.pg.query("update vm_members set x = $2, z = $3, zone = $4, dungeon = ($4 = 'castle'), pos_at = now(), last_seen = now() where character_id = $1::uuid", [char, x, z, zone]);
+        else await db.pg.query("update vm_members set x = $2, z = $3, dungeon = ($4 = 'castle'), pos_at = now(), last_seen = now() where character_id = $1::uuid", [char, x, z, zone]);
+        res.writeHead(200, { ...cors, "content-type": "application/json" });
+        res.end("{}");
+      } catch (e) {
+        res.writeHead(400, cors);
+        res.end(String(e?.message ?? e));
+      }
+    });
+    return;
+  }
   const m = /^\/rpc\/([a-z_]+)$/.exec(req.url || "");
   if (req.method !== "POST" || !m) {
     res.writeHead(404, cors);

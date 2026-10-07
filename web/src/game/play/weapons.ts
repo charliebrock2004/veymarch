@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { flatten } from "../engine/kit";
+import { ITEMS } from "../data/items.ts";
 
 const heldMat = new THREE.MeshPhongMaterial({ vertexColors: true, shininess: 50, specular: 0x444444 });
 
@@ -133,6 +134,84 @@ function buildWeapon(id: string): THREE.Group {
       g.add(mesh(new THREE.BoxGeometry(0.16, 0.08, 0.08), phong(0x55595e), 0, 0.34, 0));
       break;
     }
+    default:
+      familyModel(g, id, grip);
   }
   return g;
+}
+
+/** Metal by tier: iron grey, steel bright, black iron near-black; a few items have their own. */
+function metalOf(id: string, tier: number) {
+  if (id === "wpn_ember_sword") return 0xd8a070;
+  if (id === "wpn_finlay_longsword" || id === "wpn_blackiron_sword") return 0x2a2c30;
+  if (id === "wpn_fangbreaker") return 0xe8e0cc;
+  return tier >= 6 ? 0x34363a : tier >= 5 ? 0xc8ccd2 : tier >= 4 ? 0x9aa0a6 : 0xc07a42;
+}
+
+/** Weapons and shields without a hand-made model: built from their family and tier. */
+function familyModel(g: THREE.Group, id: string, grip: THREE.Material) {
+  const d = ITEMS[id];
+  if (!d) return;
+  const metal = metalOf(id, d.tier);
+  switch (d.family) {
+    case "sword":
+    case "greatsword": {
+      const big = d.family === "greatsword";
+      g.add(mesh(new THREE.CylinderGeometry(0.022, 0.024, big ? 0.34 : 0.2, 6), grip, 0, big ? -0.04 : 0.02, 0));
+      g.add(mesh(new THREE.SphereGeometry(big ? 0.05 : 0.04, 6, 5), phong(0x8a6a40), 0, big ? -0.22 : -0.1, 0));
+      g.add(mesh(new THREE.BoxGeometry(big ? 0.34 : 0.24, 0.035, 0.05), phong(d.tier >= 6 ? 0x1c1c20 : 0x55595e), 0, 0.13, 0));
+      const b = blade(big ? 1.15 : 0.88, big ? 0.095 : 0.07, metal, 100);
+      b.position.y = 0.14;
+      g.add(b);
+      if (id === "wpn_ember_sword") g.add(mesh(new THREE.BoxGeometry(0.02, 0.6, 0.012), new THREE.MeshBasicMaterial({ color: 0xff8a30 }), 0, 0.5, 0.012));
+      break;
+    }
+    case "dagger": {
+      g.add(mesh(new THREE.CylinderGeometry(0.02, 0.024, 0.14, 6), grip, 0, 0.02, 0));
+      g.add(mesh(new THREE.BoxGeometry(0.14, 0.025, 0.04), phong(0x55595e), 0, 0.1, 0));
+      const b = blade(0.32, 0.055, metal, 100);
+      b.position.y = 0.11;
+      g.add(b);
+      break;
+    }
+    case "axe": {
+      g.add(mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.78, 6), lam(0x6a4e34), 0, 0.28, 0));
+      const head = mesh(new THREE.BoxGeometry(0.03, 0.2, 0.22), phong(metal, 80), 0, 0.6, 0.1);
+      g.add(head);
+      g.add(mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.03, 10, 1, false, 0, Math.PI), phong(metal, 90), 0, 0.6, 0.2, 0, 0, Math.PI / 2));
+      break;
+    }
+    case "mace": {
+      g.add(mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.6, 6), grip, 0, 0.2, 0));
+      g.add(mesh(new THREE.SphereGeometry(0.075, 8, 6), phong(metal, 80), 0, 0.53, 0));
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        g.add(mesh(new THREE.BoxGeometry(0.02, 0.14, 0.06), phong(metal, 80), Math.cos(a) * 0.07, 0.53, Math.sin(a) * 0.07, 0, -a, 0));
+      }
+      break;
+    }
+    case "spear": {
+      g.add(mesh(new THREE.CylinderGeometry(0.02, 0.022, 1.7, 6), lam(0x7a5e40), 0, 0.5, 0));
+      g.add(mesh(new THREE.ConeGeometry(0.05, 0.28, 4), phong(metal, 90), 0, 1.48, 0));
+      break;
+    }
+    case "pick": {
+      g.add(mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.62, 6), lam(0x6a4e34), 0, 0.22, 0));
+      const head = mesh(new THREE.CylinderGeometry(0.025, 0.012, 0.46, 5), phong(metal, 80), 0, 0.5, 0, 0, 0, Math.PI / 2);
+      g.add(head);
+      break;
+    }
+    case "shield": {
+      if (id === "arm_steel_kite") {
+        const s = mesh(new THREE.CylinderGeometry(0.3, 0.12, 0.8, 4, 1), phong(0x9aa0a6, 70), 0, 0, 0, Math.PI / 2, Math.PI / 4, 0);
+        s.scale.set(1, 1, 0.18);
+        g.add(s);
+      } else {
+        g.add(mesh(new THREE.CylinderGeometry(0.34, 0.3, 0.07, 6), phong(0x6a6e74, 60), 0, 0, 0, Math.PI / 2, 0, 0));
+        g.add(mesh(new THREE.TorusGeometry(0.33, 0.025, 5, 6), phong(0x3a3c40), 0, 0, 0));
+      }
+      g.add(mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.05, 8), phong(0x55595e), 0, 0, 0.05, Math.PI / 2, 0, 0));
+      break;
+    }
+  }
 }

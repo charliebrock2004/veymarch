@@ -2,8 +2,8 @@
  * Slice data. Items, recipes, foes, nodes, quests, shops, bosses and zones live in ./data and are
  * shared with the server (server/gen-seed.mjs); this file keeps the words and re-exports the rest.
  */
-export { ITEMS, RECIPES, DESCRIPTIONS, RARITY_COLOR, SET_BONUS, type ItemDef, type RecipeDef, type Slot, type Rarity } from "./data/items";
-export { MOB_LOOT, MOB_SPAWNS, NODE_DEFS, CACHES, CACHE_DEFS, type Spawn, type NodeData } from "./data/world";
+export { ITEMS, RECIPES, DESCRIPTIONS, RARITY_COLOR, SET_BONUS, type ItemDef, type RecipeDef, type Slot, type Rarity } from "./data/items.ts";
+export { MOB_LOOT, MOB_SPAWNS, NODE_DEFS, CACHES, CACHE_DEFS, type Spawn, type NodeData } from "./data/world.ts";
 
 export const SPEEDS = { walk: 4.2, sprint: 6.4, cap: 7 };
 

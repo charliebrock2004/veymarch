@@ -1,3 +1,4 @@
+import { ITEMS } from "../game/data/items";
 /** Hand-drawn item icons in the art bible's palette. */
 
 const S = { fill: "none", stroke: "#1c1916", strokeWidth: 2, strokeLinejoin: "round" as const, strokeLinecap: "round" as const };
@@ -169,11 +170,175 @@ function art(id: string) {
         </g>
       );
     default:
-      return <circle cx="24" cy="24" r="12" {...S} fill="#a39888" />;
+      return generic(id);
   }
 }
 
-export function Glyph({ name, size = 26 }: { name: "sword" | "dodge" | "shield" | "flame" | "hand" | "bag" | "menu" | "heal" | "close" | "speak" | "gather" | "door"; size?: number }) {
+const TIER_METAL = ["#a39888", "#8a7a68", "#8a847a", "#c07a42", "#9aa0a6", "#d4d8de", "#3a3c42"];
+
+/** Icons for items without a drawn one, from what they are: a family, a slot, a tier. */
+function generic(id: string) {
+  const d = ITEMS[id];
+  if (!d) return <circle cx="24" cy="24" r="12" {...S} fill="#a39888" />;
+  const metal = id === "wpn_ember_sword" ? "#e0a070" : id === "wpn_finlay_longsword" || d.set === "bk" ? "#2c2e34" : d.set === "hound" ? "#2a2622" : TIER_METAL[Math.min(6, d.tier)];
+  const trim = d.rarity === "unique" || d.rarity === "legendary" ? "#d7a441" : "#4a3a2a";
+  if (id === "coin_crown")
+    return (
+      <g {...S}>
+        <circle cx="20" cy="26" r="11" fill="#c9b48a" />
+        <circle cx="28" cy="22" r="11" fill="#e4d2a6" />
+        <path d="M22 22 l3 -5 l3 4 l3 -4 l3 5 v4 h-12 z" fill="#b5893a" />
+      </g>
+    );
+  if (d.kind === "weapon") {
+    switch (d.family) {
+      case "axe":
+        return (
+          <g {...S}>
+            <path d="M12 40 L32 12" stroke="#6a4e34" strokeWidth={4} />
+            <path d="M26 10 C34 6 42 12 40 22 C36 18 32 18 28 20 Z" fill={metal} />
+          </g>
+        );
+      case "mace":
+        return (
+          <g {...S}>
+            <path d="M12 40 L28 20" stroke="#4a3a2a" strokeWidth={4} />
+            <circle cx="31" cy="16" r="8" fill={metal} />
+            <path d="M31 4 v6 M31 22 v6 M19 16 h6 M37 16 h6" stroke={metal} strokeWidth={3} />
+          </g>
+        );
+      case "spear":
+        return (
+          <g {...S}>
+            <path d="M8 42 L34 14" stroke="#7a5e40" strokeWidth={3} />
+            <path d="M32 16 L42 6 L38 18 Z" fill={metal} />
+          </g>
+        );
+      case "dagger":
+        return (
+          <g {...S}>
+            <path d="M14 36 L22 28" stroke="#4a3a2a" strokeWidth={4} />
+            <path d="M18 26 L22 30 M20 28 L36 12 L38 10 L36 16 Z" fill={metal} />
+          </g>
+        );
+      case "pick":
+        return (
+          <g {...S}>
+            <path d="M14 40 L30 18" stroke="#6a4e34" strokeWidth={4} />
+            <path d="M18 12 C26 8 36 10 42 18 C34 14 26 14 18 12 Z" fill={metal} />
+          </g>
+        );
+      default: {
+        const big = d.family === "greatsword";
+        return (
+          <g {...S}>
+            <path d={big ? "M10 38 L36 8 L40 8 L40 12 L14 42 Z" : "M12 36 L34 12 L38 12 L38 16 L16 38 Z"} fill={metal} />
+            <path d={big ? "M8 32 L18 42 M6 44 L10 40" : "M10 30 L18 38 M8 40 L12 36"} stroke={trim} strokeWidth={3} />
+            {id === "wpn_ember_sword" && <path d="M18 32 L34 14" stroke="#ff8a30" strokeWidth={2} />}
+          </g>
+        );
+      }
+    }
+  }
+  if (d.kind === "armour") {
+    switch (d.slot) {
+      case "head":
+        return (
+          <g {...S}>
+            <path d="M12 30 C12 16 36 16 36 30 V36 H12 Z" fill={metal} />
+            <path d="M18 28 h12" stroke={trim} strokeWidth={3} />
+          </g>
+        );
+      case "chest":
+        return (
+          <g {...S}>
+            <path d="M14 10 L20 12 C22 16 26 16 28 12 L34 10 L40 18 L36 22 V40 H12 V22 L8 18 Z" fill={metal} />
+            <path d="M24 18 V38" stroke={trim} />
+          </g>
+        );
+      case "hands":
+        return (
+          <g {...S}>
+            <path d="M16 40 V22 c0 -3 4 -3 4 0 v-6 c0 -3 4 -3 4 0 v-2 c0 -3 4 -3 4 0 v4 c0 -3 4 -3 4 0 v14 c0 6 -4 10 -10 10 Z" fill={metal} />
+          </g>
+        );
+      case "legs":
+        return (
+          <g {...S}>
+            <path d="M14 8 H34 L32 40 H26 L24 20 L22 40 H16 Z" fill={metal} />
+          </g>
+        );
+      case "feet":
+        return (
+          <g {...S}>
+            <path d="M14 10 H24 V30 H36 C40 30 40 38 36 38 H14 Z" fill={metal} />
+          </g>
+        );
+      case "off":
+        return (
+          <g {...S}>
+            <path d="M10 10 H38 V22 C38 32 30 38 24 42 C18 38 10 32 10 22 Z" fill={metal} />
+            <path d="M24 12 V38 M12 20 H36" stroke={trim} />
+          </g>
+        );
+    }
+  }
+  if (d.kind === "trinket")
+    return (
+      <g {...S}>
+        <path d="M16 34 C16 22 32 22 32 34 Z" fill="#b5893a" />
+        <circle cx="24" cy="36" r="3" fill="#6a4e34" />
+        <path d="M24 22 V14" stroke="#8e2f2f" strokeWidth={3} />
+      </g>
+    );
+  if (d.kind === "consumable") {
+    const liquid = id.includes("draught") ? "#c8384a" : id.includes("tonic") ? "#6a9a4a" : "#c89a5a";
+    if (id === "cons_bread")
+      return (
+        <g {...S}>
+          <ellipse cx="24" cy="28" rx="16" ry="10" fill="#c8964e" />
+          <path d="M14 26 l4 -4 M22 24 l4 -4 M30 26 l4 -4" stroke="#8a5e2e" />
+        </g>
+      );
+    if (id === "cons_roast" || id === "cons_stew")
+      return (
+        <g {...S}>
+          <ellipse cx="24" cy="32" rx="16" ry="7" fill="#7a5e40" />
+          <ellipse cx="24" cy="28" rx="12" ry="6" fill={id === "cons_stew" ? "#a06030" : "#8a3e22"} />
+        </g>
+      );
+    return (
+      <g {...S}>
+        <path d="M20 8 H28 V16 C34 18 36 24 36 30 C36 38 30 42 24 42 C18 42 12 38 12 30 C12 24 14 18 20 16 Z" fill="#d8d0c0" />
+        <path d="M14 30 C14 38 20 40 24 40 C30 40 34 36 34 30 Z" fill={liquid} />
+      </g>
+    );
+  }
+  if (id.startsWith("herb_"))
+    return (
+      <g {...S}>
+        <path d="M24 42 V20" stroke="#5e6b45" strokeWidth={3} />
+        <circle cx="24" cy="16" r="8" fill={id === "herb_marigold" ? "#e88a2a" : id === "herb_rotcap" ? "#7a6a5a" : "#cfd8c8"} />
+        <path d="M24 30 C16 28 14 24 14 22 M24 34 C32 32 34 28 34 26" stroke="#5e6b45" />
+      </g>
+    );
+  // materials: a lump in its colour
+  const col: Record<string, string> = { mat_coal: "#2a2826", mat_steel: "#c8ccd2", mat_black_iron: "#34363c", mat_wheat: "#d8b860", mat_meat: "#b05a4a", mat_hound_hide: "#2c2824", mat_boe_fang: "#efe8d8", mat_ember_shard: "#ff8a30" };
+  if (id === "mat_steel" || id === "mat_black_iron")
+    return (
+      <g {...S}>
+        <path d="M8 30 L16 20 H40 L32 30 Z" fill={col[id]} />
+        <path d="M8 30 V36 H32 V30 M32 36 L40 26 V20" fill="#6a6e74" />
+      </g>
+    );
+  return (
+    <g {...S}>
+      <path d="M10 32 C10 20 18 12 28 14 C38 16 42 26 36 34 C30 40 14 40 10 32 Z" fill={col[id] ?? "#a39888"} />
+    </g>
+  );
+}
+
+export function Glyph({ name, size = 26 }: { name: "sword" | "dodge" | "shield" | "flame" | "hand" | "bag" | "menu" | "heal" | "close" | "speak" | "gather" | "door" | "book"; size?: number }) {
   const p = { fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   return (
     <svg viewBox="0 0 32 32" width={size} height={size} aria-hidden>
@@ -218,6 +383,12 @@ export function Glyph({ name, size = 26 }: { name: "sword" | "dodge" | "shield" 
         <g {...p}>
           <path d="M8 28 V8 a8 8 0 0 1 16 0 V28" />
           <circle cx="20" cy="18" r="1.2" />
+        </g>
+      )}
+      {name === "book" && (
+        <g {...p}>
+          <path d="M6 8 C10 6 14 6 16 9 C18 6 22 6 26 8 V25 C22 23 18 23 16 26 C14 23 10 23 6 25 Z" />
+          <path d="M16 9 V26" />
         </g>
       )}
     </svg>

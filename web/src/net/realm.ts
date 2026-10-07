@@ -25,6 +25,24 @@ export type CharacterJson = {
   items: StackJson[];
   last_world: string | null;
   place: string | null;
+  /** experience, and the thresholds of the current level (equal at the cap) */
+  xp?: number;
+  xp_lo?: number;
+  xp_hi?: number;
+  crowns?: number;
+  kill_counts?: Record<string, number>;
+  quests?: Record<string, { s: number; b: number; done: boolean }>;
+};
+
+/** What vm_quest answers. */
+export type QuestJson = {
+  quests: Record<string, { s: number; b: number; done: boolean }>;
+  items: StackJson[];
+  xp: number;
+  level: number;
+  crowns: number;
+  done: boolean;
+  step: number;
 };
 
 export type WorldCard = {
@@ -51,7 +69,7 @@ export type WorldJson = {
   flags: Record<string, boolean>;
   hour: number;
   day: number;
-  boss: { cookie?: BossJson };
+  boss: Record<string, BossJson | undefined>;
   nodes: Record<string, { left: number; regrow_at: string }>;
   dead_mobs: Record<string, string | null>;
   max: number;
@@ -62,12 +80,12 @@ export type WorldJson = {
 export type EnterJson = {
   world: WorldJson;
   character: CharacterJson;
-  member: { x: number | null; z: number | null; yaw: number; dungeon: boolean; flags: Record<string, boolean> };
+  member: { x: number | null; z: number | null; yaw: number; dungeon: boolean; zone?: string; flags: Record<string, boolean> };
 };
 
 export type Profile = { characters: CharacterJson[]; worlds: WorldCard[] };
 
-export type HeartbeatJson = { ok: boolean; hour: number; day: number; flags: Record<string, boolean>; boss: { cookie?: BossJson }; now: string; online: number };
+export type HeartbeatJson = { ok: boolean; hour: number; day: number; flags: Record<string, boolean>; boss: Record<string, BossJson | undefined>; now: string; online: number };
 
 type Ident = { id: string; secret: string };
 const KEY = "veyrmarch.player";

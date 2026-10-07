@@ -1,4 +1,4 @@
-import type { ZoneId } from "./zones";
+import type { ZoneId } from "./zones.ts";
 
 /**
  * Who stands where, what they drop, and what can be gathered. Shared with the server.

@@ -1,4 +1,4 @@
-import type { ZoneId } from "./zones";
+import type { ZoneId } from "./zones.ts";
 
 /**
  * Quests are data. Each step is one checkable condition; the server checks it again before a
@@ -33,6 +33,8 @@ export type QuestStep = {
   x?: number;
   z?: number;
   r?: number;
+  /** what the NPC says as a talk or give step is completed */
+  lines?: string[];
 };
 
 export type QuestDef = {

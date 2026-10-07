@@ -4,6 +4,7 @@ import { Poser, buildCookie, characterMaterial, poseCookie, type CookieAction, t
 import { COOKIE_HP } from "../content";
 import { DUN } from "../world/layout";
 import { SILENT, type Env, type PlayerState } from "./env";
+import type { ZoneId } from "../data/zones";
 import { MOB_KINDS, Mob, type MobSnap } from "./mobs";
 
 /**
@@ -83,7 +84,7 @@ export class Cookie {
 
   /** The local player is in the castle, near enough to hear Cookie. */
   get heard() {
-    return this.env.heard(this.x, this.z, true, 70);
+    return this.env.heard(this.x, this.z, "castle", 70);
   }
 
   private get sfx() {
@@ -171,7 +172,7 @@ export class Cookie {
 
   /** Players Cookie can hurt: in the castle and standing. */
   private foes() {
-    return this.env.players().filter((q) => q.inDungeon && !q.dead);
+    return this.env.players().filter((q) => q.zone === "castle" && !q.dead);
   }
 
   /** The nearest standing player in the courtyard, kept for a while so Cookie commits. */
@@ -293,7 +294,7 @@ export class Cookie {
     for (const m of sn.ty) {
       let toy = this.toys.find((t) => t.key === m[0]);
       if (!toy) {
-        toy = new Mob(MOB_KINDS[m[8]] ?? "soldier", m[1], m[2], true, this.env, false);
+        toy = new Mob(MOB_KINDS[m[8]] ?? "soldier", m[1], m[2], "castle", this.env, false);
         toy.key = m[0];
         toy.summoned = true;
         toy.puppet = true;
@@ -535,13 +536,13 @@ export class Cookie {
     if (d.block) d.block.parent?.remove(d.block);
   }
 
-  private spawnToy(parent: (d: boolean) => THREE.Object3D) {
+  private spawnToy(parent: (zone: ZoneId) => THREE.Object3D) {
     void parent;
     const a = Math.random() * Math.PI * 2;
     const x = DUN.arena.x + Math.cos(a) * 11;
     const z = DUN.arena.z + Math.sin(a) * 11;
     const kind = Math.random() < 0.7 ? "soldier" : "mouse";
-    const m = new Mob(kind, x, z, true, this.env, false);
+    const m = new Mob(kind, x, z, "castle", this.env, false);
     m.key = "t" + Math.random().toString(36).slice(2, 7);
     m.summoned = true;
     m.state = "chase";
@@ -978,7 +979,7 @@ export class Cookie {
           dr.block = new THREE.Mesh(this.blockGeo, this.blockMats[i % this.blockMats.length]);
           dr.block.castShadow = true;
           dr.block.rotation.set(Math.random(), Math.random(), 0);
-          env.parent(true).add(dr.block);
+          env.parent("castle").add(dr.block);
         }
         if (dr.block) dr.block.position.set(dr.x, Math.max(0.7, 0.7 + (dr.t / 0.3) * 11), dr.z);
         if (dr.t <= 0) {
