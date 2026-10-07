@@ -234,3 +234,47 @@ test("changing zone needs a door", async () => {
   await db.exec(`update vm_members set x = 0, z = 162, pos_at = now() - interval '1 second' where character_id = '${c.id}'`);
   assert.equal((await beat(1200, 2.2, true)).ok, true, "through the castle door");
 });
+
+test("the bedroll moves the clock on only when you are alone", async () => {
+  const a = await player();
+  const b = await player();
+  const ca = await call("vm_create_character", { ...a, p_name: "Sleeper", p_look: {} });
+  const cb = await call("vm_create_character", { ...b, p_name: "Awake", p_look: {} });
+  const w = await call("vm_create_world", { ...a, p_name: "Night" });
+  await call("vm_enter", { ...a, p_world: w.id, p_char: ca.id });
+  const rest = () => call("vm_rest", { ...a, p_world: w.id, p_char: ca.id });
+  await assert.rejects(rest(), /bedroll/, "nobody has a position yet");
+  await call("vm_heartbeat", { ...a, p_world: w.id, p_char: ca.id, p_x: -7, p_z: -11, p_yaw: 0, p_dungeon: false, p_hp: 100, p_play: 1 });
+  await db.exec(`update vm_worlds set hour = 22, day = 3 where id = '${w.id}'`);
+  const r = await rest();
+  assert.equal(r.slept, true);
+  assert.ok(Math.abs(r.hour - 6.6) < 0.05);
+  assert.equal(r.day, 4);
+  await call("vm_join", { ...b, p_code: w.code, p_char: cb.id });
+  await db.exec(`update vm_worlds set hour = 23 where id = '${w.id}'`);
+  const r2 = await rest();
+  assert.equal(r2.slept, false, "a friend is here: the clock is shared");
+  assert.ok(r2.hour >= 23);
+});
+
+test("a maker can delete a world; a guest can leave one", async () => {
+  const a = await player();
+  const b = await player();
+  const ca = await call("vm_create_character", { ...a, p_name: "Maker", p_look: {} });
+  const cb = await call("vm_create_character", { ...b, p_name: "Guest", p_look: {} });
+  const ws = [];
+  for (let i = 0; i < 6; i++) ws.push(await call("vm_create_world", { ...a, p_name: "W" + i }));
+  await assert.rejects(call("vm_create_world", { ...a, p_name: "Seventh" }), /six worlds/);
+  await call("vm_join", { ...b, p_code: ws[0].code, p_char: cb.id });
+  await assert.rejects(call("vm_delete_world", { ...b, p_world: ws[0].id }), /maker/);
+  const pa = await call("vm_delete_world", { ...a, p_world: ws[0].id });
+  assert.equal(pa.worlds.length, 5);
+  assert.equal((await call("vm_profile", b)).worlds.length, 0, "gone for the guest too");
+  await assert.rejects(call("vm_join", { ...b, p_code: ws[0].code, p_char: cb.id }), /No world/);
+  await assert.rejects(call("vm_enter", { ...a, p_world: ws[0].id, p_char: ca.id }), /gone/);
+  await call("vm_create_world", { ...a, p_name: "Room again" });
+  await call("vm_join", { ...b, p_code: ws[1].code, p_char: cb.id });
+  const pb = await call("vm_leave_world", { ...b, p_world: ws[1].id });
+  assert.equal(pb.worlds.length, 0);
+  await assert.rejects(call("vm_leave_world", { ...a, p_world: ws[1].id }), /stays in your list/);
+});

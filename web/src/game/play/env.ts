@@ -21,6 +21,9 @@ export type PlayerState = {
   cid?: string;
 };
 
+/** Stands in for the audio engine when a sound is too far away to hear. */
+export const SILENT = new Proxy({}, { get: () => () => undefined }) as Audio;
+
 export type HurtOpts = { knock?: number; unblockable?: boolean; parryable?: boolean; source?: { stagger: (t: number) => void }; src?: string };
 
 /** Everything an enemy or the boss may touch. They never write player state directly. */
@@ -42,6 +45,8 @@ export interface Env {
   groundAt: (x: number, z: number) => number;
   blocked: (x: number, z: number) => boolean;
   shake: (a: number) => void;
+  /** Whether the local player is close enough to hear (and feel) something at x, z. */
+  heard: (x: number, z: number, dungeon: boolean, r?: number) => boolean;
   floater: (text: string, x: number, y: number, z: number, kind?: "dmg" | "heal" | "info" | "crit" | "fire") => void;
   combat: (on: boolean) => void;
   parent: (dungeon: boolean) => THREE.Object3D;

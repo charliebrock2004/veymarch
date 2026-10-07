@@ -74,5 +74,7 @@ export function getBackend(): Promise<Backend | null> {
     const { supabaseBackend } = await import("./supabase");
     return supabaseBackend(url, key);
   })();
+  // a failed download (offline for a moment) must not stick until the page reloads
+  cached.catch(() => (cached = null));
   return cached;
 }

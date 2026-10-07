@@ -116,6 +116,8 @@ create table if not exists vm_grants (
 alter table vm_members add column if not exists left_at timestamptz;
 alter table vm_players add column if not exists imports int not null default 0;
 alter table vm_boss_hits add column if not exists fire boolean not null default false;
+-- a deleted world keeps its rows (members' history) but is gone from every list and code lookup
+alter table vm_worlds add column if not exists deleted boolean not null default false;
 
 do $$
 declare t text;
@@ -375,7 +377,7 @@ begin
     'characters', coalesce((select jsonb_agg(vm_char_json(c.id) order by c.updated_at desc) from vm_characters c
                             where c.player_id = p_player and not c.deleted), '[]'::jsonb),
     'worlds', coalesce((select jsonb_agg(vm_world_card(w.id, p_player) order by w.updated_at desc) from vm_worlds w
-                        where w.owner = p_player or exists (select 1 from vm_members m where m.world_id = w.id and m.player_id = p_player and m.left_at is null)), '[]'::jsonb));
+                        where not w.deleted and (w.owner = p_player or exists (select 1 from vm_members m where m.world_id = w.id and m.player_id = p_player and m.left_at is null))), '[]'::jsonb));
 end $$;
 
 create or replace function vm_create_character(p_player uuid, p_secret text, p_name text, p_look jsonb) returns jsonb
@@ -456,7 +458,7 @@ language plpgsql security definer set search_path = public as $$
 declare v_code text; v_id uuid; v_alpha text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; v_i int; v_name text; v_hp int;
 begin
   perform vm_auth(p_player, p_secret);
-  if (select count(*) from vm_worlds where owner = p_player) >= 6 then raise exception 'You already own six worlds'; end if;
+  if (select count(*) from vm_worlds where owner = p_player and not deleted) >= 6 then raise exception 'You already own six worlds'; end if;
   v_name := coalesce(nullif(left(btrim(regexp_replace(coalesce(p_name, ''), '[[:cntrl:]<>]', '', 'g')), 32), ''), 'A Realm');
   loop
     v_code := '';
@@ -479,7 +481,7 @@ declare v_w vm_worlds; v_code text := upper(regexp_replace(coalesce(p_code, ''),
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   -- lock the world so two people joining at once cannot both take the last seat
-  select * into v_w from vm_worlds where code = v_code for update;
+  select * into v_w from vm_worlds where code = v_code and not deleted for update;
   if not found then raise exception 'No world has that code'; end if;
   if not exists (select 1 from vm_members m join vm_characters c on c.id = m.character_id
                  where m.world_id = v_w.id and m.player_id = p_player and m.left_at is null and not c.deleted) then
@@ -493,6 +495,7 @@ create or replace function vm_enter(p_player uuid, p_secret text, p_world uuid, 
 language plpgsql security definer set search_path = public as $$
 begin
   perform vm_own_char(p_player, p_secret, p_char);
+  if exists (select 1 from vm_worlds where id = p_world and deleted) then raise exception 'That world is gone'; end if;
   if not exists (select 1 from vm_worlds where id = p_world and owner = p_player)
      and not exists (select 1 from vm_members where world_id = p_world and player_id = p_player and left_at is null) then
     raise exception 'Join that world with its code first';
@@ -548,6 +551,28 @@ begin
   update vm_members set last_seen = now() - interval '10 minutes' where world_id = p_world and character_id = p_char;
 end $$;
 
+-- Sleeping on the bedroll moves the clock on (to morning, or by two hours), but only when nobody
+-- else is in the world: in a shared world the clock belongs to everyone.
+create or replace function vm_rest(p_player uuid, p_secret text, p_world uuid, p_char uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_m vm_members; v_w vm_worlds; v_h real;
+begin
+  perform vm_own_char(p_player, p_secret, p_char);
+  select * into v_w from vm_worlds where id = p_world for update;
+  v_m := vm_member(p_world, p_char);
+  if v_m.dungeon or v_m.x is null or sqrt((v_m.x + 7.4) ^ 2 + (v_m.z + 11.9) ^ 2) > 16 then raise exception 'Your bedroll is in Hearthfen'; end if;
+  perform vm_tick(p_world);
+  select * into v_w from vm_worlds where id = p_world;
+  if exists (select 1 from vm_members where world_id = p_world and character_id <> p_char and player_id <> p_player
+             and left_at is null and last_seen > now() - interval '40 seconds') then
+    return jsonb_build_object('hour', v_w.hour, 'day', v_w.day, 'slept', false);
+  end if;
+  v_h := case when v_w.hour > 18 or v_w.hour < 6 then 6.6 else v_w.hour + 2 end;
+  update vm_worlds set hour = v_h, day = day + case when v_w.hour > 18 then 1 else 0 end, clock_at = now(), updated_at = now()
+    where id = p_world returning * into v_w;
+  return jsonb_build_object('hour', v_w.hour, 'day', v_w.day, 'slept', true);
+end $$;
+
 -- Leave a world for good (it disappears from your list and frees your seat). Rejoin with the code.
 create or replace function vm_leave_world(p_player uuid, p_secret text, p_world uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
@@ -555,6 +580,19 @@ begin
   perform vm_auth(p_player, p_secret);
   if exists (select 1 from vm_worlds where id = p_world and owner = p_player) then raise exception 'You made this world: it stays in your list'; end if;
   update vm_members set left_at = now(), last_seen = now() - interval '10 minutes' where world_id = p_world and player_id = p_player and left_at is null;
+  return vm_profile(p_player, p_secret);
+end $$;
+
+-- The maker deletes a world: everyone in it leaves, and it frees one of the maker's six.
+create or replace function vm_delete_world(p_player uuid, p_secret text, p_world uuid) returns jsonb
+language plpgsql security definer set search_path = public as $$
+begin
+  perform vm_auth(p_player, p_secret);
+  perform 1 from vm_worlds where id = p_world and owner = p_player and not deleted for update;
+  if not found then raise exception 'Only the world''s maker can do that'; end if;
+  update vm_worlds set deleted = true, updated_at = now() where id = p_world;
+  update vm_members set left_at = coalesce(left_at, now()), last_seen = now() - interval '10 minutes' where world_id = p_world;
+  update vm_characters set last_world = null where last_world = p_world;
   return vm_profile(p_player, p_secret);
 end $$;
 
@@ -869,7 +907,7 @@ end $$;
 do $$
 declare f record; api text[] := array['vm_register','vm_profile','vm_create_character','vm_import_character','vm_delete_character','vm_character',
   'vm_create_world','vm_join','vm_enter','vm_heartbeat','vm_leave','vm_gather','vm_craft','vm_equip','vm_use','vm_trade','vm_loot',
-  'vm_world_flag','vm_char_flag','vm_member_flag','vm_boss_hit','vm_boss_reset','vm_died','vm_leave_world','vm_kick'];
+  'vm_world_flag','vm_char_flag','vm_member_flag','vm_boss_hit','vm_boss_reset','vm_died','vm_leave_world','vm_kick','vm_rest','vm_delete_world'];
 begin
   for f in select p.oid::regprocedure as sig, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname like 'vm\_%' loop

@@ -344,6 +344,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let lastCookieSt = "";
   /** online: whether this session already handled Cookie's fall (the world flag can arrive first) */
   let cookieFinished = false;
+  /** This character has never carried Cookie's blade: the next fall shows the reward screen. */
+  let cookieRewardDue = false;
+  /** A reward that arrived while the player was down or in a menu waits for them. */
+  let rewardWaiting = false;
   const r2 = (v: number) => Math.round(v * 100) / 100;
 
   // player
@@ -399,6 +403,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     groundAt: (x, z) => (world ? world.groundAt(x, z) : 0),
     blocked: (x, z) => (world ? world.inRiver(x, z) : false),
     shake: (a) => (shake = Math.max(shake, a)),
+    heard: (x, z, d, r = 45) => d === P.inDungeon && Math.hypot(x - P.x, z - P.z) < r,
     floater: (t, x, y, z, k) => floater(t, x, y, z, k),
     combat: () => (combatT = 3),
     parent: (d) => (d ? dun!.root : world!.root),
@@ -796,10 +801,21 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     interacts.push({
       x: a.bed.x, z: a.bed.z, r: 2.0, dungeon: false, label: () => "Rest (your bedroll)",
       act: () => fadeThen(() => {
-        // in a shared world the clock belongs to everyone
         if (!online) {
           if (hour > 18 || hour < 6) hour = 6.6;
           else hour += 2;
+        } else {
+          // the world's clock moves on only if nobody else is here (it belongs to everyone)
+          const o = online;
+          heartbeat()
+            .then(() => rpc<{ hour: number; day: number; slept: boolean }>("vm_rest"))
+            .then((r) => {
+              if (online !== o) return;
+              hour = r.hour;
+              o.day = r.day;
+              if (!r.slept) say("Others are about. The world's clock keeps its own time.");
+            })
+            .catch(() => {});
         }
         P.hp = P.maxHp;
         P.stam = P.maxStam;
@@ -1176,6 +1192,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   // ------------------------------------------------------------ combat
   function startAction(a: HumanAction, dur: number, hitAt: number) {
+    // a new action forgets what an interrupted gather or revive was aimed at
+    pendingGather = null;
+    pendingRevive = null;
     actionCount++;
     P.action = a;
     P.at = 0;
@@ -2136,6 +2155,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (cookie.st === "dead" && (online ? !cookieFinished : !flags.cookie) && bossDoneT < 0) {
         bossDoneT = 1.4;
       }
+      if (rewardWaiting && mode === "play" && !P.dead) {
+        rewardWaiting = false;
+        mode = "reward";
+        push();
+      }
       if (bossDoneT > 0) {
         bossDoneT -= dt;
         if (bossDoneT <= 0) {
@@ -2255,7 +2279,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       hitStop -= rdt;
       dt = rdt * 0.08;
     }
-    if (cookie && cookie.st === "dying") dt *= 0.55;
+    if (cookie && cookie.st === "dying" && cookie.heard) dt *= 0.55;
     env.time += dt;
     if (fade !== fadeTarget) {
       fade += Math.sign(fadeTarget - fade) * rdt * 3.2;
@@ -2268,8 +2292,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (fade <= 0 && fadeTarget === 0) fade = 0;
     }
     if (world) {
-      // a shared world keeps running behind menus
-      const sim = online ? mode !== "title" && mode !== "create" && mode !== "loading" : mode === "play" || mode === "dead";
+      // a shared world keeps running behind menus; your own single player world waits for you
+      const shared = online && !online.realm.solo;
+      const sim = shared ? mode !== "title" && mode !== "create" && mode !== "loading" : mode === "play" || mode === "dead";
       if (sim) {
         hour = (hour + dt / 90) % 24;
         playTime += rdt;
@@ -2661,8 +2686,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     else if (f === "cookie" && !flags.cookie) {
       flags.cookie = true;
       if (!seals.includes("seal_cookie")) seals = [...seals, "seal_cookie"];
-      // a fight in progress finishes on screen (the runner's snapshot brings the fall); an idle Cookie just lies still
-      if (cookie && !cookie.fighting && cookie.st !== "dying" && cookie.st !== "dead") cookie.setDead();
+      // a fight in progress finishes on screen: the runner plays the fall (its snapshot brings it to everyone);
+      // a Cookie nobody here is watching, or an idle one, just lies still
+      if (cookie && cookie.st !== "dying" && cookie.st !== "dead") {
+        if (cookie.fighting && !cookie.puppet) cookie.hp = 0;
+        else if (!cookie.fighting || !P.inDungeon) cookie.setDead();
+      } else if (cookie && cookie.st === "dying" && cookie.puppet && !P.inDungeon) cookie.setDead();
     }
   }
 
@@ -2716,20 +2745,23 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     for (const m of mobs) if (m.kind === "soldier" && !m.dungeon && m.alive && !m.puppet) m.die();
     const o = online;
     if (!o) return;
-    const had = items.some((s) => s.def === "wpn_cookie_blade");
+    // decided at entry, not now: a refresh during the fall may already carry the blade
+    const due = cookieRewardDue;
     try {
       const c = await o.realm.character(o.charId);
       if (online !== o) return;
       setItems(c.items);
       const blade = c.items.find((s) => s.def === "wpn_cookie_blade");
-      if (!had && blade) {
+      if (due && blade) {
+        cookieRewardDue = false;
         items = equip(items, blade.uid);
         syncGear();
         rpc<{ items: StackJson[] }>("vm_equip", { p_uid: blade.uid }, false).then((r) => setItems(r.items)).catch(() => {});
         reward = ["wpn_cookie_blade", "wpn_cookie_pick", "key_cookie_core"].map((id) => ({ id, name: item(id).name, desc: DESCRIPTIONS[id] ?? "" }));
         if (mode === "play" || mode === "bag" || mode === "talk") mode = "reward";
+        else rewardWaiting = true;
         audio.reward();
-      } else say(had ? "Cookie falls again in this world. You already carry its Core." : "Cookie is defeated. The toys go still.");
+      } else say(blade ? "Cookie falls again in this world. You already carry its Core." : "Cookie is defeated. The toys go still.");
     } catch (e) {
       netError(e);
     }
@@ -2819,7 +2851,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         if (ev.to === me) claimKill(String(ev.m), findMob(ev.m));
         return;
       case "bhp":
-        if (cookie && !flags.cookie) {
+        // applied even after the world flag: the runner needs the killing blow to finish the fight
+        if (cookie && cookie.st !== "dead") {
           cookie.netHit(num(ev.hp, cookie.hp), num(ev.x), num(ev.z), !!ev.hv, !!ev.f);
           if (num(ev.hp, 1) <= 0) applyWorldFlag("cookie");
         }
@@ -2903,7 +2936,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         if (Math.abs(dh) > 0.08) hour = h.hour;
         o.day = h.day;
         for (const [f, on] of Object.entries(h.flags ?? {})) if (on) applyWorldFlag(f);
-        if (h.boss?.cookie) o.boss = h.boss.cookie;
+        if (h.boss?.cookie) {
+          o.boss = h.boss.cookie;
+          // the server's pool is the truth: a lost "bhp" message cannot leave the runner's Cookie healthier
+          if (cookie && !cookie.puppet && cookie.fighting && h.boss.cookie.hp < cookie.hp) cookie.hp = h.boss.cookie.hp;
+        }
         o.room.aloneHint = h.online <= 1;
       })
       .catch(() => {
@@ -3201,6 +3238,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       respawnShrine = flags.shrine;
       bossDoneT = -1;
       cookieFinished = flags.cookie;
+      cookieRewardDue = !c.items.some((s) => s.def === "wpn_cookie_blade");
+      rewardWaiting = false;
       gateOpening = false;
       P.maxHp = c.max_hp;
       P.hp = c.hp > 0 ? Math.min(c.hp, c.max_hp) : c.max_hp;

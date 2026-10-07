@@ -130,11 +130,20 @@ export class Realm {
     return this.ident ? `VM1.${this.ident.id}.${this.ident.secret}` : "";
   }
 
+  /** The key this device used before the last switch (kept so a switch can be undone). */
+  get previousKey() {
+    const v = readIdent(this.key + ".prev");
+    return v ? `VM1.${v.id}.${v.secret}` : "";
+  }
+
   async useDeviceKey(key: string) {
     const m = /^VM1\.([0-9a-f-]{36})\.([0-9a-f]{24,128})$/i.exec(key.trim());
     if (!m) throw new RealmError("That is not a VEYRMARCH player key");
     const next = { id: m[1].toLowerCase(), secret: m[2].toLowerCase() };
+    if (this.ident && this.ident.id === next.id && this.ident.secret === next.secret) return;
     await this.backend.rpc("vm_profile", { p_player: next.id, p_secret: next.secret });
+    // the old key exists only on this device (the server keeps a hash): keep it to switch back
+    if (this.ident) writeIdent(this.key + ".prev", this.ident);
     this.ident = next;
     writeIdent(this.key, next);
   }
@@ -191,6 +200,14 @@ export class Realm {
   }
   enter(worldId: string, charId: string) {
     return this.call<EnterJson>("vm_enter", { p_world: worldId, p_char: charId });
+  }
+  /** Leave someone else's world for good (rejoin with its code). */
+  leaveWorld(worldId: string) {
+    return this.call<Profile>("vm_leave_world", { p_world: worldId });
+  }
+  /** Delete a world you made; everyone in it loses it from their list. */
+  deleteWorld(worldId: string) {
+    return this.call<Profile>("vm_delete_world", { p_world: worldId });
   }
 }
 

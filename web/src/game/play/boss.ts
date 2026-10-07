@@ -3,7 +3,7 @@ import type { Decal } from "../engine/fx";
 import { Poser, buildCookie, characterMaterial, poseCookie, type CookieAction, type Rig } from "../engine/rig";
 import { COOKIE_HP } from "../content";
 import { DUN } from "../world/layout";
-import type { Env, PlayerState } from "./env";
+import { SILENT, type Env, type PlayerState } from "./env";
 import { MOB_KINDS, Mob, type MobSnap } from "./mobs";
 
 /**
@@ -81,6 +81,15 @@ export class Cookie {
   private blockGeo = new THREE.BoxGeometry(1.4, 1.4, 1.4);
   private blockMats: THREE.Material[];
 
+  /** The local player is in the castle, near enough to hear Cookie. */
+  get heard() {
+    return this.env.heard(this.x, this.z, true, 70);
+  }
+
+  private get sfx() {
+    return this.heard ? this.env.audio : SILENT;
+  }
+
   constructor(private env: Env, parent: THREE.Object3D, blockMats: THREE.Material[], private musicLid: THREE.Object3D) {
     this.rig = buildCookie();
     this.mat = characterMaterial.clone() as THREE.MeshLambertMaterial;
@@ -105,7 +114,8 @@ export class Cookie {
     this.rig.group.position.set(this.x, this.y, this.z);
   }
 
-  reset() {
+  /** Clears everything a fight leaves around: toys, falling blocks, the floor mark, the beam. */
+  private clearFight() {
     for (const m of this.toys) m.remove();
     this.toys = [];
     for (const d of this.drops) this.clearDrop(d);
@@ -113,6 +123,10 @@ export class Cookie {
     this.env.decals.release(this.decal);
     this.decal = null;
     this.env.beam.hide();
+  }
+
+  reset() {
+    this.clearFight();
     this.hp = this.max;
     this.st = "dormant";
     this.phaseN = 1;
@@ -131,6 +145,7 @@ export class Cookie {
   }
 
   setDead() {
+    this.clearFight();
     this.st = "dead";
     this.hp = 0;
     this.y = 0;
@@ -302,17 +317,17 @@ export class Cookie {
     }
     if ((prev === "beam" || prev === "beamtell") && st !== "beam") env.beam.hide();
     if (TELLS.includes(st)) this.decal = env.decals.get();
-    if (st === "peck" || st === "phase") env.audio.squeak();
-    else if (st === "slide") env.audio.swing(true);
-    else if (st === "spin") env.audio.wind();
-    else if (st === "beamtell" || st === "beam") env.audio.beam();
-    else if (st === "slamtell") env.audio.charge();
-    else if (st === "call") env.audio.bell(0.2, 660);
+    if (st === "peck" || st === "phase") this.sfx.squeak();
+    else if (st === "slide") this.sfx.swing(true);
+    else if (st === "spin") this.sfx.wind();
+    else if (st === "beamtell" || st === "beam") this.sfx.beam();
+    else if (st === "slamtell") this.sfx.charge();
+    else if (st === "call") this.sfx.bell(0.2, 660);
     else if (st === "land") {
       env.flashes.ring(this.x, 0, this.z, 4.6, 0xffcf90, 0.6);
       env.dust.burst(30, this.x, 0.3, this.z, 6, 0xd8c8b0, 0.9, 0.35, { up: 1.5 });
-      env.audio.thud();
-      env.shake(0.6);
+      this.sfx.thud();
+      if (this.heard) env.shake(0.6);
     } else if (st === "dying") {
       env.beam.hide();
       for (const d of this.drops) this.clearDrop(d);
@@ -320,8 +335,8 @@ export class Cookie {
       this.deadT = 0;
     } else if (st === "dizzy") env.floater("Dizzy!", this.x, 3.6, this.z, "info");
     if (st === "perch" && prev === "climb") {
-      env.audio.thud();
-      env.shake(0.3);
+      this.sfx.thud();
+      if (this.heard) env.shake(0.3);
     }
   }
 
@@ -575,7 +590,7 @@ export class Cookie {
         this.decal = null;
         env.beam.hide();
         this.go("phase", 1.6);
-        env.audio.squeak();
+        this.sfx.squeak();
         env.floater("The coat opens.", this.x, 4, this.z, "info");
       } else if (this.phaseN === 2 && this.hp < this.max * 0.33) {
         this.phaseN = 3;
@@ -622,14 +637,14 @@ export class Cookie {
             this.callCd = 14;
             this.spawnToy(env.parent);
             this.spawnToy(env.parent);
-            env.audio.bell(0.2, 660);
+            this.sfx.bell(0.2, 660);
           } else if (this.phaseN >= 2 && d < 6 && Math.random() < 0.55) {
             this.go("bow", 0.8);
             this.decal = env.decals.get();
           } else if (this.phaseN >= 2 && d > 4 && Math.random() < 0.6) {
             this.go("beamtell", 0.95);
             this.decal = env.decals.get();
-            env.audio.beam();
+            this.sfx.beam();
           } else if (d < 3.4) {
             this.go("pecktell", 0.6);
             this.decal = env.decals.get();
@@ -658,7 +673,7 @@ export class Cookie {
           this.go("peck", 0.3);
           this.kx += Math.sin(this.yaw) * 6;
           this.kz += Math.cos(this.yaw) * 6;
-          env.audio.squeak();
+          this.sfx.squeak();
         }
         break;
       case "peck":
@@ -682,7 +697,7 @@ export class Cookie {
           env.decals.release(this.decal);
           this.decal = null;
           this.go("slide", 1.05);
-          env.audio.swing(true);
+          this.sfx.swing(true);
         }
         break;
       case "slide": {
@@ -698,8 +713,8 @@ export class Cookie {
         this.strike((q) => Math.hypot(q.x - this.x, q.z - this.z) < 1.7, 16, this.x, this.z, { knock: 3 });
         if (this.t <= 0 || bumped) {
           if (bumped) {
-            env.audio.thud();
-            env.shake(0.3);
+            this.sfx.thud();
+            if (this.heard) env.shake(0.3);
             env.floater("Dizzy!", this.x, 3.6, this.z, "info");
             this.go("dizzy", 1.8);
           } else this.recover(1.0);
@@ -708,7 +723,7 @@ export class Cookie {
       }
       case "call":
         action = "call";
-        if (Math.floor(env.time * 6) !== Math.floor((env.time - dt) * 6)) env.audio.bell(0.08, 880);
+        if (Math.floor(env.time * 6) !== Math.floor((env.time - dt) * 6)) this.sfx.bell(0.08, 880);
         if (this.t <= 0) this.recover(0.5);
         break;
       case "bow":
@@ -718,7 +733,7 @@ export class Cookie {
           env.decals.release(this.decal);
           this.decal = null;
           this.go("spin", 1.8);
-          env.audio.wind();
+          this.sfx.wind();
           this.hitTick = 0;
         }
         break;
@@ -754,7 +769,7 @@ export class Cookie {
             env.decals.release(this.decal);
             this.decal = null;
             this.go("beam", 0.55);
-            env.audio.beam();
+            this.sfx.beam();
           }
         } else {
           const dist = 22;
@@ -797,7 +812,7 @@ export class Cookie {
         if (this.t <= 0) {
           this.boxRate = 0.86;
           this.recover(0.3);
-          env.audio.squeak();
+          this.sfx.squeak();
         }
         break;
       case "climb": {
@@ -817,8 +832,8 @@ export class Cookie {
           this.x = bx;
           this.z = bz;
           this.boxRate = 0.72;
-          env.audio.thud();
-          env.shake(0.3);
+          this.sfx.thud();
+          if (this.heard) env.shake(0.3);
           this.go("perch", 0.8);
           this.dropCd = 0.5;
           this.callCd = 2;
@@ -848,11 +863,11 @@ export class Cookie {
             this.tx = p.x;
             this.tz = p.z;
             this.decal = env.decals.get();
-            env.audio.charge();
+            this.sfx.charge();
           } else {
             this.go("beamtell", 0.9);
             this.decal = env.decals.get();
-            env.audio.beam();
+            this.sfx.beam();
           }
         }
         break;
@@ -885,8 +900,8 @@ export class Cookie {
           this.y = 0;
           env.flashes.ring(this.x, 0, this.z, 4.6, 0xffcf90, 0.6);
           env.dust.burst(30, this.x, 0.3, this.z, 6, 0xd8c8b0, 0.9, 0.35, { up: 1.5 });
-          env.audio.thud();
-          env.shake(0.6);
+          this.sfx.thud();
+          if (this.heard) env.shake(0.6);
           this.strike((q) => Math.hypot(q.x - this.x, q.z - this.z) < 4.3, 22, this.x, this.z, { knock: 3.4 });
           env.floater("Dizzy!", this.x, 3.6, this.z, "info");
           this.go("land", 2.0);
@@ -970,8 +985,8 @@ export class Cookie {
           dr.fell = true;
           env.decals.release(dr.decal);
           env.dust.burst(14, dr.x, 0.4, dr.z, 4, 0xd8c8b0, 0.6, 0.25, { up: 1.5 });
-          env.audio.clack();
-          env.shake(0.12);
+          this.sfx.clack();
+          if (this.heard) env.shake(0.12);
           if (hurt) for (const q of this.foes()) if (Math.hypot(q.x - dr.x, q.z - dr.z) < 1.7) env.hurt(q, 15, dr.x, dr.z, { knock: 2, src: "cookie" });
           dr.t = 0.9;
         }

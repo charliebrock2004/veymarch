@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameApi, Hud, Look, Quality } from "./game/Game";
 import { Controls } from "./ui/Controls";
 import { Glyph, ItemIcon } from "./ui/icons";
-import { Online, PlayerKey, copyText } from "./ui/Online";
+import { Online, PlayerKey, copyText, hasJoinLink } from "./ui/Online";
 import { Realm } from "./net/realm";
 
 const SKINS = ["#f0d8c0", "#e2c0a0", "#c8a080", "#a07858", "#6e4a32"];
@@ -97,7 +97,7 @@ const DEFAULT_LOOK: Look = { body: 1, skin: 1, hair: 0, hairColor: 1, coat: 0 };
 
 function Screens({ api, hud }: { api: GameApi; hud: Hud }) {
   // a ?join=CODE link opens straight into online play
-  const [screen, setScreen] = useState<"main" | "solo" | "settings" | "online">(() => (new URLSearchParams(location.search).get("join") ? "online" : "main"));
+  const [screen, setScreen] = useState<"main" | "solo" | "settings" | "online">(() => (hasJoinLink() ? "online" : "main"));
   const [creating, setCreating] = useState<"solo" | "online">("online");
   const [createErr, setCreateErr] = useState("");
   if (hud.mode === "loading") return null;
@@ -168,7 +168,7 @@ function Main({ toOnline, toSingle, toSettings }: { toOnline: () => void; toSing
         </button>
         <button className="vm-mbtn" onClick={toSingle}>
           Single Player
-          <small>Your own world on this device · works offline</small>
+          <small>Your own world, saved on this device</small>
         </button>
         <button className="vm-mbtn" onClick={toSettings}>
           Settings

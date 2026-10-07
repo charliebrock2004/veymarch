@@ -58,6 +58,21 @@ const errText = (e: unknown) => {
   return m;
 };
 
+/**
+ * A ?join=CODE link, read once and taken off the address bar: a reload or a bookmark opens the
+ * title screen, and once used the code stops steering Continue to Join World.
+ */
+let joinLink = (() => {
+  try {
+    const q = new URLSearchParams(location.search).get("join");
+    if (q) history.replaceState(history.state, "", location.pathname + location.hash);
+    return normalizeCode(q ?? "");
+  } catch {
+    return "";
+  }
+})();
+export const hasJoinLink = () => joinLink.length === 6;
+
 function hourText(h: number) {
   return h >= 20.5 || h < 5.5 ? "night" : h < 7.5 ? "dawn" : h < 17.5 ? "day" : "dusk";
 }
@@ -69,7 +84,7 @@ export function Online({ api, back, newCharacter, solo = false }: { api: GameApi
   const [charId, setCharId] = useState<string | null>(() => ls.get(CHAR_KEY));
   const [err, setErr] = useState("");
   const [made, setMade] = useState<WorldCard | null>(null);
-  const [code, setCode] = useState(() => (solo ? "" : normalizeCode(new URLSearchParams(location.search).get("join") ?? "")));
+  const [code, setCode] = useState(() => (solo ? "" : joinLink));
   const [worldName, setWorldName] = useState("");
   const [busyText, setBusyText] = useState("");
   const [confirmDel, setConfirmDel] = useState("");
@@ -87,31 +102,38 @@ export function Online({ api, back, newCharacter, solo = false }: { api: GameApi
     return p;
   };
 
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      let r: Realm | null;
+  const [alive] = useState(() => ({ on: true }));
+  /** Opens the realm (or this device's own world database) and reads the profile; also "Try again". */
+  const start = async () => {
+    setPhase("loading");
+    let r = realm;
+    if (!r) {
       try {
         r = solo ? await Realm.openSolo() : await Realm.open();
       } catch (e) {
-        if (!alive) return;
+        if (!alive.on) return;
         setErr(errText(e));
         return setPhase("error");
       }
-      if (!alive) return;
+      if (!alive.on) return;
       if (!r) return setPhase("nobackend");
       setRealm(r);
-      try {
-        await load(r);
-        if (alive) setPhase("chars");
-      } catch (e) {
-        if (!alive) return;
-        setErr(errText(e));
-        setPhase("error");
-      }
-    })();
+    }
+    try {
+      await load(r);
+      if (alive.on) setPhase("chars");
+    } catch (e) {
+      if (!alive.on) return;
+      setErr(errText(e));
+      setPhase("error");
+    }
+  };
+
+  useEffect(() => {
+    alive.on = true;
+    void start();
     return () => {
-      alive = false;
+      alive.on = false;
     };
   }, []);
 
@@ -131,6 +153,10 @@ export function Online({ api, back, newCharacter, solo = false }: { api: GameApi
     setPhase("busy");
     try {
       const e = await go();
+      if (from === "join") {
+        joinLink = "";
+        setCode("");
+      }
       setBusyText(`Joining ${e.world.name}…`);
       api.startOnline(realm, e);
     } catch (e) {
@@ -153,6 +179,17 @@ export function Online({ api, back, newCharacter, solo = false }: { api: GameApi
     } catch (e) {
       setErr(errText(e));
       setPhase("newworld");
+    }
+  };
+
+  /** Delete a world you made, or leave one you joined. */
+  const dropWorld = async (w: WorldCard) => {
+    if (!realm) return;
+    try {
+      setProfile(w.mine ? await realm.deleteWorld(w.id) : await realm.leaveWorld(w.id));
+      setConfirmDel("");
+    } catch (e) {
+      setErr(errText(e));
     }
   };
 
@@ -204,19 +241,7 @@ export function Online({ api, back, newCharacter, solo = false }: { api: GameApi
           <button className="vm-mbtn" onClick={back}>
             Back
           </button>
-          <button
-            className="vm-mbtn primary"
-            onClick={() => {
-              if (!realm) return;
-              setPhase("loading");
-              load(realm)
-                .then(() => setPhase("chars"))
-                .catch((e) => {
-                  setErr(errText(e));
-                  setPhase("error");
-                });
-            }}
-          >
+          <button className="vm-mbtn primary" onClick={() => void start()}>
             Try again
           </button>
         </div>
@@ -292,6 +317,15 @@ export function Online({ api, back, newCharacter, solo = false }: { api: GameApi
                 <button className="vm-mbtn small primary" onClick={() => enter(`Entering ${w.name}…`, () => realm!.enter(w.id, char.id), "worlds")}>
                   Play
                 </button>
+                {confirmDel === w.id ? (
+                  <button className="vm-mbtn small danger" onClick={() => dropWorld(w)}>
+                    {w.mine ? "Really delete" : "Really leave"}
+                  </button>
+                ) : (
+                  <button className="vm-mbtn small" onClick={() => setConfirmDel(w.id)} aria-label={(w.mine ? "Delete " : "Leave ") + w.name}>
+                    {w.mine ? "Delete" : "Leave"}
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -403,14 +437,56 @@ export function PlayerKey() {
   const [show, setShow] = useState(false);
   const [paste, setPaste] = useState("");
   const [msg, setMsg] = useState("");
+  /** Switching away from a key that has characters or worlds asks first. */
+  const [confirm, setConfirm] = useState(false);
+  const [prev, setPrev] = useState("");
   useEffect(() => {
     let alive = true;
-    Realm.open().then((r) => alive && (setRealm(r), setKey(r?.deviceKey ?? "")));
+    Realm.open()
+      .then((r) => {
+        if (!alive) return;
+        setRealm(r);
+        setKey(r?.deviceKey ?? "");
+        setPrev(r?.previousKey ?? "");
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
   }, []);
   if (!realm) return null;
+  const switchTo = async (k: string) => {
+    try {
+      await realm.useDeviceKey(k);
+      setKey(realm.deviceKey);
+      setPrev(realm.previousKey);
+      setPaste("");
+      setConfirm(false);
+      setMsg("This device now plays as that key. Your previous key is kept here: Switch back undoes this.");
+    } catch (e) {
+      setMsg(errText(e));
+    }
+  };
+  const tryUse = async () => {
+    if (paste.trim() === key) return setMsg("That is already this device's key.");
+    if (key && !confirm) {
+      // only ask when the current key has something to lose
+      try {
+        const p = await realm.profile();
+        if (p.characters.length || p.worlds.length) {
+          setConfirm(true);
+          setMsg(`This device's key has ${p.characters.length} character(s) and ${p.worlds.length} world(s). Copy it first if you want them back later.`);
+          return;
+        }
+      } catch {
+        /* cannot tell: ask anyway */
+        setConfirm(true);
+        setMsg("Copy this device's key first if you want its characters back later.");
+        return;
+      }
+    }
+    await switchTo(paste);
+  };
   return (
     <div className="vm-field">
       <label>Player key</label>
@@ -428,24 +504,16 @@ export function PlayerKey() {
         <p>No key yet: it is made the first time you press Play.</p>
       )}
       {show && <code className="vm-key">{key}</code>}
-      <input value={paste} placeholder="Paste a key from another device" autoComplete="off" autoCorrect="off" spellCheck={false} onChange={(e) => setPaste(e.target.value)} />
+      <input value={paste} placeholder="Paste a key from another device" autoComplete="off" autoCorrect="off" spellCheck={false} onChange={(e) => (setPaste(e.target.value), setConfirm(false))} />
       <div className="vm-row start">
-        <button
-          className="vm-mbtn small"
-          disabled={!paste.trim()}
-          onClick={async () => {
-            try {
-              await realm.useDeviceKey(paste);
-              setKey(realm.deviceKey);
-              setPaste("");
-              setMsg("This device now plays as that key.");
-            } catch (e) {
-              setMsg(errText(e));
-            }
-          }}
-        >
-          Use this key
+        <button className={`vm-mbtn small ${confirm ? "danger" : ""}`} disabled={!paste.trim()} onClick={() => void tryUse()}>
+          {confirm ? "Switch anyway" : "Use this key"}
         </button>
+        {prev && prev !== key && (
+          <button className="vm-mbtn small" onClick={() => void switchTo(prev)}>
+            Switch back
+          </button>
+        )}
       </div>
       {msg && <p>{msg}</p>}
     </div>

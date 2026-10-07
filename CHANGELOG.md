@@ -11,6 +11,19 @@
 - Title flow: Play → My Characters → Worlds (Play / Join World / Create World), Single Player kept as it was. Existing single player saves are copied once into the online profile.
 - Local realm (`npm run realm`) running the same SQL in PGlite for development and two-browser tests.
 
+### Realms hardening (review fixes)
+
+- Inventory changes lock the character row; a take that cannot be fully paid raises, so parallel crafts, trades or bandages can no longer duplicate items.
+- Old local saves import only early-game gear, from `slotN:` sources, at most three per device key.
+- Cookie hits must come from the castle courtyard; Ember damage needs Ember and is throttled.
+- Seats free up when a player leaves, is removed by the world's maker, or deletes their character; joining locks the world, so a fifth player cannot slip in. Makers can delete worlds; guests can leave them.
+- Zone changes (overworld ↔ castle) are accepted only at a door.
+- A phone waking up or reconnecting listens before it takes over the world, so it no longer rewinds enemies or resets Cookie.
+- Cookie always falls on the world runner, even if the world flag arrives before the killing blow; slow motion, sounds, camera shake and combat music only play for players near the action.
+- Single Player pauses behind menus again, the bedroll skips the night, and only one tab can open it at a time.
+- Reward screen shows once per character (even if downed or in a menu when Cookie falls); interrupted gathers and revives no longer fire from a distance.
+- Settings → Player key asks before replacing a key with characters on it and offers Switch back. A `?join=` link is used once.
+
 ### Web build (current playable milestone)
 
 - `web/` is now a real game for phones: procedural world (Hearthfen, Giant Forest, Cookie's Castle, Kingsbridge, Green Gate, Kingdom vista), animated characters, villagers on routes, combat with telegraphs, Cookie in three phases, crafting at stations, barter, three save slots, character creator, touch controls, day and night, synthesised sound. Deployed to Vercel production.

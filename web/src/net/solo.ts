@@ -32,6 +32,7 @@ let opened: Promise<SoloBackend> | null = null;
 export function soloBackend(): Promise<SoloBackend> {
   if (opened) return opened;
   opened = (async () => {
+    await holdTabLock();
     let pg: PGlite;
     try {
       pg = new PGlite("idb://veyrmarch-solo", { relaxedDurability: true });
@@ -84,6 +85,27 @@ export function soloBackend(): Promise<SoloBackend> {
   })();
   opened.catch(() => (opened = null));
   return opened;
+}
+
+/**
+ * One tab at a time: each tab would load its own copy of the database and write it back over
+ * the other's. The lock is held for the life of the page (browsers without Web Locks skip this).
+ */
+function holdTabLock(): Promise<void> {
+  const locks = (navigator as Navigator & { locks?: LockManager }).locks;
+  if (!locks?.request) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    locks
+      .request("veyrmarch-solo", { ifAvailable: true }, (lock) => {
+        if (!lock) {
+          reject(new RealmError("Single Player is already open in another tab or window. Close it there, then try again."));
+          return undefined;
+        }
+        resolve();
+        return new Promise<void>(() => {});
+      })
+      .catch(() => resolve());
+  });
 }
 
 /** Nobody else is here: always connected, no presence, nothing to send. */

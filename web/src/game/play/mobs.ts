@@ -4,7 +4,7 @@ import {
   Poser, buildHuman, buildQuad, buildRockingHorse, characterMaterial, poseHorse, poseHuman, poseQuad, type HumanAction, type QuadAction, type Rig,
 } from "../engine/rig";
 import { MOB_LOOT } from "../content";
-import type { Env, PlayerState } from "./env";
+import { SILENT, type Env, type PlayerState } from "./env";
 import { weaponModel } from "./weapons";
 
 /**
@@ -206,6 +206,15 @@ export class Mob {
   puppet = false;
   private net: { x: number; z: number; yaw: number } | null = null;
 
+  /** The local player is near enough to hear this foe and feel its blows land. */
+  get heard() {
+    return this.env.heard(this.x, this.z, this.dungeon);
+  }
+
+  private get sfx() {
+    return this.heard ? this.env.audio : SILENT;
+  }
+
   constructor(public kind: MobKind, public homeX: number, public homeZ: number, public dungeon: boolean, private env: Env, public respawns = true) {
     this.cfg = MOBS[kind];
     const made = makeRig(kind);
@@ -294,10 +303,10 @@ export class Mob {
     this.respawnT = this.respawns && !this.puppet ? 150 : Infinity;
     this.env.decals.release(this.decal);
     this.decal = null;
-    if (this.kind === "wolf") this.env.audio.yelp();
+    if (this.kind === "wolf") this.sfx.yelp();
     if (this.kind === "soldier" || this.kind === "mouse" || this.kind === "horse") {
       this.env.dust.burst(26, this.x, this.y + 0.8, this.z, 4, 0xd8c8a8, 1.0, 0.18, { up: 2, grav: 7 });
-      this.env.audio.clack();
+      this.sfx.clack();
     } else this.env.dust.burst(14, this.x, this.y + 0.5, this.z, 2.5, 0x6a5a48, 0.8, 0.22, { up: 1.5 });
   }
 
@@ -375,7 +384,7 @@ export class Mob {
       this.state = state;
       this.t = t;
       if (state === "tell") this.decal = this.env.decals.get();
-      if (state === "active") this.env.audio.swing((this.atk?.dmg ?? 0) > 14);
+      if (state === "active") this.sfx.swing((this.atk?.dmg ?? 0) > 14);
     } else if (Math.abs(this.t - t) > 0.2) this.t = t;
     this.atk = atk >= 0 ? this.cfg.attacks[atk] ?? null : null;
   }
@@ -483,9 +492,9 @@ export class Mob {
             this.state = "chase";
             this.aggro = true;
             this.cd = 0.4 + Math.random() * 0.6;
-            if (this.kind === "wolf") env.audio.growl();
-            else if (this.kind === "goblin" || this.kind === "redcap") env.audio.shriek();
-            else if (this.kind === "soldier" || this.kind === "mouse") env.audio.wind();
+            if (this.kind === "wolf") this.sfx.growl();
+            else if (this.kind === "goblin" || this.kind === "redcap") this.sfx.shriek();
+            else if (this.kind === "soldier" || this.kind === "mouse") this.sfx.wind();
             env.floater("!", this.x, this.y + cfg.height + 0.6, this.z, "info");
           }
         }
@@ -516,7 +525,7 @@ export class Mob {
           this.state = "return";
           break;
         }
-        env.combat(true);
+        if (p === env.player) env.combat(true);
         face(p.x, p.z, 7);
         const atk = cfg.attacks.find((a) => d <= a.range && (this.kind !== "horse" || a.name !== "charge" || d > 4)) ?? null;
         if (atk && this.cd <= 0) {
@@ -528,8 +537,8 @@ export class Mob {
           this.aimX = p.x;
           this.aimZ = p.z;
           this.decal = env.decals.get();
-          if (this.kind === "wolf") env.audio.growl();
-          if (this.kind === "horse" && atk.name === "charge") env.audio.charge();
+          if (this.kind === "wolf") this.sfx.growl();
+          if (this.kind === "horse" && atk.name === "charge") this.sfx.charge();
           break;
         }
         const close = cfg.attacks.length ? Math.min(...cfg.attacks.map((a) => a.range)) * 0.85 : 1;
@@ -565,7 +574,7 @@ export class Mob {
           this.t = atk.active;
           env.decals.release(this.decal);
           this.decal = null;
-          env.audio.swing(atk.dmg > 14);
+          this.sfx.swing(atk.dmg > 14);
         }
         break;
       }
@@ -595,8 +604,8 @@ export class Mob {
             this.hitDone = true;
             env.flashes.ring(ox, env.groundAt(ox, oz), oz, atk.size, 0xffcf90, 0.4);
             env.dust.burst(12, ox, env.groundAt(ox, oz) + 0.2, oz, 3, 0x7a6a58, 0.6, 0.3, { up: 1 });
-            env.shake(0.25);
-            env.audio.thud();
+            if (this.heard) env.shake(0.25);
+            this.sfx.thud();
           }
         }
         if (this.t <= 0) {
@@ -636,8 +645,8 @@ export class Mob {
       this.state = "recover";
       this.t = (this.atk?.recover ?? 1) + 0.5;
       this.kx = this.kz = 0;
-      env.audio.thud();
-      env.shake(0.2);
+      this.sfx.thud();
+      if (this.heard) env.shake(0.2);
     }
     this.x = solved.x;
     this.z = solved.z;
