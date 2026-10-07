@@ -750,7 +750,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     mobKey.clear();
     mobByKey.clear();
     // dungeon positions in the table are relative to the castle interior
-    for (const [key, k, x0, z, d] of MOB_SPAWNS) {
+    for (const [key, k, x0, z, zone] of MOB_SPAWNS) {
+      if (zone !== "over" && zone !== "castle") continue;
+      const d = zone === "castle";
       const kind = k as MobKind;
       const m = new Mob(kind, d ? DUN_X + x0 : x0, z, d, env, !d && kind !== "soldier");
       m.key = key;

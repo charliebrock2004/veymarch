@@ -1,136 +1,11 @@
-/** Slice data. Numbers match the sim catalog except wolf/goblin bite, which is tuned so a telegraph is worth dodging. */
-
-export type ItemDef = {
-  id: string;
-  name: string;
-  kind: "mat" | "weapon" | "armour" | "key" | "consumable";
-  stack: number;
-  damage: number;
-  stamLight: number;
-  stamHeavy: number;
-  range: number;
-  defence: number;
-  heal: number;
-  tier: number;
-  slot: "main" | "off" | "none";
-  moveset: string;
-  element: "none" | "fire";
-  soulbound: boolean;
-};
-
-export type RecipeDef = {
-  id: string;
-  name: string;
-  out: string;
-  station: "hand" | "bench" | "forge";
-  inputs: { id: string; n: number }[];
-};
+/**
+ * Slice data. Items, recipes, foes, nodes, quests, shops, bosses and zones live in ./data and are
+ * shared with the server (server/gen-seed.mjs); this file keeps the words and re-exports the rest.
+ */
+export { ITEMS, RECIPES, DESCRIPTIONS, RARITY_COLOR, SET_BONUS, type ItemDef, type RecipeDef, type Slot, type Rarity } from "./data/items";
+export { MOB_LOOT, MOB_SPAWNS, NODE_DEFS, CACHES, CACHE_DEFS, type Spawn, type NodeData } from "./data/world";
 
 export const SPEEDS = { walk: 4.2, sprint: 6.4, cap: 7 };
-
-export const ITEMS: Record<string, ItemDef> = {
-  wpn_fists: w("wpn_fists", "Fists", 4, 1.2, 6, 14, 0, "fists"),
-  mat_wood: m("mat_wood", "Wood"),
-  mat_flint: m("mat_flint", "Flint"),
-  mat_fibre: m("mat_fibre", "Fibre"),
-  mat_stone: m("mat_stone", "Stone"),
-  mat_bone: m("mat_bone", "Bone"),
-  mat_leather: m("mat_leather", "Leather"),
-  mat_copper: m("mat_copper", "Copper"),
-  mat_iron: m("mat_iron", "Iron"),
-  wpn_stone_knife: w("wpn_stone_knife", "Stone Knife", 10, 1.5, 7, 14, 1, "knife"),
-  wpn_stone_pick: w("wpn_stone_pick", "Stone Pick", 7, 1.6, 8, 16, 2, "pick"),
-  wpn_copper_pick: w("wpn_copper_pick", "Copper Pick", 9, 1.6, 8, 16, 3, "pick"),
-  wpn_copper_sword: w("wpn_copper_sword", "Copper Sword", 14, 1.9, 9, 18, 3, "sword"),
-  wpn_iron_sword: w("wpn_iron_sword", "Iron Sword", 19, 2, 10, 20, 4, "sword"),
-  wpn_cookie_blade: {
-    ...w("wpn_cookie_blade", "Cookie's Blade", 22, 2, 9, 20, 4, "cookie_blade"),
-    soulbound: true,
-  },
-  wpn_cookie_pick: {
-    ...w("wpn_cookie_pick", "Cookie's Pickaxe", 16, 1.7, 8, 16, 4, "cookie_pick"),
-    soulbound: true,
-  },
-  key_cookie_core: {
-    id: "key_cookie_core",
-    name: "Cookie's Core",
-    kind: "key",
-    stack: 1,
-    damage: 0,
-    stamLight: 0,
-    stamHeavy: 0,
-    range: 0,
-    defence: 0,
-    heal: 0,
-    tier: 4,
-    slot: "none",
-    moveset: "",
-    element: "none",
-    soulbound: true,
-  },
-  wpn_smacko: { ...w("wpn_smacko", "Smacko", 18, 1.8, 6, 12, 4, "smacko"), soulbound: true },
-  arm_stump_shield: {
-    id: "arm_stump_shield",
-    name: "Stump Shield",
-    kind: "armour",
-    stack: 1,
-    damage: 0,
-    stamLight: 0,
-    stamHeavy: 0,
-    range: 0,
-    defence: 6,
-    heal: 0,
-    tier: 0,
-    slot: "off",
-    moveset: "shield",
-    element: "none",
-    soulbound: false,
-  },
-  arm_cloth: {
-    id: "arm_cloth",
-    name: "Cloth",
-    kind: "armour",
-    stack: 1,
-    damage: 0,
-    stamLight: 0,
-    stamHeavy: 0,
-    range: 0,
-    defence: 0,
-    heal: 0,
-    tier: 0,
-    slot: "none",
-    moveset: "",
-    element: "none",
-    soulbound: false,
-  },
-  cons_bandage: {
-    id: "cons_bandage",
-    name: "Bandage",
-    kind: "consumable",
-    stack: 10,
-    damage: 0,
-    stamLight: 0,
-    stamHeavy: 0,
-    range: 0,
-    defence: 0,
-    heal: 28,
-    tier: 0,
-    slot: "none",
-    moveset: "",
-    element: "none",
-    soulbound: false,
-  },
-};
-
-export const RECIPES: RecipeDef[] = [
-  { id: "recipe_stone_knife", name: "Stone Knife", out: "wpn_stone_knife", station: "hand", inputs: [{ id: "mat_flint", n: 2 }, { id: "mat_wood", n: 1 }] },
-  { id: "recipe_bandage", name: "Bandage", out: "cons_bandage", station: "hand", inputs: [{ id: "mat_fibre", n: 2 }] },
-  { id: "recipe_stump_shield", name: "Stump Shield", out: "arm_stump_shield", station: "bench", inputs: [{ id: "mat_wood", n: 3 }, { id: "mat_fibre", n: 1 }] },
-  { id: "recipe_stone_pick", name: "Stone Pick", out: "wpn_stone_pick", station: "bench", inputs: [{ id: "mat_flint", n: 3 }, { id: "mat_wood", n: 2 }, { id: "mat_fibre", n: 1 }] },
-  { id: "recipe_copper_sword", name: "Copper Sword", out: "wpn_copper_sword", station: "forge", inputs: [{ id: "mat_copper", n: 5 }, { id: "mat_wood", n: 1 }, { id: "mat_flint", n: 1 }] },
-  { id: "recipe_copper_pick", name: "Copper Pick", out: "wpn_copper_pick", station: "forge", inputs: [{ id: "mat_copper", n: 4 }, { id: "mat_wood", n: 2 }, { id: "wpn_stone_pick", n: 1 }] },
-  { id: "recipe_iron_sword", name: "Iron Sword", out: "wpn_iron_sword", station: "forge", inputs: [{ id: "mat_iron", n: 3 }, { id: "mat_leather", n: 1 }, { id: "mat_wood", n: 1 }] },
-];
 
 export const LINES = {
   tanic1: "Flint in the creek. Wood from the fallen limb. The bench is past the smith, if you want an edge.",
@@ -153,20 +28,6 @@ export const LINES = {
 /** The sim's Cookie has 180. The browser fight is longer because a phone player has no lock-on; see KNOWN_ISSUES WEB-2. */
 export const COOKIE_HP = 280;
 export const BOE_HP = 120;
-
-function m(id: string, name: string): ItemDef {
-  return {
-    id, name, kind: "mat", stack: 99, damage: 0, stamLight: 0, stamHeavy: 0,
-    range: 0, defence: 0, heal: 0, tier: 0, slot: "none", moveset: "", element: "none", soulbound: false,
-  };
-}
-
-function w(id: string, name: string, damage: number, range: number, light: number, heavy: number, tier: number, moveset: string): ItemDef {
-  return {
-    id, name, kind: "weapon", stack: 1, damage, stamLight: light, stamHeavy: heavy,
-    range, defence: 0, heal: 0, tier, slot: "main", moveset, element: "none", soulbound: false,
-  };
-}
 
 export const MORE_LINES: Record<string, string[]> = {
   tanicHello: [
@@ -211,71 +72,6 @@ export const TRADES: Trade[] = [
   { id: "t_flint", give: [{ id: "mat_wood", n: 3 }], get: { id: "mat_flint", n: 2 }, label: "3 Wood → 2 Flint" },
   { id: "t_fibre", give: [{ id: "mat_stone", n: 2 }], get: { id: "mat_fibre", n: 3 }, label: "2 Stone → 3 Fibre" },
 ];
-
-export const DESCRIPTIONS: Record<string, string> = {
-  wpn_fists: "Knuckles. Better than nothing, barely.",
-  mat_wood: "Seasoned limb wood.",
-  mat_flint: "Creek flint. Knaps to an edge.",
-  mat_fibre: "Flax and nettle, twisted.",
-  mat_stone: "Field stone.",
-  mat_bone: "Wolf bone. Corrin buys it.",
-  mat_leather: "Rough hide.",
-  mat_copper: "Creek copper, green at the edges.",
-  mat_iron: "Iron the seal kept from you.",
-  wpn_stone_knife: "Flint on a stick. Fast and honest.",
-  wpn_stone_pick: "Breaks copper loose.",
-  wpn_copper_pick: "A better pick. Still not enough for iron.",
-  wpn_copper_sword: "Mara's work. Longer reach, harder hits.",
-  wpn_iron_sword: "Grey, heavy, and yours.",
-  wpn_cookie_blade: "Painted wood over brass. It hums a lullaby when it hits.",
-  wpn_cookie_pick: "Brass head, nursery-red haft. It breaks iron.",
-  key_cookie_core: "A brass heart that still ticks. The Green Gate answers it.",
-  wpn_smacko: "A fast sword with a collar-bell guard.",
-  arm_stump_shield: "A stump with a strap. Hold block to raise it. Block just as a blow lands to parry.",
-  arm_cloth: "Village wool.",
-  cons_bandage: "Restores 28 health.",
-};
-
-// ------------------------------------------------------------------ shared with the server (web/server/seed.sql is generated from these)
-
-/** Loot rolls: [item, count, chance]. The server rolls these; clients only display them. */
-export const MOB_LOOT: Record<string, [string, number, number][]> = {
-  wolf: [["mat_bone", 1, 1], ["mat_leather", 1, 0.35]],
-  goblin: [["mat_leather", 1, 0.8], ["mat_fibre", 2, 0.5]],
-  redcap: [["mat_copper", 3, 1], ["cons_bandage", 1, 1], ["mat_leather", 2, 1]],
-  soldier: [["cons_bandage", 1, 0.25]],
-  mouse: [],
-  horse: [["cons_bandage", 2, 1]],
-  deer: [["mat_leather", 2, 1], ["mat_bone", 1, 0.5]],
-};
-
-/** Every placed enemy has a stable key. Dungeon positions are relative to the castle interior's origin. */
-export const MOB_SPAWNS: [string, string, number, number, boolean][] = [
-  ["w1", "wolf", 14, 58, false], ["w2", "wolf", -18, 62, false], ["w3", "wolf", 16, 82, false], ["w4", "wolf", 21, 86, false], ["w5", "wolf", 22, 79, false],
-  ["w6", "wolf", 30, 128, false], ["w7", "wolf", -36, 136, false],
-  ["g1", "goblin", -39, 93, false], ["g2", "goblin", -46, 99, false], ["g3", "goblin", -37, 100, false], ["g4", "redcap", -43, 96, false],
-  ["d1", "deer", 34, 100, false], ["d2", "deer", 37, 104, false], ["d3", "deer", -34, 124, false], ["d4", "deer", 46, 72, false], ["d5", "deer", 130, 30, false],
-  ["s1", "soldier", -5, 150, false], ["s2", "soldier", 6, 154, false],
-  ["dm1", "mouse", -4, 10, true], ["dm2", "mouse", 4, 12, true],
-  ["ds1", "soldier", -4, 50, true], ["ds2", "soldier", 4, 52, true], ["dm3", "mouse", 0, 46, true],
-  ["ds3", "soldier", -3, 66, true], ["ds4", "soldier", 3, 76, true], ["dh", "horse", 0, 72, true],
-];
-
-/** Gatherable nodes. Positions live in the world builder; the rules live here. */
-export const NODE_DEFS: { id: string; item: string; tier: number; seal: string | null; max: number }[] = [
-  ...[0, 1, 2, 3].map((i) => ({ id: "flint_" + i, item: "mat_flint", tier: 0, seal: null, max: 3 })),
-  ...[0, 1, 2, 3, 4].map((i) => ({ id: "wood_" + i, item: "mat_wood", tier: 0, seal: null, max: 3 })),
-  ...[0, 1, 2, 3, 4, 5].map((i) => ({ id: "fibre_" + i, item: "mat_fibre", tier: 0, seal: null, max: 3 })),
-  ...[0, 1, 2].map((i) => ({ id: "stone_" + i, item: "mat_stone", tier: 0, seal: null, max: 3 })),
-  ...[0, 1, 2, 3].map((i) => ({ id: "copper_" + i, item: "mat_copper", tier: 2, seal: null, max: 3 })),
-  ...[0, 1].map((i) => ({ id: "iron_" + i, item: "mat_iron", tier: 4, seal: "seal_cookie", max: 4 })),
-];
-
-/** One-time caches a character can loot once per world. */
-export const CACHES: Record<string, [string, number][]> = {
-  chest: [["cons_bandage", 2], ["mat_fibre", 2], ["mat_wood", 1]],
-  hollow: [["mat_copper", 3], ["mat_leather", 1], ["cons_bandage", 1]],
-};
 
 export const COOKIE_REWARDS = ["wpn_cookie_blade", "wpn_cookie_pick", "key_cookie_core"];
 export const WORLD_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
