@@ -7,6 +7,7 @@ import { SELL_RATE, SHOPS } from "./data/shops.ts";
 import { autoStarts, journal, npcBusiness, readyToStep, tracked, type JournalEntry, type QuestBook, type QuestCtx } from "./systems/quests.ts";
 import { addItem, canMine, consume, countOf, equip, equipped, gateOpen, grantUniques, item, recipeHint, strikeDamage, tryCraft, type Stack } from "./rules";
 import { Audio } from "./engine/audio";
+import type { ThemeId } from "./engine/music";
 import { Beam, DecalPool, Flashes } from "./engine/fx";
 import { shared } from "./engine/kit";
 import { makeMaterials } from "./engine/materials";
@@ -368,6 +369,37 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const b = zones.get(zoneAt(x));
     return b?.blocked ? b.blocked(x, z) : false;
   }
+  /** Which theme the moment wants, and how hard the fighting is. */
+  const CALM_KINDS = new Set<string>(["deer", "horse", "mouse"]);
+  function musicNow(): { theme: ThemeId; intensity: number } {
+    if (mode === "loading") return { theme: "none", intensity: 0 };
+    if (mode === "title" || mode === "create") return { theme: "title", intensity: 0 };
+    if (mode === "end") return { theme: "ending", intensity: 0 };
+    const b = zoneBoss();
+    if (b && b.fighting && b.st !== "intro" && Math.hypot(P.x - b.x, P.z - b.z) < b.def.r + 20) {
+      const id = b.def.id;
+      if (id === "finlay" && hazards.length > 0) return { theme: "rite", intensity: 1 };
+      return { theme: id === "cookie" || id === "boe" || id === "finlay" ? id : "keep", intensity: Math.min(1, b.phaseN / 3 + 0.2) };
+    }
+    let near = 0;
+    for (const m of mobs) {
+      if (m.zone !== P.zone || !m.alive || CALM_KINDS.has(m.kind)) continue;
+      if (m.state !== "idle" && m.state !== "return" && m.state !== "flee" && Math.hypot(m.x - P.x, m.z - P.z) < 24) near++;
+    }
+    const intensity = Math.min(1, near / 2);
+    const r = region ?? "";
+    switch (P.zone) {
+      case "over":
+        return { theme: r === "hearthfen" ? "hearthfen" : r === "castle" || r === "nursery" ? "castle" : r === "kingdom" ? "kingdom" : "forest", intensity };
+      case "castle":
+        return { theme: "castle", intensity };
+      case "kingdom":
+        return { theme: r === "harrenvale" || r === "market" ? "town" : "kingdom", intensity };
+      default:
+        return { theme: P.zone, intensity };
+    }
+  }
+
   function regionTitle(reg: string): [string, string] {
     const t = (REGION_TITLE as Record<string, [string, string]>)[reg] ?? zones.get(P.zone)?.regions?.[reg];
     if (t) return t;
@@ -471,6 +503,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let lastBossSt = "";
   /** A reward that arrived while the player was down or in a menu waits for them. */
   let rewardWaiting = false;
+  /** the chapter ended while a menu was open: show the ending when play resumes */
+  let endingDue = false;
   const r2 = (v: number) => Math.round(v * 100) / 100;
 
   // player
@@ -2594,6 +2628,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         rewardWaiting = false;
         mode = "reward";
         push();
+      } else if (endingDue && mode === "play" && !P.dead) {
+        endingDue = false;
+        mode = "end";
+        audio.reward();
+        push();
       }
       if (bossDoneT > 0) {
         bossDoneT -= dt;
@@ -2842,8 +2881,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         box: !flags.cookie && (P.zone === "castle" || P.zone === "over") ? (P.zone === "castle" ? (P.z > DUN.galleryZ1 - 10 ? 0.9 : 0.25) : Math.max(0, 1 - Math.hypot(P.x - 0, P.z - 170) / 40) * 0.5) : 0,
         boxRate: cookie ? cookie.boxRate : 1,
         indoor: ZONES[P.zone].indoor && !(P.zone === "castle" && P.z >= DUN.galleryZ1 + 4),
-        boss: zoneBoss()?.fighting && zoneBoss()!.st !== "intro" ? 1 : 0,
-        music: mode === "title" ? 1 : ZONES[P.zone].indoor ? 0 : 0.6,
+        ...musicNow(),
       });
       // network timers run on wall time, even when a slow frame stretches game time
       if (online) netFrame(Math.min(real, 1));
@@ -3850,6 +3888,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         rewardDue[d.id] = !c.items.some((s) => s.def === d.rewards[0][0]);
       }
       rewardWaiting = false;
+      endingDue = false;
       gateOpening = false;
       P.maxHp = c.max_hp;
       P.hp = c.hp > 0 ? Math.min(c.hp, c.max_hp) : c.max_hp;

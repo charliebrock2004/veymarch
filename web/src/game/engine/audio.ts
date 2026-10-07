@@ -1,3 +1,5 @@
+import { Music, type ThemeId } from "./music";
+
 /**
  * Synthesised sound. No files: every cue is built from oscillators and filtered noise,
  * which keeps the build small and starts instantly on a phone. iOS only allows audio
@@ -27,8 +29,7 @@ export class Audio {
   private boxRate = 1;
   private birdNext = 0;
   private forgeNext = 0;
-  private padNext = 0;
-  private marchNext = 0;
+  private music: Music | null = null;
   enabled = true;
   muted = false;
 
@@ -65,6 +66,7 @@ export class Audio {
       this.boxGain = c.createGain();
       this.boxGain.gain.value = 0;
       this.boxGain.connect(this.mus);
+      this.music = new Music(c, this.mus, this.noise);
     }
     if (this.ctx.state === "suspended") void this.ctx.resume();
   }
@@ -258,11 +260,16 @@ export class Audio {
     }
   }
 
+  /** the theme playing now (for tests and the debug overlay) */
+  get theme(): ThemeId {
+    return this.music?.playing ?? "none";
+  }
+
   /**
    * Per-frame ambience: wind, water, birds by day, crickets by night, the smith's hammer
-   * near the forge, a soft folk pad outdoors, and Cookie's music box near the castle.
+   * near the forge, Cookie's music box near the castle, and the music for the place or fight.
    */
-  tick(o: { day: number; forest: number; water: number; forge: number; box: number; boxRate: number; indoor: boolean; boss: number; music: number }) {
+  tick(o: { day: number; forest: number; water: number; forge: number; box: number; boxRate: number; indoor: boolean; theme: ThemeId; intensity: number }) {
     const c = this.ctx;
     if (!c) return;
     const t = c.currentTime;
@@ -290,17 +297,6 @@ export class Audio {
       this.boxNote(LULLABY[this.boxStep % LULLABY.length]);
       this.boxStep++;
     }
-    if (o.music > 0.01 && !o.indoor && t > this.padNext) {
-      this.padNext = t + 6;
-      const roots = [50, 53, 55, 48];
-      const r = roots[Math.floor(Math.random() * roots.length)];
-      for (const iv of [0, 7, 12, 16]) this.tone(midi(r + iv), 7, "triangle", 0.025 * o.music, { attack: 2.5, dest: this.mus });
-      for (let i = 0; i < 4; i++) this.tone(midi(r + 24 + [0, 3, 7, 10][i]), 1.2, "triangle", 0.03 * o.music, { delay: 1 + i * 0.6, dest: this.mus });
-    }
-    if (o.boss > 0.01 && t > this.marchNext) {
-      this.marchNext = t + 0.5;
-      this.tone(70, 0.18, "sine", 0.3 * o.boss, { to: 45, dest: this.mus });
-      this.hiss(0.04, 6000, 0.08 * o.boss, { dest: this.mus, delay: 0.25 });
-    }
+    this.music?.tick(o.theme, o.intensity, this.enabled);
   }
 }
