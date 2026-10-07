@@ -3,6 +3,7 @@ import { Poser, buildHuman, poseHuman, type HumanAction, type HumanLook, type Ri
 import type { PlayerState } from "./env";
 import type { ZoneId } from "../data/zones";
 import { weaponModel } from "./weapons";
+import { armourFromCode } from "./gear";
 
 /** What a client sends about its own player every tick. */
 export type NetPlayer = {
@@ -28,6 +29,8 @@ export type NetPlayer = {
   mh: number;
   w: string;
   sh: number;
+  /** worn armour (play/gear.ts armourCode) */
+  ar?: string;
 };
 
 type Sample = { t: number; x: number; z: number; y: number; yaw: number };
@@ -55,8 +58,9 @@ export class RemotePlayer {
   private shield = false;
   private held: THREE.Object3D | null = null;
   private off: THREE.Object3D | null = null;
+  private armour = "";
 
-  constructor(public cid: string, public charId: string, public name: string, look: HumanLook, private parent: (zone: ZoneId) => THREE.Object3D | null, overlay: HTMLElement) {
+  constructor(public cid: string, public charId: string, public name: string, private look: HumanLook, private parent: (zone: ZoneId) => THREE.Object3D | null, overlay: HTMLElement) {
     this.rig = buildHuman(look);
     this.poser = new Poser(this.rig);
     this.state = { x: 0, y: 0, z: 0, yaw: 0, hp: 100, maxHp: 100, iframe: 0, blocking: false, blockT: 0, shield: false, dead: false, zone: "over", cid };
@@ -94,6 +98,21 @@ export class RemotePlayer {
       this.action = n.a;
       this.at = n.at;
       this.dur = Math.max(0.05, n.du);
+    }
+    if ((n.ar ?? "") !== this.armour) {
+      // armour is part of the body mesh: rebuild it, then hang the weapon and shield again
+      this.armour = n.ar ?? "";
+      const old = this.rig.group;
+      this.rig = buildHuman({ ...this.look, armour: armourFromCode(n.ar) });
+      this.poser = new Poser(this.rig);
+      this.rig.group.position.copy(old.position);
+      this.rig.group.rotation.y = old.rotation.y;
+      this.rig.group.visible = old.visible;
+      old.parent?.add(this.rig.group);
+      old.parent?.remove(old);
+      this.held = this.off = null;
+      this.weapon = "";
+      this.shield = false;
     }
     if (n.w !== this.weapon) {
       this.weapon = n.w;
@@ -161,6 +180,8 @@ export class RemotePlayer {
     this.state.z = s.z;
     this.state.y = s.y;
     this.state.yaw = s.yaw;
+    // the zone may have been built here after this player went into it
+    if (!g.parent && n.zn === localZone) this.parent(n.zn)?.add(g);
     g.visible = n.zn === localZone && !!g.parent;
     if (!g.visible) return;
     g.position.set(s.x, s.y, s.z);

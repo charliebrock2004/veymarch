@@ -118,6 +118,18 @@ export const characterMaterial = charMat;
 
 // ------------------------------------------------------------ humanoids
 
+/** Armour sets with a look of their own (the item's `set`). */
+export type ArmourStyle = "leather" | "iron" | "steel" | "hound" | "bk";
+export type ArmourLook = Partial<Record<"head" | "chest" | "hands" | "legs" | "feet", ArmourStyle>>;
+export const ARMOUR_STYLES: ArmourStyle[] = ["leather", "iron", "steel", "hound", "bk"];
+const ARM_COL: Record<ArmourStyle, { base: number; trim: number; accent: number }> = {
+  leather: { base: 0x6e4c2e, trim: 0x3e2a1a, accent: 0x9a8458 },
+  iron: { base: 0x6a6d72, trim: 0x45484d, accent: 0x8a7a5a },
+  steel: { base: 0xb4b9c2, trim: 0x707682, accent: 0xb08a3e },
+  hound: { base: 0x221e1b, trim: 0x8a2420, accent: 0x3e352e },
+  bk: { base: 0x18181c, trim: 0x2e2e36, accent: 0xa07e36 },
+};
+
 export type HumanLook = {
   skin: number;
   hair: number;
@@ -138,6 +150,8 @@ export type HumanLook = {
   headScale?: number;
   hat?: "bearskin" | "redcap" | "straw";
   face?: "toy";
+  /** worn armour, drawn as part of the body */
+  armour?: ArmourLook;
 };
 
 export function buildHuman(look: HumanLook): Rig {
@@ -212,11 +226,11 @@ export function buildHuman(look: HumanLook): Rig {
   } else if (look.hat === "straw") {
     b.part("head", cyl(0.25, 0.25, 0.02, 0, 0.2, 0, 14), 0xb59a55);
     b.part("head", cyl(0.13, 0.11, 0.1, 0, 0.25, 0, 12), 0xb59a55);
-  } else if (look.hairStyle !== "bald") {
+  } else if (look.hairStyle !== "bald" && look.armour?.head !== "bk") {
     const hairCap = capG(H * 1.1);
     hairCap.scale(1, 1.08, 1.1);
     hairCap.translate(0, 0.12 * hs, -0.012);
-    b.part("head", hairCap, look.hair);
+    if (!look.armour?.head) b.part("head", hairCap, look.hair);
     if (look.hairStyle === "tied") {
       b.part("head", ell(0.05, 0.05, 0.05, 0, 0.12 * hs, -0.13), look.hair);
       b.part("head", at(rot(cap(0.035, 0.18, 0, 0, 0, 6), 0.3, 0, 0), 0, 0.0, -0.16), look.hair);
@@ -239,6 +253,7 @@ export function buildHuman(look: HumanLook): Rig {
     b.part("shin" + s, cyl(0.065 * f, 0.07 * f, 0.24, 0, -0.3, 0, 10), look.boots);
     b.part("foot" + s, ell(0.055, 0.045, 0.12, 0, 0.0, 0.05, 8), look.boots);
   }
+  if (look.armour) armourParts(b, look.armour, f, hs);
   const height = (look.height ?? 1.8) / 1.8;
   const rig = b.build(charMat, 1.8 * height);
   rig.group.scale.setScalar(height);
@@ -254,6 +269,119 @@ export function buildHuman(look: HumanLook): Rig {
   rig.bones.chest.add(back);
   rig.sockets.back = back;
   return rig;
+}
+
+/** Armour as rigid parts of the body mesh: each piece sits just outside what it covers. */
+function armourParts(b: RigBuilder, a: ArmourLook, f: number, hs: number) {
+  const H = 0.118 * hs;
+  const dome = (r: number, cut = 0.55) => new THREE.SphereGeometry(r, 12, 8, 0, Math.PI * 2, 0, Math.PI * cut);
+  if (a.head) {
+    const c = ARM_COL[a.head];
+    switch (a.head) {
+      case "leather": {
+        const g = dome(H * 1.2);
+        g.scale(1, 1, 1.1);
+        b.part("head", at(g, 0, 0.115 * hs, -0.01), c.base);
+        b.part("head", cyl(H * 1.2, H * 1.2, 0.03, 0, 0.12 * hs, -0.008, 14, true), c.trim);
+        break;
+      }
+      case "iron": {
+        b.part("head", at(dome(H * 1.24, 0.5), 0, 0.11 * hs, -0.01), c.base);
+        b.part("head", cyl(H * 1.27, H * 1.27, 0.028, 0, 0.112 * hs, -0.01, 14, true), c.trim);
+        b.part("head", box(0.022, 0.1, 0.022, 0, 0.1 * hs, H * 1.18), c.trim);
+        break;
+      }
+      case "steel": {
+        const g = dome(H * 1.27, 0.55);
+        g.scale(1, 1.18, 1.05);
+        b.part("head", at(g, 0, 0.1 * hs, -0.01), c.base);
+        for (const sx of [1, -1]) b.part("head", box(0.02, 0.12, 0.1, sx * H * 1.15, 0.07 * hs, 0.035), c.base);
+        b.part("head", box(0.018, 0.035, 0.24, 0, 0.27 * hs, -0.01), c.accent);
+        b.part("neck", cyl(0.13, 0.1, 0.11, 0, 0.0, 0, 10, true), c.trim);
+        break;
+      }
+      case "hound": {
+        b.part("head", ell(0.158, 0.168, 0.168, 0, 0.12 * hs, -0.03), c.base);
+        for (const sx of [1, -1]) b.part("head", at(rot(ell(0.045, 0.12, 0.028), 0, 0, sx * 0.18), sx * 0.16, 0.05 * hs, -0.02), c.accent);
+        b.part("head", box(0.2, 0.022, 0.02, 0, 0.19 * hs, 0.112), c.trim);
+        break;
+      }
+      case "bk": {
+        b.part("head", cyl(H * 1.36, H * 1.3, 0.3, 0, 0.12 * hs, 0, 12), c.base);
+        b.part("head", ell(H * 1.36, 0.05, H * 1.36, 0, 0.27 * hs, 0, 12), c.base);
+        b.part("head", box(0.19, 0.02, 0.02, 0, 0.145 * hs, H * 1.36), 0x050506);
+        b.part("head", box(0.014, 0.1, 0.02, 0, 0.065 * hs, H * 1.36), c.accent);
+        b.part("head", box(0.022, 0.07, 0.24, 0, 0.31 * hs, 0), c.accent);
+        break;
+      }
+    }
+  }
+  if (a.chest) {
+    const c = ARM_COL[a.chest];
+    const heavy = a.chest === "steel" || a.chest === "bk";
+    b.part("chest", ell(0.218 * f, 0.192, 0.145, 0, 0.06, 0.002), c.base);
+    b.part("spine", cyl(0.18 * f, 0.2 * f, 0.26, 0, 0.05, 0, 12, true), a.chest === "iron" ? c.trim : c.base);
+    switch (a.chest) {
+      case "leather":
+        for (const sx of [1, -1]) b.part("chest", ell(0.1 * f, 0.06, 0.1, sx * 0.15 * f, 0.15, 0), c.trim);
+        b.part("chest", at(rot(box(0.045, 0.46, 0.012), 0, 0, 0.62), 0, 0.05, 0.142), c.accent);
+        break;
+      case "iron":
+        b.part("hips", cyl(0.27 * f, 0.2 * f, 0.36, 0, -0.12, 0, 12, true), c.trim);
+        for (const sx of [1, -1]) b.part("chest", ell(0.12 * f, 0.07, 0.11, sx * 0.16 * f, 0.15, 0), c.base);
+        break;
+      case "steel":
+        b.part("hips", cyl(0.27 * f, 0.2 * f, 0.36, 0, -0.12, 0, 12, true), c.trim);
+        b.part("spine", ell(0.19 * f, 0.12, 0.13, 0, 0.04, 0.012), c.base);
+        b.part("chest", cyl(0.1, 0.12, 0.08, 0, 0.21, 0, 10, true), c.trim);
+        for (const sx of [1, -1]) {
+          b.part("chest", ell(0.13 * f, 0.08, 0.12, sx * 0.17 * f, 0.16, 0), c.base);
+          b.part("chest", ell(0.12 * f, 0.05, 0.11, sx * 0.18 * f, 0.1, 0), c.trim);
+          b.part("hips", at(rot(box(0.14 * f, 0.17, 0.025), -0.12, 0, 0), sx * 0.1 * f, -0.1, 0.17 * f), c.base);
+        }
+        break;
+      case "hound":
+        b.part("hips", cyl(0.3 * f, 0.19 * f, 0.62, 0, -0.22, 0, 12, true), c.base);
+        b.part("chest", ell(0.2 * f, 0.075, 0.155, 0, 0.2, -0.012), c.accent);
+        b.part("chest", box(0.03, 0.36, 0.012, 0, 0.04, 0.147), c.trim);
+        break;
+      case "bk":
+        b.part("hips", cyl(0.27 * f, 0.2 * f, 0.38, 0, -0.13, 0, 12, true), c.base);
+        b.part("hips", box(0.2 * f, 0.5, 0.02, 0, -0.2, 0.2 * f), c.trim);
+        b.part("chest", box(0.3 * f, 0.016, 0.01, 0, 0.13, 0.152), c.accent);
+        for (const sx of [1, -1]) {
+          b.part("chest", at(rot(box(0.17 * f, 0.08, 0.19), 0, 0, sx * 0.35), sx * 0.19 * f, 0.17, 0), c.base);
+          b.part("chest", at(rot(box(0.17 * f, 0.014, 0.195), 0, 0, sx * 0.35), sx * 0.19 * f, 0.215, 0), c.accent);
+        }
+        break;
+    }
+    if (a.chest !== "leather")
+      for (const s of ["L", "R"]) b.part("arm" + s, cap(0.065 * f, 0.2, 0, -0.14, 0), heavy ? c.base : a.chest === "iron" ? c.trim : c.base);
+  }
+  if (a.hands) {
+    const c = ARM_COL[a.hands];
+    for (const s of ["L", "R"]) {
+      b.part("fore" + s, cyl(0.062 * f, 0.072 * f, 0.1, 0, -0.2, 0, 8), c.base);
+      b.part("hand" + s, ell(0.053, 0.067, 0.043, 0, -0.045, 0.01, 8), a.hands === "leather" || a.hands === "hound" ? c.base : c.trim);
+      if (a.hands === "steel" || a.hands === "bk") b.part("hand" + s, box(0.08, 0.02, 0.03, 0, -0.065, 0.035), c.accent);
+    }
+  }
+  if (a.legs) {
+    const c = ARM_COL[a.legs];
+    const plate = a.legs === "iron" || a.legs === "steel" || a.legs === "bk";
+    for (const s of ["L", "R"]) {
+      b.part("thigh" + s, cap(0.087 * f, 0.3, 0, -0.22, 0), c.base);
+      if (plate) b.part("shin" + s, ell(0.072 * f, 0.065, 0.075, 0, -0.005, 0.03), c.trim);
+    }
+  }
+  if (a.feet) {
+    const c = ARM_COL[a.feet];
+    for (const s of ["L", "R"]) {
+      b.part("shin" + s, cyl(0.074 * f, 0.08 * f, 0.27, 0, -0.29, 0, 10), c.base);
+      b.part("foot" + s, ell(0.063, 0.052, 0.132, 0, 0.0, 0.05, 8), a.feet === "leather" || a.feet === "hound" ? c.base : c.trim);
+      if (a.feet === "steel" || a.feet === "bk") b.part("foot" + s, box(0.09, 0.015, 0.1, 0, 0.04, 0.09), c.base);
+    }
+  }
 }
 
 // ------------------------------------------------------------ quadrupeds

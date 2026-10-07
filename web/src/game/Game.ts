@@ -8,11 +8,12 @@ import { autoStarts, journal, npcBusiness, readyToStep, tracked, type JournalEnt
 import { addItem, canMine, consume, countOf, equip, equipped, gateOpen, grantUniques, item, recipeHint, strikeDamage, tryCraft, type Stack } from "./rules";
 import { Audio } from "./engine/audio";
 import type { ThemeId } from "./engine/music";
+import { armourCode, armourLook } from "./play/gear";
 import { Beam, DecalPool, Flashes } from "./engine/fx";
 import { shared } from "./engine/kit";
 import { makeMaterials } from "./engine/materials";
 import { Particles, buildGlows } from "./engine/particles";
-import { Poser, buildHuman, poseHuman, type HumanAction, type HumanLook, type Rig } from "./engine/rig";
+import { Poser, buildHuman, poseHuman, type ArmourLook, type HumanAction, type HumanLook, type Rig } from "./engine/rig";
 import { buildSky } from "./engine/sky";
 import { blockTex } from "./engine/textures";
 import { buildDungeon, type Dungeon } from "./world/dungeon";
@@ -172,8 +173,9 @@ const freshFlags = (): Flags => ({
   talked: false, ember: false, chest: false, hollow: false, shrine: false, entered: false, slab: false, nursery: false, cookie: false, gate: false, voss: false, ended: false, tanicKnife: false,
 });
 
-function lookToHuman(l: Look): HumanLook {
+function lookToHuman(l: Look, armour?: ArmourLook): HumanLook {
   return {
+    armour,
     skin: SKINS[l.skin] ?? SKINS[1],
     hair: HAIRS[l.hairColor] ?? HAIRS[1],
     hairStyle: HAIR_STYLES[l.hair] ?? "tied",
@@ -680,9 +682,17 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     return ({ dagger: 0.82, fists: 0.85, sword: 1, spear: 1.05, mace: 1.1, axe: 1.12, greatsword: 1.28, pick: 1 } as Record<string, number>)[w.family] ?? 1;
   }
 
+  let wornCode = "";
   function syncGear() {
     P.calm = items.some((s) => s.equipped && s.def === "trk_hound_bell");
     if (!playerRig) return;
+    // armour is part of the body mesh: a change of armour rebuilds the body (this runs again from there)
+    const code = armourCode(armourLook(equippedDefs()));
+    if (code !== wornCode) {
+      wornCode = code;
+      buildPlayer();
+      return;
+    }
     const w = mainWeapon();
     if (heldMain) heldMain.parent?.remove(heldMain);
     heldMain = null;
@@ -705,8 +715,15 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   function buildPlayer() {
     if (!world) return;
+    const pose = playerRig ? { p: playerRig.group.position.clone(), r: playerRig.group.rotation.y, v: playerRig.group.visible } : null;
     if (playerRig) playerRig.group.parent?.remove(playerRig.group);
-    playerRig = buildHuman(lookToHuman(look));
+    wornCode = armourCode(armourLook(equippedDefs()));
+    playerRig = buildHuman(lookToHuman(look, armourLook(equippedDefs())));
+    if (pose) {
+      playerRig.group.position.copy(pose.p);
+      playerRig.group.rotation.y = pose.r;
+      playerRig.group.visible = pose.v;
+    }
     playerPoser = new Poser(playerRig);
     zoneRoot(P.zone).add(playerRig.group);
     heldMain = heldOff = null;
@@ -3274,7 +3291,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     return {
       x: r2(P.x), z: r2(P.z), y: r2(P.y), yw: r2(P.yaw), a: P.action, at: r2(P.action === "dead" ? P.at : P.at / P.dur), du: r2(P.dur), ac: actionCount,
       mv: r2(P.speed), sp: P.sprint ? 1 : 0, b: P.blocking ? 1 : 0, d: P.dead ? 1 : 0, zn: P.zone, cm: P.calm ? 1 : 0,
-      hp: Math.ceil(P.hp), mh: P.maxHp, w: mainWeapon().id, sh: P.shield ? 1 : 0,
+      hp: Math.ceil(P.hp), mh: P.maxHp, w: mainWeapon().id, sh: P.shield ? 1 : 0, ar: wornCode,
     };
   }
 
@@ -3423,7 +3440,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           r.remove();
           o.remotes.delete(old);
         }
-      o.remotes.set(cid, new RemotePlayer(cid, meta.ch, meta.name, lookToHuman(meta.look as Look), (d) => (d ? dun!.root : world!.root), overlay));
+      o.remotes.set(cid, new RemotePlayer(cid, meta.ch, meta.name, lookToHuman(meta.look as Look), (z) => zones.get(z)?.root ?? null, overlay));
       if (!o.names.has(meta.ch)) say(meta.name + " joined the world.");
       o.names.add(meta.ch);
     }
