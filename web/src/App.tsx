@@ -422,7 +422,7 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
               <span className="pip" style={{ left: "66%" }} />
               <span className="pip" style={{ left: "33%" }} />
             </div>
-            <div className="vm-boss-phase">{["", "Peck and call", "The coat opens", "The music box"][hud.boss.phase]}</div>
+            <div className="vm-boss-phase">{hud.boss.phaseName}</div>
           </div>
         ) : (
           <div className="vm-top">
@@ -449,6 +449,11 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
           </button>
         </div>
       </div>
+      {hud.bossLine && (
+        <div className="vm-bossline" key={hud.bossLine.at}>
+          “{hud.bossLine.text}”
+        </div>
+      )}
       {title && (
         <div className="vm-region" key={title.at}>
           <div>{title.a}</div>
@@ -822,8 +827,8 @@ function Talk({ api, hud }: { api: GameApi; hud: Hud }) {
 function Reward({ api, hud }: { api: GameApi; hud: Hud }) {
   return (
     <div className="vm-reward">
-      <div className="vm-reward-title">Cookie is defeated</div>
-      <div className="vm-reward-sub">The music box winds down. The toys go still.</div>
+      <div className="vm-reward-title">{hud.rewardText?.title ?? "Victory"}</div>
+      <div className="vm-reward-sub">{hud.rewardText?.sub ?? ""}</div>
       <div className="vm-reward-items">
         {hud.reward!.map((r, i) => (
           <div className="vm-reward-card" key={r.id} style={{ animationDelay: `${0.3 + i * 0.35}s` }}>
@@ -833,9 +838,7 @@ function Reward({ api, hud }: { api: GameApi; hud: Hud }) {
           </div>
         ))}
       </div>
-      <div className="vm-seal">
-        <span>Seal broken</span> The Green Gate answers the Core.
-      </div>
+      {hud.rewardText?.seal && <div className="vm-seal">{hud.rewardText.seal}</div>}
       <button className="vm-mbtn primary" onClick={() => api.press("rewardClose")}>
         Take them
       </button>

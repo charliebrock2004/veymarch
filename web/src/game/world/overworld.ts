@@ -14,7 +14,8 @@ import {
 } from "./props";
 
 export type NodeKind = "flint" | "wood" | "fibre" | "stone" | "copper" | "iron";
-export type NodeDef = { id: string; kind: NodeKind; item: string; tier: number; seal: string | null; x: number; z: number; y: number; max: number; mesh: THREE.Object3D };
+export type { NodeDef } from "./nodes";
+import type { NodeDef } from "./nodes";
 
 export type Deck = { minX: number; maxX: number; minZ: number; maxZ: number; y: number };
 

@@ -214,3 +214,79 @@ export function buildTerrain(): Terrain {
 export function rawHeight(x: number, z: number) {
   return sample(x, z).h;
 }
+
+/** What a zone's terrain is at one local point: height, colour, and how much path or water is there. */
+export type FieldSample = { h: number; color: THREE.Color; path?: number; water?: number };
+
+/**
+ * A heightfield for any outdoor zone, built in local coordinates and placed at the zone's world
+ * origin. The zone supplies `sample`; this does the grid, the colours, the normals and lookups.
+ */
+export function buildFieldTerrain(o: { ox: number; bounds: { minX: number; maxX: number; minZ: number; maxZ: number }; step?: number; sample: (x: number, z: number) => FieldSample }): Terrain {
+  const step = o.step ?? STEP;
+  const B = o.bounds;
+  const nx = Math.ceil((B.maxX - B.minX) / step) + 1;
+  const nz = Math.ceil((B.maxZ - B.minZ) / step) + 1;
+  const heights = new Float32Array(nx * nz);
+  const paths = new Float32Array(nx * nz);
+  const waters = new Float32Array(nx * nz);
+  const pos = new Float32Array(nx * nz * 3);
+  const col = new Float32Array(nx * nz * 3);
+  const uv = new Float32Array(nx * nz * 2);
+  for (let j = 0; j < nz; j++)
+    for (let i = 0; i < nx; i++) {
+      const x = B.minX + i * step;
+      const z = B.minZ + j * step;
+      const s = o.sample(x, z);
+      const k = j * nx + i;
+      heights[k] = s.h;
+      paths[k] = s.path ?? 0;
+      waters[k] = s.water ?? 0;
+      pos[k * 3] = o.ox + x;
+      pos[k * 3 + 1] = s.h;
+      pos[k * 3 + 2] = z;
+      uv[k * 2] = x / 6;
+      uv[k * 2 + 1] = z / 6;
+      col[k * 3] = s.color.r;
+      col[k * 3 + 1] = s.color.g;
+      col[k * 3 + 2] = s.color.b;
+    }
+  const idx: number[] = [];
+  for (let j = 0; j < nz - 1; j++)
+    for (let i = 0; i < nx - 1; i++) {
+      const a = j * nx + i;
+      const b = a + 1;
+      const d = a + nx;
+      const e = d + 1;
+      idx.push(a, d, b, b, d, e);
+    }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, map: detailTex() }));
+  mesh.receiveShadow = true;
+  mesh.name = "terrain";
+  const grid = (arr: Float32Array, wx: number, z: number) => {
+    const fx = clamp((wx - o.ox - B.minX) / step, 0, nx - 1.0001);
+    const fz = clamp((z - B.minZ) / step, 0, nz - 1.0001);
+    const i = Math.floor(fx);
+    const j = Math.floor(fz);
+    const u = fx - i;
+    const v = fz - j;
+    const a = arr[j * nx + i];
+    const b = arr[j * nx + i + 1];
+    const d = arr[(j + 1) * nx + i];
+    const e = arr[(j + 1) * nx + i + 1];
+    if (u + v <= 1) return a + (b - a) * u + (d - a) * v;
+    return e + (d - e) * (1 - u) + (b - e) * (1 - v);
+  };
+  return {
+    mesh,
+    heightAt: (x, z) => grid(heights, x, z),
+    pathAt: (x, z) => grid(paths, x, z),
+    waterAt: (x, z) => grid(waters, x, z),
+  };
+}

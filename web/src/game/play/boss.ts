@@ -2,6 +2,8 @@ import * as THREE from "three";
 import type { Decal } from "../engine/fx";
 import { Poser, buildCookie, characterMaterial, poseCookie, type CookieAction, type Rig } from "../engine/rig";
 import { COOKIE_HP } from "../content";
+import { BOSSES } from "../data/bosses.ts";
+import type { Boss } from "./bossapi";
 import { DUN } from "../world/layout";
 import { SILENT, type Env, type PlayerState } from "./env";
 import type { ZoneId } from "../data/zones";
@@ -33,7 +35,10 @@ export type BossSnap = {
   sv: number; ob: number; tx: number; tz: number; mv: number; bx: number; dr: [string, number, number, number, number][]; ty: MobSnap[];
 };
 
-export class Cookie {
+export class Cookie implements Boss {
+  readonly def = BOSSES.cookie;
+  readonly phaseNames = ["", "Peck and call", "The coat opens", "The music box"];
+  readonly stageLight = true;
   rig: Rig;
   poser: Poser;
   mat: THREE.MeshLambertMaterial;
@@ -99,6 +104,18 @@ export class Cookie {
     this.blockMats = blockMats;
     parent.add(this.rig.group);
     this.place();
+  }
+
+  get adds() {
+    return this.toys;
+  }
+
+  /** The server sized this fight for the players in the courtyard. */
+  setMax(max: number) {
+    if (!(max > 0)) return;
+    const k = this.max > 0 ? this.hp / this.max : 1;
+    this.max = max;
+    this.hp = this.fighting ? Math.round(max * k) : this.st === "dead" ? 0 : max;
   }
 
   get alive() {
@@ -252,7 +269,8 @@ export class Cookie {
   }
 
   /** Applies a snapshot from the client that runs the world. */
-  applySnap(sn: BossSnap) {
+  applySnap(raw: unknown) {
+    const sn = raw as BossSnap;
     const st = STATES[sn.s] ?? "dormant";
     if (!this.net || Math.hypot(sn.x - this.x, sn.z - this.z) > 12) {
       this.x = sn.x;
