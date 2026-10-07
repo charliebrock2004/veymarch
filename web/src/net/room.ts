@@ -51,12 +51,15 @@ export class Room {
   private queue: Ev[] = [];
   private lastFlush = 0;
   private me: PresenceMeta;
+  /** a single player world: nobody to wait for */
+  private solo: boolean;
   onBundle: (b: Bundle) => void = () => {};
   onPeers: () => void = () => {};
   onStatus: (s: ChannelStatus) => void = () => {};
 
   constructor(backend: Backend, worldId: string, character: { id: string; name: string; look: unknown }) {
     this.me = { cid: this.cid, ch: character.id, name: character.name, look: character.look, j: this.joinedAt };
+    this.solo = backend.kind === "solo";
     this.ch = backend.channel("vm-" + worldId, this.cid);
     this.ch.onStatus((s) => {
       this.status = s;
@@ -106,7 +109,7 @@ export class Room {
     const live = this.live();
     if (this.runner && live.some((p) => p.cid === this.runner)) return;
     // listen first: an existing runner announces itself with its next snapshot
-    if (!this.connectedAt || Date.now() - this.connectedAt < 2500) return;
+    if (!this.solo && (!this.connectedAt || Date.now() - this.connectedAt < 2500)) return;
     const prev = this.runner;
     this.runner = live[0].cid;
     if (this.runner === this.cid && prev !== this.cid) this.runnerSince = Date.now();

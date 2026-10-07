@@ -37,6 +37,8 @@ export type SlotInfo = { slot: number; name: string; place: string; progress: st
 
 /** Multiplayer status for the HUD; null in single player. */
 export type OnlineHud = {
+  /** a single player world on this device */
+  solo: boolean;
   code: string;
   world: string;
   day: number;
@@ -2956,7 +2958,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const players: OnlineHud["players"] = [{ name, hp: Math.ceil(P.hp), max: P.maxHp, dead: P.dead, me: true, away: false, zone: zone(P.inDungeon, P.x, P.z) }];
     for (const r of o.remotes.values())
       players.push({ name: r.name, hp: r.state.hp, max: r.state.maxHp, dead: r.state.dead, me: false, away: !r.live(now), zone: zone(r.state.inDungeon, r.state.x, r.state.z) });
-    return { code: o.code, world: o.worldName, day: o.day, status: o.room.status, runner: o.room.isRunner, players };
+    return { solo: o.realm.solo, code: o.code, world: o.worldName, day: o.day, status: o.room.status, runner: o.room.isRunner, players };
   }
 
   function leaveOnline() {

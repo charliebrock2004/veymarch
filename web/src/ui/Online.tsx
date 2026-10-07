@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { GameApi } from "../game/Game";
-import { importLocalSaves } from "../net/migrate";
+import { importLegacySolo, importLocalSaves } from "../net/migrate";
 import { Realm, normalizeCode, type CharacterJson, type EnterJson, type Profile, type WorldCard } from "../net/realm";
 import { Glyph } from "./icons";
 
@@ -62,14 +62,14 @@ function hourText(h: number) {
   return h >= 20.5 || h < 5.5 ? "night" : h < 7.5 ? "dawn" : h < 17.5 ? "day" : "dusk";
 }
 
-export function Online({ api, back, newCharacter }: { api: GameApi; back: () => void; newCharacter: () => void }) {
+export function Online({ api, back, newCharacter, solo = false }: { api: GameApi; back: () => void; newCharacter: () => void; solo?: boolean }) {
   const [realm, setRealm] = useState<Realm | null>(null);
   const [phase, setPhase] = useState<Phase>("loading");
   const [profile, setProfile] = useState<Profile | null>(null);
   const [charId, setCharId] = useState<string | null>(() => ls.get(CHAR_KEY));
   const [err, setErr] = useState("");
   const [made, setMade] = useState<WorldCard | null>(null);
-  const [code, setCode] = useState(() => normalizeCode(new URLSearchParams(location.search).get("join") ?? ""));
+  const [code, setCode] = useState(() => (solo ? "" : normalizeCode(new URLSearchParams(location.search).get("join") ?? "")));
   const [worldName, setWorldName] = useState("");
   const [busyText, setBusyText] = useState("");
   const [confirmDel, setConfirmDel] = useState("");
@@ -78,7 +78,7 @@ export function Online({ api, back, newCharacter }: { api: GameApi; back: () => 
 
   const load = async (r: Realm) => {
     let p = await r.profile();
-    const n = await importLocalSaves(r);
+    const n = solo ? await importLegacySolo(r) : await importLocalSaves(r);
     if (n) {
       p = await r.profile();
       setImported(n);
@@ -90,7 +90,14 @@ export function Online({ api, back, newCharacter }: { api: GameApi; back: () => 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const r = await Realm.open();
+      let r: Realm | null;
+      try {
+        r = solo ? await Realm.openSolo() : await Realm.open();
+      } catch (e) {
+        if (!alive) return;
+        setErr(errText(e));
+        return setPhase("error");
+      }
       if (!alive) return;
       if (!r) return setPhase("nobackend");
       setRealm(r);
@@ -138,6 +145,7 @@ export function Online({ api, back, newCharacter }: { api: GameApi; back: () => 
     setPhase("busy");
     try {
       const w = await realm.createWorld(worldName.trim() || `${char.name}'s Realm`);
+      if (solo) return void enter(`Entering ${w.name}…`, () => realm.enter(w.id, char.id), "newworld");
       setMade(w);
       setCopied(false);
       setPhase("code");
@@ -172,7 +180,7 @@ export function Online({ api, back, newCharacter }: { api: GameApi; back: () => 
     body = (
       <>
         {head(phase === "busy" ? "" : "Play", back)}
-        <div className="vm-wait">{phase === "busy" ? busyText : "Reaching the realm…"}</div>
+        <div className="vm-wait">{phase === "busy" ? busyText : solo ? "Opening your worlds on this device…" : "Reaching the realm…"}</div>
       </>
     );
   else if (phase === "nobackend")
@@ -218,7 +226,13 @@ export function Online({ api, back, newCharacter }: { api: GameApi; back: () => 
     body = (
       <>
         {head("My Characters", back)}
-        {imported > 0 && <p className="vm-note">Copied {imported} character{imported > 1 ? "s" : ""} from this device's single player saves. Those saves are untouched.</p>}
+        {imported > 0 && (
+          <p className="vm-note">
+            {solo
+              ? `Brought ${imported} saved game${imported > 1 ? "s" : ""} into Single Player: each character keeps its gear, and its world keeps its progress.`
+              : `Copied ${imported} character${imported > 1 ? "s" : ""} from this device's single player saves. Those saves are untouched.`}
+          </p>
+        )}
         <div className="vm-cards vm-scroll">
           {profile?.characters.length === 0 && <p className="vm-sub">No characters yet. Make one; it can visit any world.</p>}
           {profile?.characters.map((c) => (
@@ -257,20 +271,20 @@ export function Online({ api, back, newCharacter }: { api: GameApi; back: () => 
   else if (phase === "worlds" && char)
     body = (
       <>
-        {head("Worlds", () => setPhase("chars"))}
+        {head(solo ? "Your Worlds" : "Worlds", () => setPhase("chars"))}
         <p className="vm-sub">
           Playing as <b className="vm-gold">{char.name}</b>, level {char.level}.
         </p>
         <div className="vm-cards vm-scroll">
-          {profile?.worlds.length === 0 && <p className="vm-sub">No worlds yet. Create one and give the code to your friends, or join theirs.</p>}
+          {profile?.worlds.length === 0 && <p className="vm-sub">{solo ? "No world yet. Start one: it lives on this device and plays offline." : "No worlds yet. Create one and give the code to your friends, or join theirs."}</p>}
           {profile?.worlds.map((w) => (
             <div key={w.id} className="vm-card">
               <div className="vm-card-main">
                 <b>
-                  {w.name} <code>{w.code}</code>
+                  {w.name} {!solo && <code>{w.code}</code>}
                 </b>
                 <span>
-                  {w.players}/{w.max} players{w.online ? ` · ${w.online} here now` : ""} · Day {w.day}, {hourText(w.hour)}
+                  {solo ? "" : `${w.players}/${w.max} players${w.online ? ` · ${w.online} here now` : ""} · `}Day {w.day}, {hourText(w.hour)}
                   {w.cookie ? " · Cookie defeated" : ""}
                 </span>
               </div>
@@ -284,11 +298,13 @@ export function Online({ api, back, newCharacter }: { api: GameApi; back: () => 
         </div>
         {err && <p className="vm-err">{err}</p>}
         <div className="vm-row">
-          <button className="vm-mbtn" onClick={() => { setErr(""); setPhase("join"); }}>
-            Join World
-          </button>
-          <button className="vm-mbtn primary" onClick={() => { setErr(""); setWorldName(`${char.name}'s Realm`); setPhase("newworld"); }}>
-            Create World
+          {!solo && (
+            <button className="vm-mbtn" onClick={() => { setErr(""); setPhase("join"); }}>
+              Join World
+            </button>
+          )}
+          <button className="vm-mbtn primary" onClick={() => { setErr(""); setWorldName(solo ? `${char.name}'s Hearthfen` : `${char.name}'s Realm`); setPhase("newworld"); }}>
+            {solo ? "New World" : "Create World"}
           </button>
         </div>
       </>
@@ -296,11 +312,11 @@ export function Online({ api, back, newCharacter }: { api: GameApi; back: () => 
   else if (phase === "newworld" && char)
     body = (
       <>
-        {head("Create World", () => setPhase("worlds"))}
+        {head(solo ? "New World" : "Create World", () => setPhase("worlds"))}
         <div className="vm-field">
           <label>World name</label>
           <input value={worldName} maxLength={32} onChange={(e) => setWorldName(e.target.value)} placeholder={`${char.name}'s Realm`} />
-          <p>A persistent world: Hearthfen, the forest and Cookie's Castle, with its own day and night. Up to four players. It stays when you leave.</p>
+          <p>{solo ? "A world of your own on this device: Hearthfen, the forest and Cookie's Castle, with its own day and night. Works offline." : "A persistent world: Hearthfen, the forest and Cookie's Castle, with its own day and night. Up to four players. It stays when you leave."}</p>
         </div>
         {err && <p className="vm-err">{err}</p>}
         <div className="vm-row">

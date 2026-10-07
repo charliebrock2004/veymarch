@@ -169,3 +169,14 @@ test("an old local save imports once", async () => {
   const prof = await call("vm_profile", a);
   assert.equal(prof.characters.length, 1);
 });
+
+test("the SQL grants exactly the client API", async () => {
+  const { REALM_API } = await import("../src/net/api.ts");
+  const rows = (await db.pg.query(`select distinct p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname like 'vm\\_%' and has_function_privilege('public', p.oid, 'execute') is not null`)).rows;
+  const all = rows.map((r) => r.proname);
+  const src = (await import("node:fs")).readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
+  const granted = JSON.parse("[" + /api text\[\] := array\[([^\]]*)\]/.exec(src)[1].replace(/'/g, '"') + "]");
+  assert.deepEqual([...granted].sort(), [...REALM_API].sort());
+  for (const f of REALM_API) assert.ok(all.includes(f), f + " exists");
+});

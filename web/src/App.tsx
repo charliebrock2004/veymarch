@@ -97,38 +97,30 @@ const DEFAULT_LOOK: Look = { body: 1, skin: 1, hair: 0, hairColor: 1, coat: 0 };
 
 function Screens({ api, hud }: { api: GameApi; hud: Hud }) {
   // a ?join=CODE link opens straight into online play
-  const [screen, setScreen] = useState<"main" | "single" | "slots" | "settings" | "online">(() => (new URLSearchParams(location.search).get("join") ? "online" : "main"));
-  const [pendingSlot, setPendingSlot] = useState(0);
-  const [creating, setCreating] = useState<"single" | "online">("single");
+  const [screen, setScreen] = useState<"main" | "solo" | "settings" | "online">(() => (new URLSearchParams(location.search).get("join") ? "online" : "main"));
+  const [creating, setCreating] = useState<"solo" | "online">("online");
   const [createErr, setCreateErr] = useState("");
   if (hud.mode === "loading") return null;
-  const newSingle = (s: number) => {
-    setPendingSlot(s);
-    setCreating("single");
-    api.create(DEFAULT_LOOK);
-  };
   if (hud.mode === "title")
-    return screen === "online" ? (
+    return screen === "online" || screen === "solo" ? (
       <Online
+        key={screen}
         api={api}
+        solo={screen === "solo"}
         back={() => setScreen("main")}
         newCharacter={() => {
-          setCreating("online");
+          setCreating(screen);
           setCreateErr("");
           api.create(DEFAULT_LOOK);
         }}
       />
-    ) : screen === "slots" ? (
-      <Slots hud={hud} api={api} back={() => setScreen("single")} onNew={(s) => { newSingle(s); setScreen("single"); }} />
     ) : screen === "settings" ? (
       <Settings hud={hud} api={api} back={() => setScreen("main")} />
-    ) : screen === "single" ? (
-      <Title hud={hud} api={api} toSlots={() => setScreen("slots")} back={() => setScreen("main")} onNew={newSingle} />
     ) : (
-      <Main hud={hud} toOnline={() => setScreen("online")} toSingle={() => setScreen("single")} toSettings={() => setScreen("settings")} />
+      <Main toOnline={() => setScreen("online")} toSingle={() => setScreen("solo")} toSettings={() => setScreen("settings")} />
     );
   if (hud.mode === "create")
-    return creating === "online" ? (
+    return (
       <Creator
         api={api}
         title="A new character"
@@ -137,11 +129,11 @@ function Screens({ api, hud }: { api: GameApi; hud: Hud }) {
         error={createErr}
         back={() => {
           api.toTitle();
-          setScreen("online");
+          setScreen(creating);
         }}
         onConfirm={async (name, look) => {
           try {
-            const realm = await Realm.open();
+            const realm = creating === "solo" ? await Realm.openSolo() : await Realm.open();
             if (!realm) throw new Error("Online play is not set up on this build.");
             const c = await realm.createCharacter(name, look);
             try {
@@ -150,20 +142,17 @@ function Screens({ api, hud }: { api: GameApi; hud: Hud }) {
               /* ignore */
             }
             api.toTitle();
-            setScreen("online");
+            setScreen(creating);
           } catch (e) {
             setCreateErr(String((e as Error)?.message ?? e));
           }
         }}
       />
-    ) : (
-      <Creator api={api} back={() => api.toTitle()} onConfirm={(name, look) => api.newGame(pendingSlot, name, look)} />
     );
   return <Play api={api} hud={hud} />;
 }
 
-function Main({ hud, toOnline, toSingle, toSettings }: { hud: Hud; toOnline: () => void; toSingle: () => void; toSettings: () => void }) {
-  const latest = hud.slots.filter(Boolean).sort((a, b) => (b!.time ?? 0) - (a!.time ?? 0))[0];
+function Main({ toOnline, toSingle, toSettings }: { toOnline: () => void; toSingle: () => void; toSettings: () => void }) {
   const standalone = typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone);
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
   return (
@@ -179,7 +168,7 @@ function Main({ hud, toOnline, toSingle, toSettings }: { hud: Hud; toOnline: () 
         </button>
         <button className="vm-mbtn" onClick={toSingle}>
           Single Player
-          <small>{latest ? `${latest.name} · ${latest.progress}` : "Offline, saved on this device"}</small>
+          <small>Your own world on this device · works offline</small>
         </button>
         <button className="vm-mbtn" onClick={toSettings}>
           Settings
@@ -187,87 +176,6 @@ function Main({ hud, toOnline, toSingle, toSettings }: { hud: Hud; toOnline: () 
       </div>
       <div className="vm-title-foot">
         {ios && !standalone ? "For full screen: Share → Add to Home Screen. Play in landscape." : "Best played in landscape."}
-      </div>
-    </div>
-  );
-}
-
-function Title({ hud, api, toSlots, back, onNew }: { hud: Hud; api: GameApi; toSlots: () => void; back: () => void; onNew: (s: number) => void }) {
-  const latest = hud.slots.filter(Boolean).sort((a, b) => (b!.time ?? 0) - (a!.time ?? 0))[0];
-  const free = hud.slots.findIndex((s) => !s);
-  return (
-    <div className="vm-title">
-      <div className="vm-title-head">
-        <div className="vm-wordmark big">VEYRMARCH</div>
-        <div className="vm-tagline">Single Player</div>
-      </div>
-      <div className="vm-menu">
-        {latest && (
-          <button className="vm-mbtn primary" onClick={() => api.continueGame(latest.slot)}>
-            Continue
-            <small>
-              {latest.name} · {latest.progress}
-            </small>
-          </button>
-        )}
-        <button className={`vm-mbtn ${latest ? "" : "primary"}`} onClick={() => (free >= 0 ? onNew(free) : toSlots())}>
-          New Character
-        </button>
-        {hud.slots.some(Boolean) && (
-          <button className="vm-mbtn" onClick={toSlots}>
-            Characters
-          </button>
-        )}
-        <button className="vm-mbtn" onClick={back}>
-          Back
-        </button>
-      </div>
-      <div className="vm-title-foot">Single player saves live on this device. Online characters live in your worlds.</div>
-    </div>
-  );
-}
-
-function Slots({ hud, api, back, onNew }: { hud: Hud; api: GameApi; back: () => void; onNew: (s: number) => void }) {
-  const [confirm, setConfirm] = useState(-1);
-  return (
-    <div className="vm-panel-screen">
-      <div className="vm-panel wide">
-        <div className="vm-panel-head">
-          <h2>Characters</h2>
-          <button className="vm-icon" onClick={back} aria-label="Back">
-            <Glyph name="close" size={22} />
-          </button>
-        </div>
-        <div className="vm-slots">
-          {hud.slots.map((s, i) =>
-            s ? (
-              <div className="vm-slot" key={i}>
-                <div className="vm-slot-name">{s.name}</div>
-                <div className="vm-slot-meta">
-                  {s.progress} · {s.place} · {fmtTime(s.time)}
-                </div>
-                <div className="vm-slot-actions">
-                  <button className="vm-mbtn small primary" onClick={() => api.continueGame(i)}>
-                    Play
-                  </button>
-                  {confirm === i ? (
-                    <button className="vm-mbtn small danger" onClick={() => { api.deleteSlot(i); setConfirm(-1); }}>
-                      Really delete
-                    </button>
-                  ) : (
-                    <button className="vm-mbtn small" onClick={() => setConfirm(i)}>
-                      Delete
-                    </button>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <button className="vm-slot empty" key={i} onClick={() => onNew(i)}>
-                <span>+ New character</span>
-              </button>
-            ),
-          )}
-        </div>
       </div>
     </div>
   );
@@ -495,7 +403,7 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
             <ItemIcon id={hud.weaponId} size={22} />
             <span>{hud.weapon}</span>
           </div>
-          {hud.online && <Party hud={hud} />}
+          {hud.online && !hud.online.solo && <Party hud={hud} />}
         </div>
         {hud.boss ? (
           <div className="vm-boss">
@@ -579,14 +487,14 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
                 <Glyph name="close" size={22} />
               </button>
             </div>
-            {hud.online && <WorldCodeRow hud={hud} />}
+            {hud.online && !hud.online.solo && <WorldCodeRow hud={hud} />}
             <SettingsBody hud={hud} api={api} />
             <div className="vm-row">
               <button className="vm-mbtn primary" onClick={() => api.press("resume")}>
                 Resume
               </button>
               <button className="vm-mbtn" onClick={() => api.toTitle()}>
-                {hud.online ? "Leave world" : "Save and quit"}
+                {hud.online && !hud.online.solo ? "Leave world" : "Save and quit"}
               </button>
             </div>
           </div>

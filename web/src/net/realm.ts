@@ -72,9 +72,9 @@ export type HeartbeatJson = { ok: boolean; hour: number; day: number; flags: Rec
 type Ident = { id: string; secret: string };
 const KEY = "veyrmarch.player";
 
-function readIdent(): Ident | null {
+function readIdent(key: string): Ident | null {
   try {
-    const raw = localStorage.getItem(KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const v = JSON.parse(raw) as Ident;
     return v.id && v.secret ? v : null;
@@ -83,9 +83,9 @@ function readIdent(): Ident | null {
   }
 }
 
-function writeIdent(v: Ident) {
+function writeIdent(key: string, v: Ident) {
   try {
-    localStorage.setItem(KEY, JSON.stringify(v));
+    localStorage.setItem(key, JSON.stringify(v));
   } catch {
     /* private mode: the key lives for this session only */
   }
@@ -98,14 +98,27 @@ function randomSecret() {
 }
 
 export class Realm {
-  private ident: Ident | null = readIdent();
+  private ident: Ident | null;
   private registering: Promise<Ident> | null = null;
 
-  constructor(public backend: Backend) {}
+  /** `key` is where this device keeps its player key: online and single player use separate ones. */
+  constructor(public backend: Backend, private key = KEY) {
+    this.ident = readIdent(key);
+  }
 
   static async open(): Promise<Realm | null> {
     const b = await getBackend();
     return b ? new Realm(b) : null;
+  }
+
+  /** The private world database on this device (single player). */
+  static async openSolo(): Promise<Realm> {
+    const { soloBackend } = await import("./solo");
+    return new Realm(await soloBackend(), KEY + ".solo");
+  }
+
+  get solo() {
+    return this.backend.kind === "solo";
   }
 
   get playerId() {
@@ -123,7 +136,7 @@ export class Realm {
     const next = { id: m[1].toLowerCase(), secret: m[2].toLowerCase() };
     await this.backend.rpc("vm_profile", { p_player: next.id, p_secret: next.secret });
     this.ident = next;
-    writeIdent(next);
+    writeIdent(this.key, next);
   }
 
   private async me(): Promise<Ident> {
@@ -134,7 +147,7 @@ export class Realm {
         const id = await this.backend.rpc<string>("vm_register", { p_secret: secret });
         const v = { id, secret };
         this.ident = v;
-        writeIdent(v);
+        writeIdent(this.key, v);
         return v;
       })().finally(() => (this.registering = null));
     return this.registering;

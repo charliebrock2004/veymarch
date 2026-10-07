@@ -29,7 +29,7 @@ export interface Channel {
 }
 
 export interface Backend {
-  kind: "supabase" | "local";
+  kind: "supabase" | "local" | "solo";
   rpc<T>(fn: string, args: Record<string, unknown>): Promise<T>;
   channel(topic: string, key: string): Channel;
 }
