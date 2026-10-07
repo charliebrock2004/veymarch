@@ -3,21 +3,13 @@
 -- Clients never touch these tables. Row level security is on with no policies, and table
 -- privileges are revoked from the public roles. Every client action is a vm_* function that
 -- checks the caller's identity and the game rules, then changes state. The functions are the
--- authority for: identity, world membership, zones and doors, inventory, crafting, gathering,
--- loot, experience and levels, shops, quests, unique rewards, world progression, and every
--- boss's shared health pool.
+-- authority for: identity, world membership, inventory, crafting, gathering, loot, unique
+-- rewards, world progression, and Cookie's shared health pool.
 --
 -- Identity is a device secret: the client generates 32 random bytes, registers once, and keeps
 -- (player id, secret) in local storage. Only the SHA-256 of the secret is stored.
---
--- Positions: every zone is built in local coordinates and placed at a world x origin (ox, see
--- src/game/data/zones.ts). Every table here stores WORLD coordinates (ox + local x, z).
---
--- This file is applied again and again (the hosted project, the local realm, and the browser's
--- solo realm re-apply it when it changes), so every statement is idempotent and an older
--- database is migrated in place, never broken.
 
--- ------------------------------------------------------------------ content (seeded from src/game/data by gen-seed.mjs)
+-- ------------------------------------------------------------------ content (seeded from content.ts)
 create table if not exists vm_item_defs (
   id text primary key, name text not null, kind text not null, stack int not null, damage int not null,
   tier int not null, slot text not null, moveset text not null, heal int not null, soulbound boolean not null
@@ -127,79 +119,16 @@ alter table vm_boss_hits add column if not exists fire boolean not null default 
 -- a deleted world keeps its rows (members' history) but is gone from every list and code lookup
 alter table vm_worlds add column if not exists deleted boolean not null default false;
 
--- Phase B: items carry armour, rarity, price and weapon family; recipes can make several
-alter table vm_item_defs add column if not exists defence int not null default 0;
-alter table vm_item_defs add column if not exists rarity text not null default 'common';
-alter table vm_item_defs add column if not exists value int not null default 0;
-alter table vm_item_defs add column if not exists family text not null default '';
-alter table vm_recipes add column if not exists n int not null default 1;
-alter table vm_mob_spawns add column if not exists zone text;
-
--- Phase B: a member stands in a zone. Older rows only knew "in the castle or not".
-alter table vm_members add column if not exists zone text;
-update vm_members set zone = case when dungeon then 'castle' else 'over' end where zone is null;
-alter table vm_members alter column zone set default 'over';
-alter table vm_members alter column zone set not null;
-
--- Phase B: experience, kills by kind, and quest progress live on the character
-alter table vm_characters add column if not exists kill_counts jsonb not null default '{}'::jsonb;
-alter table vm_characters add column if not exists quests jsonb not null default '{}'::jsonb;
-do $$
-begin
-  if not exists (select 1 from pg_attribute where attrelid = to_regclass('vm_characters') and attname = 'xp' and not attisdropped) then
-    alter table vm_characters add column xp int not null default 0;
-    -- one time, as the column appears: experience for what was done before experience existed
-    update vm_characters c set xp = least(greatest(c.kills, 0), 100) * 12
-                                    + 400 * (select count(*)::int from vm_grants g where g.character_id = c.id)
-      where c.xp = 0;
-  end if;
-end $$;
-
--- Phase B content: zones, doors, shrines, stations, foes' worth, bosses, shops, quests, caches, flag rules
-create table if not exists vm_zones (
-  id text primary key, ox real not null, indoor boolean not null,
-  min_x real not null, max_x real not null, min_z real not null, max_z real not null
-);
-create table if not exists vm_stations (id text primary key, kind text not null, zone text not null, x real not null, z real not null, r real not null);
-create table if not exists vm_portals (
-  id text primary key, from_zone text not null, x real not null, z real not null, r real not null,
-  to_zone text not null, tx real not null, tz real not null, flag text
-);
-create table if not exists vm_shrines (id text primary key, zone text not null, x real not null, z real not null);
-create table if not exists vm_mob_kinds (kind text primary key, xp int not null);
-create table if not exists vm_bosses (
-  id text primary key, name text not null, zone text not null, x real not null, z real not null, r real not null, reach real not null,
-  hp int not null, scale double precision not null, xp int not null, crowns int not null, rewards jsonb not null default '[]'::jsonb, flag text not null
-);
-create table if not exists vm_shops (id text primary key, zone text not null, x real not null, z real not null, keeper text not null, buys boolean not null);
-create table if not exists vm_shop_stock (
-  shop text not null references vm_shops on delete cascade, item text not null references vm_item_defs, price int not null,
-  primary key (shop, item)
-);
-create table if not exists vm_quests (id text primary key, def jsonb not null);
-create table if not exists vm_cache_spots (cache text primary key, zone text not null, x real not null, z real not null);
-create table if not exists vm_world_flag_rules (flag text primary key, needs_mob text, needs_flag text);
-
 do $$
 declare t text;
 begin
   foreach t in array array['vm_item_defs','vm_recipes','vm_recipe_inputs','vm_trades','vm_trade_inputs','vm_loot','vm_mob_spawns','vm_nodes','vm_caches','vm_config',
-                           'vm_players','vm_characters','vm_items','vm_worlds','vm_members','vm_boss_hits','vm_grants',
-                           'vm_zones','vm_stations','vm_portals','vm_shrines','vm_mob_kinds','vm_bosses','vm_shops','vm_shop_stock','vm_quests',
-                           'vm_cache_spots','vm_world_flag_rules'] loop
+                           'vm_players','vm_characters','vm_items','vm_worlds','vm_members','vm_boss_hits','vm_grants'] loop
     execute format('alter table %I enable row level security', t);
     if exists (select 1 from pg_roles where rolname = 'anon') then execute format('revoke all on table %I from anon', t); end if;
     if exists (select 1 from pg_roles where rolname = 'authenticated') then execute format('revoke all on table %I from authenticated', t); end if;
   end loop;
 end $$;
-
--- Functions whose parameters grew. A new parameter makes a new signature, so the old one is
--- dropped first (otherwise a call by name would match both). Callers that leave the new
--- parameter out keep working through its default.
-drop function if exists vm_heartbeat(uuid, text, uuid, uuid, real, real, real, boolean, real, int);
-drop function if exists vm_boss_hit(uuid, text, uuid, uuid, boolean, boolean, boolean, boolean, boolean);
-drop function if exists vm_boss_reset(uuid, text, uuid, uuid);
-drop function if exists vm_take_item(uuid, text, int);
 
 -- ------------------------------------------------------------------ internal helpers (not callable by clients)
 create or replace function vm_hash(p text) returns text language sql immutable set search_path = pg_catalog as $$
@@ -252,76 +181,23 @@ language sql stable security definer set search_path = public as $$
   from vm_items where character_id = p_char
 $$;
 
-create or replace function vm_count(p_char uuid, p_def text) returns int language sql stable security definer set search_path = public as $$
-  select coalesce(sum(count), 0)::int from vm_items where character_id = p_char and def = p_def
-$$;
-
--- the most a character carries of any ONE of the '|'-separated item ids (quest 'have' and 'give'
--- steps: "any edge" means one edge, not a knife and half a sword; src/game/systems/quests.ts agrees)
-create or replace function vm_count_any(p_char uuid, p_defs text) returns int language sql stable security definer set search_path = public as $$
-  select coalesce(max(n), 0)::int from (
-    select sum(count) as n from vm_items where character_id = p_char and def = any (string_to_array(coalesce(p_defs, ''), '|')) group by def
-  ) t
-$$;
-
--- distance on the ground between two world positions
-create or replace function vm_dist(p_x1 double precision, p_z1 double precision, p_x2 double precision, p_z2 double precision) returns double precision
-language sql immutable set search_path = pg_catalog as $$
-  select sqrt((p_x1 - p_x2) ^ 2 + (p_z1 - p_z2) ^ 2)
-$$;
-
--- The old level rule (kills and bosses). Kept for anything that still calls it; levels now come from experience.
 create or replace function vm_level(p_kills int, p_bosses int) returns int language sql immutable set search_path = pg_catalog as $$
   select 1 + floor(sqrt(greatest(0, p_kills * 10 + p_bosses * 120) / 40.0))::int
 $$;
 
--- Level from experience: LEVEL_XP (seeded into vm_config 'level_xp') holds the total experience
--- at the start of each level, so the level is how many of those thresholds you have passed.
-create or replace function vm_level_of(p_xp int) returns int
-language sql stable security definer set search_path = public as $$
-  select greatest(1, (select count(*)::int from jsonb_array_elements_text(coalesce(vm_cfg('level_xp'), '[0]'::jsonb)) t(v)
-                      where t.v::numeric <= coalesce(p_xp, 0)))
-$$;
-
--- What a level is worth (data/progression.ts statsFor): health always, breath once Ember is learned.
-create or replace function vm_sync_stats(p_char uuid) returns int
-language plpgsql security definer set search_path = public as $$
-declare v_l int;
-begin
-  select vm_level_of(xp) into v_l from vm_characters where id = p_char;
-  if v_l is null then return null; end if;
-  update vm_characters set max_hp = 100 + 9 * (v_l - 1),
-                           mana_max = case when mana_max > 0 then 30 + 2 * (v_l - 1) else 0 end
-    where id = p_char and (max_hp <> 100 + 9 * (v_l - 1) or (mana_max > 0 and mana_max <> 30 + 2 * (v_l - 1)));
-  return v_l;
-end $$;
-
--- Experience goes up (never down); returns the new level.
-create or replace function vm_add_xp(p_char uuid, p_n int) returns int
-language plpgsql security definer set search_path = public as $$
-begin
-  if coalesce(p_n, 0) > 0 then
-    update vm_characters set xp = xp + p_n, updated_at = now() where id = p_char;
-  end if;
-  return vm_sync_stats(p_char);
-end $$;
-
 create or replace function vm_char_json(p_char uuid) returns jsonb
 language plpgsql stable security definer set search_path = public as $$
-declare v_c vm_characters; v_w text; v_place text; v_l int; v_lx jsonb := coalesce(vm_cfg('level_xp'), '[0]'::jsonb); v_lo int;
+declare v_c vm_characters; v_w text; v_bosses int; v_place text;
 begin
   select * into v_c from vm_characters where id = p_char;
   select d.name into v_w from vm_items i join vm_item_defs d on d.id = i.def
     where i.character_id = p_char and i.equipped and d.slot = 'main' limit 1;
+  select count(*)::int into v_bosses from vm_grants g where g.character_id = p_char;
   select name into v_place from vm_worlds where id = v_c.last_world;
-  v_l := vm_level_of(v_c.xp);
-  v_lo := coalesce((v_lx->>(v_l - 1))::int, 0);
   return jsonb_build_object(
     'id', v_c.id, 'name', v_c.name, 'look', v_c.look, 'hp', v_c.hp, 'max_hp', v_c.max_hp, 'mana_max', v_c.mana_max,
     'flags', v_c.flags - 'gather_at', 'kills', v_c.kills, 'deaths', v_c.deaths, 'play_seconds', v_c.play_seconds,
-    'level', v_l, 'xp', v_c.xp, 'xp_lo', v_lo, 'xp_hi', coalesce((v_lx->>v_l)::int, v_lo),
-    'crowns', vm_count(p_char, 'coin_crown'), 'kill_counts', v_c.kill_counts, 'quests', v_c.quests,
-    'weapon', coalesce(v_w, 'Fists'), 'items', vm_items_json(p_char),
+    'level', vm_level(v_c.kills, v_bosses), 'weapon', coalesce(v_w, 'Fists'), 'items', vm_items_json(p_char),
     'last_world', v_c.last_world, 'place', v_place);
 end $$;
 
@@ -373,7 +249,7 @@ language plpgsql security definer set search_path = public as $$
 declare v_d vm_item_defs; v_left int := p_n; v_r record; v_take int; v_seq int;
 begin
   select * into v_d from vm_item_defs where id = p_def;
-  if not found or p_n is null or p_n <= 0 then return 0; end if;
+  if not found or p_n <= 0 then return 0; end if;
   if v_d.soulbound then
     if exists (select 1 from vm_items where character_id = p_char and def = p_def) then return 0; end if;
     update vm_characters set seq = seq + 1 where id = p_char returning seq into v_seq;
@@ -398,17 +274,14 @@ begin
   return p_n;
 end $$;
 
--- Removes p_n of an item or raises: callers hold the character lock, and nothing is taken unless
--- all of it is there. With p_uid, only from that one stack (an emptied stack is gone, and with it
--- whatever it had equipped).
-create or replace function vm_take_item(p_char uuid, p_def text, p_n int, p_uid text default null) returns boolean
+-- Removes p_n of an item or raises: callers hold the character lock, and nothing is taken unless all of it is there.
+create or replace function vm_take_item(p_char uuid, p_def text, p_n int) returns boolean
 language plpgsql security definer set search_path = public as $$
 declare v_have int; v_left int := p_n; v_r record; v_rows int;
 begin
-  select coalesce(sum(count), 0) into v_have from vm_items where character_id = p_char and def = p_def and (p_uid is null or uid = p_uid);
+  select coalesce(sum(count), 0) into v_have from vm_items where character_id = p_char and def = p_def;
   if v_have < p_n then raise exception 'materials'; end if;
-  for v_r in select uid, count from vm_items where character_id = p_char and def = p_def and (p_uid is null or uid = p_uid)
-             order by equipped, length(uid), uid for update loop
+  for v_r in select uid, count from vm_items where character_id = p_char and def = p_def order by equipped, length(uid), uid for update loop
     exit when v_left <= 0;
     if v_r.count <= v_left then
       delete from vm_items where character_id = p_char and uid = v_r.uid;
@@ -425,6 +298,10 @@ begin
   if v_left > 0 then raise exception 'materials'; end if;
   return true;
 end $$;
+
+create or replace function vm_count(p_char uuid, p_def text) returns int language sql stable security definer set search_path = public as $$
+  select coalesce(sum(count), 0)::int from vm_items where character_id = p_char and def = p_def
+$$;
 
 create or replace function vm_pick_tier(p_char uuid) returns int language sql stable security definer set search_path = public as $$
   select coalesce(max(d.tier), 0) from vm_items i join vm_item_defs d on d.id = i.def
@@ -463,87 +340,23 @@ begin
   where id = p_world;
 end $$;
 
--- A fresh fight for every boss the world does not know yet (worlds made before a boss existed).
-create or replace function vm_boss_fill(p_world uuid) returns void
-language plpgsql security definer set search_path = public as $$
-declare v_add jsonb;
-begin
-  select coalesce(jsonb_object_agg(b.id, jsonb_build_object('hp', b.hp, 'max', b.hp, 'dead', false, 'fight', 1)), '{}'::jsonb) into v_add
-    from vm_bosses b join vm_worlds w on w.id = p_world where not (w.boss ? b.id);
-  if v_add <> '{}'::jsonb then
-    update vm_worlds set boss = v_add || boss where id = p_world;
-  end if;
-end $$;
-
--- Shrines a member has found in this world. Everyone knows the Hearthfen bedroll.
-create or replace function vm_shrine_known(p_flags jsonb, p_shrine text) returns boolean
-language sql immutable set search_path = pg_catalog as $$
-  select p_shrine = 'hearthfen' or coalesce(p_flags ? ('sh_' || p_shrine), false)
-$$;
-
 create or replace function vm_enter_internal(p_world uuid, p_char uuid, p_player uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare v_online int;
 begin
-  -- world first: lock order is world, member, character
-  perform 1 from vm_worlds where id = p_world for update;
   select count(*) into v_online from vm_members
     where world_id = p_world and character_id <> p_char and player_id <> p_player and left_at is null and last_seen > now() - interval '40 seconds';
   if v_online >= 4 then raise exception 'Four players are already in that world'; end if;
   insert into vm_members (world_id, character_id, player_id, last_seen) values (p_world, p_char, p_player, now())
     on conflict (world_id, character_id) do update set last_seen = now(), left_at = null;
-  perform vm_lock_char(p_char);
   update vm_characters set last_world = p_world, updated_at = now() where id = p_char;
-  perform vm_sync_stats(p_char);
-  perform vm_boss_fill(p_world);
   update vm_worlds set updated_at = now() where id = p_world;
   perform vm_tick(p_world);
   return jsonb_build_object(
     'world', vm_world_json(p_world),
     'character', vm_char_json(p_char),
-    'member', (select jsonb_build_object('x', x, 'z', z, 'yaw', yaw, 'zone', zone, 'dungeon', dungeon, 'flags', flags)
-               from vm_members where world_id = p_world and character_id = p_char));
+    'member', (select jsonb_build_object('x', x, 'z', z, 'yaw', yaw, 'dungeon', dungeon, 'flags', flags) from vm_members where world_id = p_world and character_id = p_char));
 end $$;
-
--- Is a quest step's condition true right now? p_b is the step's baseline (kills of that kind when it began).
-create or replace function vm_quest_met(p_world uuid, p_char uuid, p_step jsonb, p_b int) returns boolean
-language plpgsql stable security definer set search_path = public as $$
-declare v_k text := p_step->>'k'; v_c vm_characters; v_m vm_members; v_ox real; v_n int := coalesce((p_step->>'n')::int, 1);
-begin
-  select * into v_c from vm_characters where id = p_char;
-  if v_k = 'talk' then
-    return true;  -- the client reports the conversation
-  elsif v_k = 'cflag' then
-    return coalesce((v_c.flags->>(p_step->>'flag'))::boolean, false);
-  elsif v_k in ('have', 'give') then
-    return vm_count_any(p_char, p_step->>'item') >= v_n;
-  elsif v_k = 'kill' then
-    return coalesce((v_c.kill_counts->>(p_step->>'kind'))::int, 0) - coalesce(p_b, 0) >= v_n;
-  elsif v_k = 'reach' then
-    select * into v_m from vm_members where world_id = p_world and character_id = p_char and left_at is null;
-    if not found or v_m.zone is distinct from (p_step->>'zone') then return false; end if;
-    if p_step->>'x' is null or p_step->>'z' is null then return true; end if;
-    -- within r (10 when unset, as the client judges it) plus the age of the last saved position
-    select ox into v_ox from vm_zones where id = v_m.zone;
-    return coalesce(v_m.x is not null and v_ox is not null
-                    and vm_dist(v_m.x, v_m.z, v_ox + (p_step->>'x')::double precision, (p_step->>'z')::double precision)
-                        <= coalesce((p_step->>'r')::double precision, 10) + 8, false);
-  elsif v_k = 'flag' then
-    return coalesce((select (flags->>(p_step->>'flag'))::boolean from vm_worlds where id = p_world), false);
-  elsif v_k = 'boss' then
-    return exists (select 1 from vm_grants where world_id = p_world and boss = p_step->>'boss' and character_id = p_char);
-  elsif v_k = 'level' then
-    return vm_level_of(v_c.xp) >= v_n;
-  end if;
-  return false;
-end $$;
-
--- A step's baseline as it begins: kill steps count from the kills you already have.
-create or replace function vm_quest_baseline(p_char uuid, p_step jsonb) returns int
-language sql stable security definer set search_path = public as $$
-  select case when p_step->>'k' = 'kill'
-    then coalesce((select (kill_counts->>(p_step->>'kind'))::int from vm_characters where id = p_char), 0) else 0 end
-$$;
 
 -- ------------------------------------------------------------------ client API
 create or replace function vm_register(p_secret text) returns uuid
@@ -589,7 +402,7 @@ declare v_id uuid; v_it jsonb; v_src text := left(p_payload->>'source', 80); v_f
 begin
   perform vm_auth(p_player, p_secret);
   -- a local save is client data: it can bring a character's look, name and early gear, never
-  -- uniques, keys, late-tier items, experience or boss progress (those are earned in a world)
+  -- uniques, keys, late-tier items or boss progress (those are earned in a world)
   v_cookie := false;
   if v_src is null or v_src !~ '^slot[0-2]:' then raise exception 'That save cannot be imported'; end if;
   select id into v_id from vm_characters where player_id = p_player and flags->>'imported' = v_src and not deleted;
@@ -608,13 +421,10 @@ begin
           least(greatest(coalesce((p_payload->>'deaths')::int, 0), 0), 1000),
           least(greatest(coalesce((p_payload->>'time')::int, 0), 0), 360000))
   returning id into v_id;
-  -- at most 20 of each kind, however many times the save lists it; never crowns (they buy things)
-  for v_it in select jsonb_build_object('def', e->>'def', 'count', sum(least(greatest(coalesce((e->>'count')::int, 1), 1), 20)))
-              from jsonb_array_elements(case when jsonb_typeof(p_payload->'items') = 'array' then p_payload->'items' else '[]'::jsonb end) e
-              group by e->>'def' loop
+  for v_it in select * from jsonb_array_elements(coalesce(p_payload->'items', '[]'::jsonb)) loop
     select * into v_def from vm_item_defs where id = v_it->>'def';
-    continue when not found or v_def.id = 'arm_cloth' or v_def.kind in ('key', 'coin') or v_def.soulbound or v_def.tier >= 4 or v_def.id = 'mat_iron';
-    perform vm_add_item(v_id, v_def.id, least((v_it->>'count')::int, 20));
+    continue when not found or v_def.id = 'arm_cloth' or v_def.kind = 'key' or v_def.soulbound or v_def.tier >= 4 or v_def.id = 'mat_iron';
+    perform vm_add_item(v_id, v_def.id, least(greatest(coalesce((v_it->>'count')::int, 1), 1), 20));
   end loop;
   perform vm_add_item(v_id, 'arm_cloth', 1);
   update vm_items set equipped = true where character_id = v_id and def = 'arm_cloth';
@@ -630,10 +440,9 @@ create or replace function vm_delete_character(p_player uuid, p_secret text, p_c
 language plpgsql security definer set search_path = public as $$
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  -- soft delete: the row stays so world history (grants, hits) keeps its references.
-  -- Members before the character (lock order).
-  update vm_members set last_seen = now() - interval '10 minutes', left_at = coalesce(left_at, now()) where character_id = p_char;
+  -- soft delete: the row stays so world history (grants, hits) keeps its references
   update vm_characters set deleted = true, updated_at = now() where id = p_char;
+  update vm_members set last_seen = now() - interval '10 minutes', left_at = coalesce(left_at, now()) where character_id = p_char;
   return vm_profile(p_player, p_secret);
 end $$;
 
@@ -646,7 +455,7 @@ end $$;
 
 create or replace function vm_create_world(p_player uuid, p_secret text, p_name text) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_code text; v_id uuid; v_alpha text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; v_i int; v_name text; v_boss jsonb; v_hp int;
+declare v_code text; v_id uuid; v_alpha text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; v_i int; v_name text; v_hp int;
 begin
   perform vm_auth(p_player, p_secret);
   if (select count(*) from vm_worlds where owner = p_player and not deleted) >= 6 then raise exception 'You already own six worlds'; end if;
@@ -658,14 +467,10 @@ begin
     end loop;
     exit when not exists (select 1 from vm_worlds where code = v_code);
   end loop;
-  -- a fresh fight for every boss; Cookie falls back to the older 'cookie_hp' setting if the boss table lacks it
-  select coalesce(jsonb_object_agg(id, jsonb_build_object('hp', hp, 'max', hp, 'dead', false, 'fight', 1)), '{}'::jsonb) into v_boss from vm_bosses;
-  if not (v_boss ? 'cookie') then
-    v_hp := coalesce((vm_cfg('cookie_hp') #>> '{}')::int, 280);
-    v_boss := v_boss || jsonb_build_object('cookie', jsonb_build_object('hp', v_hp, 'max', v_hp, 'dead', false, 'fight', 1));
-  end if;
+  v_hp := coalesce((vm_cfg('cookie_hp') #>> '{}')::int, 280);
   insert into vm_worlds (code, name, owner, seed, boss)
-  values (v_code, v_name, p_player, floor(random() * 1000000)::int, v_boss)
+  values (v_code, v_name, p_player, floor(random() * 1000000)::int,
+          jsonb_build_object('cookie', jsonb_build_object('hp', v_hp, 'max', v_hp, 'dead', false, 'fight', 1)))
   returning id into v_id;
   return vm_world_card(v_id, p_player);
 end $$;
@@ -700,42 +505,25 @@ end $$;
 
 -- Every few seconds: persist the position (if it is physically possible), health and play time,
 -- advance the world clock, and return the shared world state.
---
--- Within a zone you can only have walked so far since the last save. Changing zone needs a door:
--- a portal from your old zone to the new one, near where you last stood, and open (its world
--- flag set). After death or on first entry (no saved position) you may wake anywhere. Clients
--- that only know "castle or not" leave p_zone out and send p_dungeon.
 create or replace function vm_heartbeat(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_x real, p_z real, p_yaw real,
-                                        p_dungeon boolean default null, p_hp real default null, p_play int default 0,
-                                        p_zone text default null) returns jsonb
+                                        p_dungeon boolean, p_hp real, p_play int) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_m vm_members; v_dt double precision; v_ok boolean := true; v_w vm_worlds; v_zone text; v_z vm_zones;
+declare v_m vm_members; v_dt double precision; v_ok boolean := true; v_w vm_worlds;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   perform vm_tick(p_world);
-  select * into v_w from vm_worlds where id = p_world;
   select * into v_m from vm_members where world_id = p_world and character_id = p_char and left_at is null for update;
   if not found then raise exception 'Not in this world'; end if;
-  v_zone := coalesce(p_zone, case when coalesce(p_dungeon, false) then 'castle' else 'over' end);
   v_dt := greatest(0.2, extract(epoch from now() - v_m.pos_at));
-  select * into v_z from vm_zones where id = v_zone;
-  if not found or p_x is null or p_z is null
-     or p_x - v_z.ox < v_z.min_x - 30 or p_x - v_z.ox > v_z.max_x + 30 or p_z < v_z.min_z - 30 or p_z > v_z.max_z + 30 then
-    -- an unknown zone, or a position that is not in the zone it claims
+  if v_m.x is not null and v_m.dungeon = p_dungeon and sqrt((p_x - v_m.x) ^ 2 + (p_z - v_m.z) ^ 2) > 9.5 * v_dt + 8 then
     v_ok := false;
-  elsif v_m.x is null then
-    null;
-  elsif v_m.zone = v_zone then
-    if vm_dist(p_x, p_z, v_m.x, v_m.z) > 9.5 * v_dt + 8 then v_ok := false; end if;
-  elsif not exists (select 1 from vm_portals p
-                    where p.from_zone = v_m.zone and p.to_zone = v_zone
-                      and vm_dist(v_m.x, v_m.z, p.x, p.z) < p.r + 12 + 9.5 * least(v_dt, 6)
-                      and (p.flag is null or coalesce((v_w.flags->>p.flag)::boolean, false))) then
+  end if;
+  -- changing zone needs a door: the castle door outside, the entry hall or the courtyard gate inside
+  if v_m.x is not null and v_m.dungeon <> p_dungeon and not vm_at_portal(v_m.dungeon, v_m.x, v_m.z, v_dt) then
     v_ok := false;
   end if;
   if v_ok then
-    update vm_members set x = p_x, z = p_z, yaw = coalesce(p_yaw, yaw), zone = v_zone, dungeon = (v_zone = 'castle'),
-                          pos_at = now(), last_seen = now()
+    update vm_members set x = p_x, z = p_z, yaw = p_yaw, dungeon = p_dungeon, pos_at = now(), last_seen = now()
       where world_id = p_world and character_id = p_char;
   else
     update vm_members set last_seen = now() where world_id = p_world and character_id = p_char;
@@ -744,12 +532,11 @@ begin
                            play_seconds = play_seconds + least(greatest(coalesce(p_play, 0), 0), 60), updated_at = now()
     where id = p_char;
   select * into v_w from vm_worlds where id = p_world;
-  return jsonb_build_object('ok', v_ok, 'zone', case when v_ok then v_zone else v_m.zone end,
-    'hour', v_w.hour, 'day', v_w.day, 'flags', v_w.flags, 'boss', v_w.boss, 'now', now(),
+  return jsonb_build_object('ok', v_ok, 'hour', v_w.hour, 'day', v_w.day, 'flags', v_w.flags, 'boss', v_w.boss, 'now', now(),
     'online', (select count(*) from vm_members where world_id = p_world and last_seen > now() - interval '40 seconds'));
 end $$;
 
--- The castle's doors before zones were data (vm_portals replaces it). Kept: harmless and internal.
+-- Doors between zones (static map data). Walking speed covers the gap since the last save.
 create or replace function vm_at_portal(p_dungeon boolean, p_x real, p_z real, p_dt double precision) returns boolean
 language sql immutable set search_path = pg_catalog as $$
   select case when p_dungeon
@@ -773,7 +560,7 @@ begin
   perform vm_own_char(p_player, p_secret, p_char);
   select * into v_w from vm_worlds where id = p_world for update;
   v_m := vm_member(p_world, p_char);
-  if v_m.zone <> 'over' or v_m.x is null or vm_dist(v_m.x, v_m.z, -7.4, -11.9) > 16 then raise exception 'Your bedroll is in Hearthfen'; end if;
+  if v_m.dungeon or v_m.x is null or sqrt((v_m.x + 7.4) ^ 2 + (v_m.z + 11.9) ^ 2) > 16 then raise exception 'Your bedroll is in Hearthfen'; end if;
   perform vm_tick(p_world);
   select * into v_w from vm_worlds where id = p_world;
   if exists (select 1 from vm_members where world_id = p_world and character_id <> p_char and player_id <> p_player
@@ -852,12 +639,9 @@ begin
                             'node', jsonb_build_object('id', p_node, 'left', v_left, 'regrow_at', v_regrow), 'now', now());
 end $$;
 
--- Crafting by hand works anywhere. Everything else needs a station of the recipe's kind (any of
--- them: Hearthfen's forge or Holt's), in your zone, within its reach plus a few seconds' walk
--- (the last saved position is a little old). p_station is only the client's hint.
 create or replace function vm_craft(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_recipe text, p_station text) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_r vm_recipes; v_in record; v_m vm_members; v_d vm_item_defs; v_n int;
+declare v_r vm_recipes; v_in record; v_m vm_members; v_d vm_item_defs;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   v_m := vm_member(p_world, p_char);
@@ -865,8 +649,8 @@ begin
   select * into v_r from vm_recipes where id = p_recipe;
   if not found then raise exception 'Unknown recipe'; end if;
   if v_r.station <> 'hand' then
-    if v_m.x is null or not exists (select 1 from vm_stations s where s.kind = v_r.station and s.zone = v_m.zone
-                                     and vm_dist(v_m.x, v_m.z, s.x, s.z) <= s.r + 8) then
+    -- the workbench and the forge stand in Hearthfen
+    if p_station is distinct from v_r.station or v_m.dungeon or v_m.x is null or sqrt(v_m.x ^ 2 + v_m.z ^ 2) > 60 then
       raise exception 'station';
     end if;
   end if;
@@ -876,11 +660,10 @@ begin
   for v_in in select item, n from vm_recipe_inputs where recipe = p_recipe loop
     if not vm_take_item(p_char, v_in.item, v_in.n) then raise exception 'materials'; end if;
   end loop;
-  v_n := greatest(1, coalesce(v_r.n, 1));
-  perform vm_add_item(p_char, v_r.out_item, v_n);
+  perform vm_add_item(p_char, v_r.out_item, 1);
   select * into v_d from vm_item_defs where id = v_r.out_item;
   if v_d.slot <> 'none' and v_d.moveset not like '%pick%' then perform vm_equip_def(p_char, v_r.out_item); end if;
-  return jsonb_build_object('items', vm_items_json(p_char), 'made', v_r.out_item, 'n', v_n);
+  return jsonb_build_object('items', vm_items_json(p_char), 'made', v_r.out_item);
 end $$;
 
 create or replace function vm_equip(p_player uuid, p_secret text, p_char uuid, p_uid text) returns jsonb
@@ -928,12 +711,11 @@ begin
   return jsonb_build_object('items', vm_items_json(p_char));
 end $$;
 
--- A foe dies once per spawn. The first claim records the death, rolls the loot (crowns are
--- ordinary drops), and pays the killer the foe's experience; any later claim for the same foe
--- before it respawns gets nothing.
+-- A foe dies once per spawn. The first claim records the death and rolls the loot; any later
+-- claim for the same foe before it respawns gets nothing.
 create or replace function vm_loot(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_mob text) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_s vm_mob_spawns; v_w vm_worlds; v_dead jsonb; v_r record; v_drops jsonb := '[]'::jsonb; v_until timestamptz; v_xp int; v_level int;
+declare v_s vm_mob_spawns; v_w vm_worlds; v_dead jsonb; v_r record; v_drops jsonb := '[]'::jsonb; v_until timestamptz;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   perform vm_member(p_world, p_char);
@@ -943,8 +725,7 @@ begin
   perform vm_lock_char(p_char);
   v_dead := v_w.dead_mobs -> p_mob;
   if v_dead is not null and (jsonb_typeof(v_dead) = 'null' or (v_dead #>> '{}')::timestamptz > now()) then
-    return jsonb_build_object('items', vm_items_json(p_char), 'drops', '[]'::jsonb, 'dup', true, 'xp_gained', 0,
-                              'level', (select vm_level_of(xp) from vm_characters where id = p_char), 'crowns', vm_count(p_char, 'coin_crown'));
+    return jsonb_build_object('items', vm_items_json(p_char), 'drops', '[]'::jsonb, 'dup', true);
   end if;
   v_until := case when v_s.respawns then now() + interval '150 seconds' else null end;
   update vm_worlds set dead_mobs = dead_mobs || jsonb_build_object(p_mob, v_until), updated_at = now() where id = p_world;
@@ -954,35 +735,25 @@ begin
       v_drops := v_drops || jsonb_build_array(jsonb_build_object('item', v_r.item, 'n', v_r.n));
     end if;
   end loop;
-  v_xp := coalesce((select xp from vm_mob_kinds where kind = v_s.kind), 0);
-  update vm_characters set kills = kills + 1,
-                           kill_counts = kill_counts || jsonb_build_object(v_s.kind, coalesce((kill_counts->>v_s.kind)::int, 0) + 1)
-    where id = p_char;
-  v_level := vm_add_xp(p_char, v_xp);
-  return jsonb_build_object('items', vm_items_json(p_char), 'drops', v_drops, 'dup', false, 'xp_gained', v_xp, 'level', v_level,
-                            'xp', (select xp from vm_characters where id = p_char), 'crowns', vm_count(p_char, 'coin_crown'));
+  update vm_characters set kills = kills + 1 where id = p_char;
+  return jsonb_build_object('items', vm_items_json(p_char), 'drops', v_drops, 'dup', false);
 end $$;
 
--- World flags a player may set (doors, levers, puzzles): only those with a rule, and only once
--- the rule's foe is dead or its prerequisite flag is set. Boss flags fall with the boss; the
--- causeway opens with the Castellan's quest.
 create or replace function vm_world_flag(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_flag text) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_w vm_worlds; v_r vm_world_flag_rules;
+declare v_w vm_worlds;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   perform vm_member(p_world, p_char);
   select * into v_w from vm_worlds where id = p_world for update;
-  if p_flag = 'causeway' or exists (select 1 from vm_bosses where flag = p_flag or id = p_flag) then
-    raise exception 'That is not yours to open';
-  end if;
-  select * into v_r from vm_world_flag_rules where flag = p_flag;
-  if not found then raise exception 'Unknown flag'; end if;
-  if v_r.needs_mob is not null and not (v_w.dead_mobs ? v_r.needs_mob) then
-    raise exception 'It will not budge while its keeper still stands';
-  end if;
-  if v_r.needs_flag is not null and not coalesce((v_w.flags->>v_r.needs_flag)::boolean, false) then
-    raise exception 'It does not answer yet';
+  if p_flag = 'slab' then
+    null;
+  elsif p_flag = 'nursery' then
+    if not (v_w.dead_mobs ? 'dh') then raise exception 'The door will not budge while the rocking horse still rocks'; end if;
+  elsif p_flag = 'gate' then
+    if not coalesce((v_w.flags->>'cookie')::boolean, false) then raise exception 'The gate does not answer'; end if;
+  else
+    raise exception 'Unknown flag';
   end if;
   update vm_worlds set flags = flags || jsonb_build_object(p_flag, true), updated_at = now() where id = p_world returning * into v_w;
   return v_w.flags;
@@ -995,12 +766,11 @@ begin
   v_c := vm_own_char(p_player, p_secret, p_char);
   perform vm_lock_char(p_char);
   if p_flag = 'ember' then
-    if not exists (select 1 from vm_items i join vm_item_defs d on d.id = i.def where i.character_id = p_char and d.kind = 'weapon'
-                   and (d.family in ('dagger', 'sword', 'axe', 'mace', 'spear', 'greatsword')
-                        or d.id in ('wpn_stone_knife', 'wpn_copper_sword', 'wpn_iron_sword', 'wpn_cookie_blade', 'wpn_smacko'))) then
+    if not exists (select 1 from vm_items where character_id = p_char
+                   and def in ('wpn_stone_knife', 'wpn_copper_sword', 'wpn_iron_sword', 'wpn_cookie_blade', 'wpn_smacko')) then
       raise exception 'Tanic wants to see an edge first';
     end if;
-    update vm_characters set mana_max = 30 + 2 * (vm_level_of(xp) - 1) where id = p_char;
+    update vm_characters set mana_max = greatest(mana_max, 30) where id = p_char;
   elsif p_flag not in ('talked', 'voss', 'ended') then
     raise exception 'Unknown flag';
   end if;
@@ -1008,27 +778,16 @@ begin
   return vm_char_json(p_char);
 end $$;
 
--- Per character, per world: one-time caches (stand by them; contents once), shrines found
--- ('sh_' || shrine id; stand by them), and the legacy 'shrine' and 'entered' marks.
+-- Per character, per world: one-time caches, the shrine, having entered the castle.
 create or replace function vm_member_flag(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_flag text) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_m vm_members; v_r record; v_drops jsonb := '[]'::jsonb; v_zone text; v_x real; v_z real;
+declare v_m vm_members; v_r record; v_drops jsonb := '[]'::jsonb;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   select * into v_m from vm_members where world_id = p_world and character_id = p_char and left_at is null for update;
   if not found then raise exception 'Not in this world'; end if;
   perform vm_lock_char(p_char);
-  if p_flag in ('shrine', 'entered') then
-    null;
-  else
-    if p_flag like 'sh\_%' then
-      select zone, x, z into v_zone, v_x, v_z from vm_shrines where id = substr(p_flag, 4);
-    else
-      select zone, x, z into v_zone, v_x, v_z from vm_cache_spots where cache = p_flag;
-    end if;
-    if not found then raise exception 'Unknown flag'; end if;
-    if v_m.zone <> v_zone or v_m.x is null or vm_dist(v_m.x, v_m.z, v_x, v_z) > 6 + 8 then raise exception 'Too far away'; end if;
-  end if;
+  if p_flag not in ('chest', 'hollow', 'shrine', 'entered') then raise exception 'Unknown flag'; end if;
   if not (v_m.flags ? p_flag) then
     for v_r in select item, n from vm_caches where cache = p_flag loop
       perform vm_add_item(p_char, v_r.item, v_r.n);
@@ -1040,119 +799,96 @@ begin
                             'flags', (select flags from vm_members where world_id = p_world and character_id = p_char));
 end $$;
 
--- Every boss has one health pool per world. The server checks the hitter stands in the arena,
--- computes the damage from their equipped weapon and level, throttles swings, and on the killing
--- blow marks the world, then pays every character who fought this fight (or stood in the arena)
--- exactly once: the rewards, the experience, the crowns and the boss's character flag.
+-- Cookie has one health pool per world. The server computes the damage from the attacker's
+-- equipped weapon, throttles swings, and on the killing blow marks the world, then grants the
+-- three uniques exactly once to every character who fought (or stood in the castle) for this fight.
 create or replace function vm_boss_hit(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_heavy boolean, p_fire boolean,
-                                       p_behind boolean, p_perched boolean, p_dizzy boolean, p_boss text default 'cookie') returns jsonb
+                                       p_behind boolean, p_perched boolean, p_dizzy boolean) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_def vm_bosses; v_w vm_worlds; v_b jsonb; v_hp int; v_max int; v_fight int; v_d vm_item_defs; v_dmg double precision; v_last timestamptz;
-        v_rec record; v_it jsonb; v_granted boolean := false; v_m vm_members; v_dead boolean := false; v_c vm_characters; v_power double precision;
+declare v_w vm_worlds; v_b jsonb; v_hp int; v_max int; v_fight int; v_d vm_item_defs; v_dmg double precision; v_last timestamptz;
+        v_rec record; v_item text; v_granted boolean := false; v_m vm_members; v_dead boolean := false;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  select * into v_def from vm_bosses where id = coalesce(p_boss, 'cookie');
-  if not found then raise exception 'Unknown foe'; end if;
   select * into v_w from vm_worlds where id = p_world for update;
   v_m := vm_member(p_world, p_char);
-  -- the hitter must be in the arena, by its last save (every few seconds while playing)
-  if v_m.zone <> v_def.zone or v_m.last_seen < now() - interval '20 seconds' or v_m.x is null
-     or vm_dist(v_m.x, v_m.z, v_def.x, v_def.z) > v_def.reach then
-    raise exception '% is not within reach', v_def.name;
+  -- the hitter must be in the castle courtyard, by its last save (every 5 s while playing)
+  if not v_m.dungeon or v_m.last_seen < now() - interval '20 seconds' or v_m.x is null
+     or sqrt((v_m.x - 1200) ^ 2 + (v_m.z - 104) ^ 2) > 34 then
+    raise exception 'Cookie is not within reach';
   end if;
-  select * into v_c from vm_characters where id = p_char;
-  v_b := coalesce(v_w.boss -> v_def.id, jsonb_build_object('hp', v_def.hp, 'max', v_def.hp, 'dead', false, 'fight', 1));
+  if p_fire then
+    if (select mana_max from vm_characters where id = p_char) <= 0 then raise exception 'You do not know Ember'; end if;
+    if exists (select 1 from vm_boss_hits where character_id = p_char and world_id = p_world and boss = 'cookie' and fire and at > now() - interval '900 milliseconds') then
+      return jsonb_build_object('hp', (v_w.boss->'cookie'->>'hp')::int, 'max', (v_w.boss->'cookie'->>'max')::int, 'dead', false, 'dealt', 0, 'throttled', true);
+    end if;
+  end if;
+  v_b := coalesce(v_w.boss->'cookie', jsonb_build_object('hp', 280, 'max', 280, 'dead', false, 'fight', 1));
   v_hp := (v_b->>'hp')::int;
   v_max := (v_b->>'max')::int;
   v_fight := coalesce((v_b->>'fight')::int, 1);
-  if p_fire then
-    if v_c.mana_max <= 0 then raise exception 'You do not know Ember'; end if;
-    if exists (select 1 from vm_boss_hits where character_id = p_char and world_id = p_world and boss = v_def.id and fire and at > now() - interval '900 milliseconds') then
-      return jsonb_build_object('boss', v_def.id, 'hp', v_hp, 'max', v_max, 'dead', coalesce((v_b->>'dead')::boolean, false), 'dealt', 0, 'throttled', true);
-    end if;
-  end if;
   if coalesce((v_b->>'dead')::boolean, false) then
-    return jsonb_build_object('boss', v_def.id, 'hp', 0, 'max', v_max, 'dead', true, 'dealt', 0, 'granted',
-                              exists (select 1 from vm_grants where world_id = p_world and boss = v_def.id and character_id = p_char));
+    return jsonb_build_object('hp', 0, 'max', v_max, 'dead', true, 'dealt', 0, 'granted',
+                              exists (select 1 from vm_grants where world_id = p_world and boss = 'cookie' and character_id = p_char));
   end if;
-  select max(at) into v_last from vm_boss_hits where character_id = p_char and world_id = p_world and boss = v_def.id;
+  select max(at) into v_last from vm_boss_hits where character_id = p_char and world_id = p_world and boss = 'cookie';
   if v_last is not null and v_last > now() - interval '250 milliseconds' then
-    return jsonb_build_object('boss', v_def.id, 'hp', v_hp, 'max', v_max, 'dead', false, 'dealt', 0, 'throttled', true);
+    return jsonb_build_object('hp', v_hp, 'max', v_max, 'dead', false, 'dealt', 0, 'throttled', true);
   end if;
-  v_power := 1 + 0.03 * (vm_level_of(v_c.xp) - 1);
   if p_fire then
-    v_dmg := 21 * v_power;
+    v_dmg := 14 * 1.5;
   else
     select d.* into v_d from vm_items i join vm_item_defs d on d.id = i.def where i.character_id = p_char and i.equipped and d.slot = 'main' limit 1;
     if not found then select * into v_d from vm_item_defs where id = 'wpn_fists'; end if;
-    v_dmg := coalesce(v_d.damage, 4) * v_power * (case when p_heavy then 1.6 else 1 end) * (0.92 + random() * 0.16);
+    v_dmg := v_d.damage * (case when p_heavy then 1.6 else 1 end) * (0.92 + random() * 0.16);
     if p_heavy and p_behind and not p_perched then v_dmg := v_dmg * 1.3; end if;
     if p_perched then v_dmg := v_dmg * 0.5; end if;
   end if;
   if p_dizzy then v_dmg := v_dmg * 1.3; end if;
-  -- the Black Knight's Oath: all five pieces worn
-  if (select count(distinct i.def) from vm_items i where i.character_id = p_char and i.equipped
-        and i.def in ('arm_bk_head', 'arm_bk_chest', 'arm_bk_hands', 'arm_bk_legs', 'arm_bk_feet')) = 5 then
-    v_dmg := v_dmg * 1.15;
-  end if;
   v_dmg := greatest(1, round(v_dmg));
   v_hp := greatest(0, v_hp - v_dmg::int);
-  insert into vm_boss_hits (world_id, boss, character_id, fight, dmg, fire) values (p_world, v_def.id, p_char, v_fight, v_dmg::int, coalesce(p_fire, false));
+  insert into vm_boss_hits (world_id, boss, character_id, fight, dmg, fire) values (p_world, 'cookie', p_char, v_fight, v_dmg::int, p_fire);
   v_b := v_b || jsonb_build_object('hp', v_hp);
   if v_hp <= 0 then
     v_dead := true;
     v_b := v_b || jsonb_build_object('dead', true, 'hp', 0);
-    update vm_worlds set boss = boss || jsonb_build_object(v_def.id, v_b), flags = flags || jsonb_build_object(v_def.flag, true), updated_at = now()
+    update vm_worlds set boss = boss || jsonb_build_object('cookie', v_b), flags = flags || '{"cookie": true}'::jsonb, updated_at = now()
       where id = p_world;
     for v_rec in
       select character_id from (
-        select distinct h.character_id from vm_boss_hits h where h.world_id = p_world and h.boss = v_def.id and h.fight = v_fight
+        select distinct h.character_id from vm_boss_hits h where h.world_id = p_world and h.boss = 'cookie' and h.fight = v_fight
         union
-        select m.character_id from vm_members m
-          where m.world_id = p_world and m.left_at is null and m.zone = v_def.zone and m.x is not null
-            and m.last_seen > now() - interval '60 seconds' and vm_dist(m.x, m.z, v_def.x, v_def.z) <= v_def.reach
+        select m.character_id from vm_members m where m.world_id = p_world and m.left_at is null and m.dungeon and m.last_seen > now() - interval '60 seconds'
       ) f order by character_id
     loop
-      insert into vm_grants (world_id, boss, character_id) values (p_world, v_def.id, v_rec.character_id) on conflict do nothing;
+      insert into vm_grants (world_id, boss, character_id) values (p_world, 'cookie', v_rec.character_id) on conflict do nothing;
       if found then
-        for v_it in select * from jsonb_array_elements(v_def.rewards) loop
-          perform vm_add_item(v_rec.character_id, v_it->>0, coalesce((v_it->>1)::int, 1));
+        foreach v_item in array array['wpn_cookie_blade', 'wpn_cookie_pick', 'key_cookie_core'] loop
+          perform vm_add_item(v_rec.character_id, v_item, 1);
         end loop;
-        perform vm_add_xp(v_rec.character_id, v_def.xp);
-        perform vm_add_item(v_rec.character_id, 'coin_crown', v_def.crowns);
-        update vm_characters set flags = flags || jsonb_build_object(v_def.id, true), updated_at = now() where id = v_rec.character_id;
+        update vm_characters set flags = flags || '{"cookie": true}'::jsonb, updated_at = now() where id = v_rec.character_id;
       end if;
     end loop;
-    v_granted := exists (select 1 from vm_grants where world_id = p_world and boss = v_def.id and character_id = p_char);
+    v_granted := exists (select 1 from vm_grants where world_id = p_world and boss = 'cookie' and character_id = p_char);
   else
-    update vm_worlds set boss = boss || jsonb_build_object(v_def.id, v_b), updated_at = now() where id = p_world;
+    update vm_worlds set boss = boss || jsonb_build_object('cookie', v_b), updated_at = now() where id = p_world;
   end if;
-  return jsonb_build_object('boss', v_def.id, 'hp', v_hp, 'max', v_max, 'dead', v_dead, 'dealt', v_dmg::int, 'granted', v_granted)
-         || case when v_dead then jsonb_build_object('character', vm_char_json(p_char)) else '{}'::jsonb end;
+  return jsonb_build_object('hp', v_hp, 'max', v_max, 'dead', v_dead, 'dealt', v_dmg::int, 'granted', v_granted);
 end $$;
 
--- The fight resets (a new fight number, full health) when everyone has fallen or left. Health
--- grows with the fighters standing in the arena: each one past the first adds `scale` of the base.
-create or replace function vm_boss_reset(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_boss text default 'cookie') returns jsonb
+-- The fight resets (full health, a new fight number) when everyone has fallen or left.
+create or replace function vm_boss_reset(p_player uuid, p_secret text, p_world uuid, p_char uuid) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_def vm_bosses; v_w vm_worlds; v_b jsonb; v_n int; v_max int;
+declare v_w vm_worlds; v_b jsonb;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  select * into v_def from vm_bosses where id = coalesce(p_boss, 'cookie');
-  if not found then raise exception 'Unknown foe'; end if;
-  select * into v_w from vm_worlds where id = p_world for update;
   perform vm_member(p_world, p_char);
-  v_b := coalesce(v_w.boss -> v_def.id, jsonb_build_object('hp', v_def.hp, 'max', v_def.hp, 'dead', false, 'fight', 0));
-  if coalesce((v_b->>'dead')::boolean, false) then return v_w.boss; end if;
+  select * into v_w from vm_worlds where id = p_world for update;
+  v_b := v_w.boss->'cookie';
+  if v_b is null or coalesce((v_b->>'dead')::boolean, false) then return v_w.boss; end if;
   -- a fight that is still being fought is not reset (a client with stale state may ask)
-  if exists (select 1 from vm_boss_hits where world_id = p_world and boss = v_def.id and at > now() - interval '15 seconds') then return v_w.boss; end if;
-  select count(*)::int into v_n from vm_members m
-    where m.world_id = p_world and m.left_at is null and m.zone = v_def.zone and m.x is not null
-      and m.last_seen > now() - interval '20 seconds' and vm_dist(m.x, m.z, v_def.x, v_def.z) <= v_def.reach;
-  v_n := least(4, greatest(1, v_n));
-  v_max := round((v_def.hp * (1 + v_def.scale * (v_n - 1)))::numeric)::int;
-  v_b := v_b || jsonb_build_object('hp', v_max, 'max', v_max, 'dead', false, 'fight', coalesce((v_b->>'fight')::int, 0) + 1);
-  update vm_worlds set boss = boss || jsonb_build_object(v_def.id, v_b), updated_at = now() where id = p_world returning * into v_w;
+  if exists (select 1 from vm_boss_hits where world_id = p_world and boss = 'cookie' and at > now() - interval '15 seconds') then return v_w.boss; end if;
+  v_b := v_b || jsonb_build_object('hp', (v_b->>'max')::int, 'fight', coalesce((v_b->>'fight')::int, 1) + 1);
+  update vm_worlds set boss = boss || jsonb_build_object('cookie', v_b), updated_at = now() where id = p_world returning * into v_w;
   return v_w.boss;
 end $$;
 
@@ -1160,182 +896,18 @@ create or replace function vm_died(p_player uuid, p_secret text, p_world uuid, p
 language plpgsql security definer set search_path = public as $$
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  -- waking somewhere else is allowed: the next position is not checked against the last one.
-  -- Member before character (lock order).
-  update vm_members set x = null, z = null where world_id = p_world and character_id = p_char;
   perform vm_lock_char(p_char);
   update vm_characters set deaths = deaths + 1, hp = max_hp, updated_at = now() where id = p_char;
+  -- waking somewhere else is allowed: the next position is not checked against the last one
+  update vm_members set x = null, z = null where world_id = p_world and character_id = p_char;
   return vm_char_json(p_char);
 end $$;
-
--- Shops sell their stock for crowns at the counter (you stand within 6 m, plus the age of your
--- last saved position). Nothing is handed over unless every crown is there.
-create or replace function vm_buy(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_shop text, p_item text, p_n int) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare v_m vm_members; v_s vm_shops; v_price int; v_d vm_item_defs; v_cost int;
-begin
-  perform vm_own_char(p_player, p_secret, p_char);
-  v_m := vm_member(p_world, p_char);
-  select * into v_s from vm_shops where id = p_shop;
-  if not found then raise exception 'No such shop'; end if;
-  if v_m.zone <> v_s.zone or v_m.x is null or vm_dist(v_m.x, v_m.z, v_s.x, v_s.z) > 6 + 8 then raise exception 'Stand at the counter'; end if;
-  select price into v_price from vm_shop_stock where shop = p_shop and item = p_item;
-  select * into v_d from vm_item_defs where id = p_item;
-  if v_price is null or v_price <= 0 or v_d.id is null or v_d.soulbound or v_d.kind = 'coin' then raise exception 'Not for sale here'; end if;
-  if p_n is null or p_n < 1 or p_n > 20 then raise exception 'Buy between 1 and 20'; end if;
-  v_cost := v_price * p_n;
-  perform vm_lock_char(p_char);
-  if vm_count(p_char, 'coin_crown') < v_cost then raise exception 'You cannot afford that'; end if;
-  perform vm_take_item(p_char, 'coin_crown', v_cost);
-  perform vm_add_item(p_char, p_item, p_n);
-  return jsonb_build_object('items', vm_items_json(p_char), 'crowns', vm_count(p_char, 'coin_crown'), 'item', p_item, 'n', p_n, 'cost', v_cost);
-end $$;
-
--- A shop that buys pays 40% of an item's value (at least a crown each) for anything that is not
--- soulbound, a key or coin. It takes from the exact stack you hand over.
-create or replace function vm_sell(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_shop text, p_uid text, p_n int) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare v_m vm_members; v_s vm_shops; v_i vm_items; v_d vm_item_defs; v_each int;
-begin
-  perform vm_own_char(p_player, p_secret, p_char);
-  v_m := vm_member(p_world, p_char);
-  select * into v_s from vm_shops where id = p_shop;
-  if not found then raise exception 'No such shop'; end if;
-  if not v_s.buys then raise exception 'They do not buy here'; end if;
-  if v_m.zone <> v_s.zone or v_m.x is null or vm_dist(v_m.x, v_m.z, v_s.x, v_s.z) > 6 + 8 then raise exception 'Stand at the counter'; end if;
-  perform vm_lock_char(p_char);
-  select * into v_i from vm_items where character_id = p_char and uid = p_uid;
-  if not found then raise exception 'You do not have that'; end if;
-  select * into v_d from vm_item_defs where id = v_i.def;
-  if v_i.soulbound or v_d.soulbound or v_d.kind in ('key', 'coin') then raise exception 'They will not buy that'; end if;
-  if p_n is null or p_n < 1 or p_n > v_i.count then raise exception 'You do not have that many'; end if;
-  v_each := greatest(1, floor(v_d.value * coalesce((vm_cfg('sell_rate') #>> '{}')::numeric, 0.4))::int);
-  perform vm_take_item(p_char, v_i.def, p_n, p_uid);
-  perform vm_add_item(p_char, 'coin_crown', v_each * p_n);
-  return jsonb_build_object('items', vm_items_json(p_char), 'crowns', vm_count(p_char, 'coin_crown'), 'item', v_i.def, 'n', p_n, 'paid', v_each * p_n);
-end $$;
-
--- Quests are data (vm_quests, from data/quests.ts). 'start' takes one up; 'step' passes the
--- current step once its condition holds (checked here, not on the client), and the last step
--- pays the reward exactly once. A step also passes when a LATER flag, boss, cflag or level step
--- already holds, so a veteran is not sent back for what they have done.
-create or replace function vm_quest(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_quest text, p_op text) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare v_def jsonb; v_steps jsonb; v_c vm_characters; v_st jsonb; v_s int; v_step jsonb; v_skip boolean := false; v_req text; v_i int;
-        v_it jsonb; v_gain int := 0; v_left int; v_id text; v_flag text;
-begin
-  perform vm_own_char(p_player, p_secret, p_char);
-  select def into v_def from vm_quests where id = p_quest;
-  if v_def is null then raise exception 'Unknown quest'; end if;
-  v_steps := coalesce(v_def->'steps', '[]'::jsonb);
-  -- world, member, character: the start flag and flag/boss steps read and write the world
-  perform 1 from vm_worlds where id = p_world for update;
-  perform vm_member(p_world, p_char);
-  perform vm_lock_char(p_char);
-  select * into v_c from vm_characters where id = p_char;
-  v_st := v_c.quests -> p_quest;
-  if p_op = 'start' then
-    if v_st is not null then raise exception 'You already have that quest'; end if;
-    for v_req in select jsonb_array_elements_text(coalesce(v_def->'requires', '[]'::jsonb)) loop
-      if not coalesce((v_c.quests->v_req->>'done')::boolean, false) then raise exception 'Not yet: another quest comes first'; end if;
-    end loop;
-    if vm_level_of(v_c.xp) < coalesce((v_def->>'level')::int, 1) then
-      raise exception 'You need to be level % for that', coalesce((v_def->>'level')::int, 1);
-    end if;
-    v_st := jsonb_build_object('s', 0, 'b', vm_quest_baseline(p_char, v_steps->0), 'done', false);
-    update vm_characters set quests = quests || jsonb_build_object(p_quest, v_st), updated_at = now() where id = p_char;
-    v_flag := nullif(v_def->>'startFlag', '');
-    if v_flag is not null then
-      update vm_worlds set flags = flags || jsonb_build_object(v_flag, true), updated_at = now() where id = p_world;
-    end if;
-  elsif p_op = 'step' then
-    if v_st is null then raise exception 'You do not have that quest'; end if;
-    if coalesce((v_st->>'done')::boolean, false) then raise exception 'That quest is done'; end if;
-    v_s := coalesce((v_st->>'s')::int, 0);
-    v_step := v_steps -> v_s;
-    if v_step is not null then
-      for v_i in v_s + 1 .. jsonb_array_length(v_steps) - 1 loop
-        if (v_steps->v_i->>'k') in ('flag', 'boss', 'cflag', 'level') and vm_quest_met(p_world, p_char, v_steps->v_i, 0) then
-          v_skip := true;
-          exit;
-        end if;
-      end loop;
-      if not v_skip then
-        if not vm_quest_met(p_world, p_char, v_step, coalesce((v_st->>'b')::int, 0)) then raise exception 'not yet'; end if;
-        if v_step->>'k' = 'give' then
-          -- n of the first listed item you carry n of
-          v_left := coalesce((v_step->>'n')::int, 1);
-          foreach v_id in array string_to_array(v_step->>'item', '|') loop
-            if vm_count(p_char, v_id) >= v_left then
-              perform vm_take_item(p_char, v_id, v_left);
-              v_left := 0;
-              exit;
-            end if;
-          end loop;
-          if v_left > 0 then raise exception 'not yet'; end if;
-        end if;
-      end if;
-    end if;
-    v_s := v_s + 1;
-    if v_s >= jsonb_array_length(v_steps) then
-      -- done is written under the character lock in the same transaction as the reward: paid once
-      update vm_characters set quests = quests || jsonb_build_object(p_quest, jsonb_build_object('s', v_s, 'b', 0, 'done', true)), updated_at = now()
-        where id = p_char;
-      v_gain := greatest(0, coalesce((v_def->'rewards'->>'xp')::int, 0));
-      perform vm_add_xp(p_char, v_gain);
-      perform vm_add_item(p_char, 'coin_crown', coalesce((v_def->'rewards'->>'crowns')::int, 0));
-      for v_it in select * from jsonb_array_elements(coalesce(v_def->'rewards'->'items', '[]'::jsonb)) loop
-        perform vm_add_item(p_char, v_it->>0, coalesce((v_it->>1)::int, 1));
-      end loop;
-    else
-      update vm_characters set quests = quests || jsonb_build_object(p_quest, jsonb_build_object('s', v_s, 'b', vm_quest_baseline(p_char, v_steps->v_s), 'done', false)),
-                               updated_at = now()
-        where id = p_char;
-    end if;
-  else
-    raise exception 'Unknown quest action';
-  end if;
-  select * into v_c from vm_characters where id = p_char;
-  return jsonb_build_object('quests', v_c.quests, 'items', vm_items_json(p_char), 'xp', v_c.xp, 'xp_gained', v_gain,
-                            'level', vm_level_of(v_c.xp), 'crowns', vm_count(p_char, 'coin_crown'),
-                            'done', coalesce((v_c.quests->p_quest->>'done')::boolean, false), 'step', (v_c.quests->p_quest->>'s')::int,
-                            'character', vm_char_json(p_char));
-end $$;
-
--- Fast travel: from any shrine you have found (standing by it), to any other you have found.
-create or replace function vm_travel(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_shrine text) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare v_m vm_members; v_t vm_shrines;
-begin
-  perform vm_own_char(p_player, p_secret, p_char);
-  select * into v_m from vm_members where world_id = p_world and character_id = p_char and left_at is null for update;
-  if not found then raise exception 'Not in this world'; end if;
-  select * into v_t from vm_shrines where id = p_shrine;
-  if not found then raise exception 'Unknown shrine'; end if;
-  if not vm_shrine_known(v_m.flags, v_t.id) then raise exception 'You have not found that shrine'; end if;
-  if v_m.x is null or not exists (select 1 from vm_shrines s where s.zone = v_m.zone and vm_shrine_known(v_m.flags, s.id)
-                                   and vm_dist(v_m.x, v_m.z, s.x, s.z) <= 6 + 8) then
-    raise exception 'Travel from a shrine you have found';
-  end if;
-  update vm_members set zone = v_t.zone, x = v_t.x, z = v_t.z + 1.5, dungeon = (v_t.zone = 'castle'), pos_at = now(), last_seen = now()
-    where world_id = p_world and character_id = p_char
-    returning * into v_m;
-  return jsonb_build_object('zone', v_m.zone, 'x', v_m.x, 'z', v_m.z);
-end $$;
-
--- ------------------------------------------------------------------ data fixes (idempotent)
--- Health and breath follow the level (once the level table is seeded; entering a world also does this).
-update vm_characters set max_hp = 100 + 9 * (vm_level_of(xp) - 1),
-                         mana_max = case when mana_max > 0 then 30 + 2 * (vm_level_of(xp) - 1) else 0 end
-  where vm_cfg('level_xp') is not null
-    and (max_hp <> 100 + 9 * (vm_level_of(xp) - 1) or (mana_max > 0 and mana_max <> 30 + 2 * (vm_level_of(xp) - 1)));
 
 -- ------------------------------------------------------------------ privileges
 do $$
 declare f record; api text[] := array['vm_register','vm_profile','vm_create_character','vm_import_character','vm_delete_character','vm_character',
   'vm_create_world','vm_join','vm_enter','vm_heartbeat','vm_leave','vm_gather','vm_craft','vm_equip','vm_use','vm_trade','vm_loot',
-  'vm_world_flag','vm_char_flag','vm_member_flag','vm_boss_hit','vm_boss_reset','vm_died','vm_leave_world','vm_kick','vm_rest','vm_delete_world',
-  'vm_quest','vm_buy','vm_sell','vm_travel'];
+  'vm_world_flag','vm_char_flag','vm_member_flag','vm_boss_hit','vm_boss_reset','vm_died','vm_leave_world','vm_kick','vm_rest','vm_delete_world'];
 begin
   for f in select p.oid::regprocedure as sig, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
            where n.nspname = 'public' and p.proname like 'vm\_%' loop

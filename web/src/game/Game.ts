@@ -3143,7 +3143,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       deadLeft.set("dh", Infinity);
     }
     if (!online || !mobByKey.has(key)) return;
-    rpc<{ items: StackJson[]; drops: { item: string; n: number }[]; dup: boolean; xp_gained?: number; level?: number }>("vm_loot", { p_mob: key })
+    rpc<{ items: StackJson[]; drops: { item: string; n: number }[]; dup: boolean; xp_gained?: number; level?: number; xp?: number }>("vm_loot", { p_mob: key })
       .then((r) => {
         setItems(r.items);
         if (r.dup) return;
@@ -3151,9 +3151,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         const kind = m?.kind ?? MOB_SPAWNS.find((x) => x[0] === key)?.[1];
         if (kind) killCounts[kind] = (killCounts[kind] ?? 0) + 1;
         if (r.xp_gained) {
-          xp += r.xp_gained;
           if (m) floater(`+${r.xp_gained} XP`, m.x, m.y + m.cfg.height + 1.2, m.z, "info");
-          applyProgress({ xp, level: r.level });
+          // the server's total wins over our running sum (another tab, a quest, a boss)
+          applyProgress({ xp: r.xp ?? xp + r.xp_gained, level: r.level });
         }
       })
       .catch(netError);
@@ -3590,7 +3590,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
             mode = "end";
             audio.reward();
             push();
-          } else rewardWaiting = rewardWaiting || false;
+          } else endingDue = true;
         }, 5600);
       return;
     }
