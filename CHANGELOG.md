@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Realms multiplayer (web)
+
+- Create a world, get a six-letter code, share it; friends join with their own characters. Up to four players. Worlds and characters persist on the server (Supabase Postgres); leaving or closing a phone does not end the world.
+- Player profile separate from world saves: characters (look, inventory, equipment, Ember, kills, deaths, time) belong to a device key and travel between worlds; world progress (day, clock, doors, Green Gate, Cookie, gathered nodes, dead enemies) belongs to the world.
+- Server-authoritative functions for identity, membership, inventory changes, loot (once per enemy per respawn), crafting stations, caches, world flags, and Cookie's shared health pool with the three uniques granted exactly once per fighter.
+- Live play over Supabase Realtime: smoothed remote players with their saved look, weapon and a quiet nameplate; shared enemies run by one client and mirrored on the others; one Cookie for everyone; revive downed friends; party list and world code in the HUD and pause menu; reconnect and runner hand-over.
+- Title flow: Play → My Characters → Worlds (Play / Join World / Create World), Single Player kept as it was. Existing single player saves are copied once into the online profile.
+- Local realm (`npm run realm`) running the same SQL in PGlite for development and two-browser tests.
+
 ### Web build (current playable milestone)
 
 - `web/` is now a real game for phones: procedural world (Hearthfen, Giant Forest, Cookie's Castle, Kingsbridge, Green Gate, Kingdom vista), animated characters, villagers on routes, combat with telegraphs, Cookie in three phases, crafting at stations, barter, three save slots, character creator, touch controls, day and night, synthesised sound. Deployed to Vercel production.

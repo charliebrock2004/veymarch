@@ -4,7 +4,7 @@ The Sealed Continent. A third-person medieval fantasy action RPG for iOS and And
 
 ## Where the project is
 
-**Current milestone: the web build in `web/`, playable on an iPhone through Vercel.** Hearthfen, the Giant Forest, Cookie's Castle, Cookie, the Green Gate, and the edge of the Kingdom, with touch controls. See [The web build](#the-web-build).
+**Current milestone: the web build in `web/`, playable on an iPhone through Vercel, alone or with up to three friends in a persistent world.** Hearthfen, the Giant Forest, Cookie's Castle, Cookie, the Green Gate, and the edge of the Kingdom, with touch controls. See [The web build](#the-web-build) and [Playing together](#playing-together-realms).
 
 **Unity track: Programme Phase 2, waiting on checkpoint 1 (movement on a real phone).** Paused, not abandoned.
 
@@ -55,7 +55,8 @@ Architecture map: [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ```bash
 cd web && npm ci && npm run dev      # http://localhost:5173
-npm test                             # rules tests
+npm test                             # rules tests + server rules tests (PGlite)
+npm run realm                        # local realm server for online play (open with ?realm=local)
 npm run build                        # production bundle in web/dist
 ```
 
@@ -68,6 +69,38 @@ Vercel builds `web/` using the root `vercel.json`. On an iPhone, open the URL in
 | `web/src/game/world/` | Map layout, Hearthfen and the forest (`overworld.ts`), the castle interior (`dungeon.ts`), building kit, collision |
 | `web/src/game/engine/` | Terrain, sky, instanced vegetation, skinned procedural characters, particles, telegraphs, synthesised audio |
 | `web/src/App.tsx`, `web/src/ui/` | Title, character creator, HUD, touch controls, bag and crafting, dialogue |
+
+## Playing together (Realms)
+
+Worlds work like Minecraft Realms: a world lives on the server, not on anyone's phone.
+
+1. **Play → My Characters → New Character.** Characters belong to your player profile and travel between worlds with their gear and progress. The first time you press Play, characters from this device's single player saves are copied in once (the local saves are left alone).
+2. **Continue → Worlds → Create World.** You get a six-letter code such as `K7X4P2` (no O, 0, I or 1). Copy or share it.
+3. Your friend: **Play → their character → Join World**, types the code, **Join**. Up to four players per world.
+4. Leave whenever you like. The world, its day and night, opened doors, defeated bosses, and every character's inventory stay on the server. Come back through **Play → Worlds → Play**.
+
+What is shared: positions and animations (about 10 updates a second, smoothed), enemies (one player's phone runs them and the others mirror it; if that phone goes quiet the next one takes over within a few seconds), Cookie's single health pool, world progress (the weight door, the nursery, the Green Gate, Cookie's defeat), gathering nodes, the bell. Downed players can be pulled up by a friend standing next to them.
+
+What the server decides (`web/server/schema.sql`, all `vm_*` functions): who you are (a device key; copy it in Settings → Player key to play the same characters on another device), world membership and the four-player cap, every item that enters or leaves an inventory (gathering, crafting, trading, caches, loot), loot once per enemy per respawn, Cookie's health and the damage each blow does, and the Blade, Pickaxe and Core exactly once per character who fought. Position is checked against a speed limit on each save.
+
+The backend is a Supabase project (Postgres + Realtime). The browser needs two public values at build time, set as Vercel environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `VITE_SUPABASE_URL` | `https://<project-ref>.supabase.co` |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | the project's publishable key (`sb_publishable_…`), public by design |
+
+Without them the game still builds and Single Player works; Play says online play is not set up. To change the server: edit `web/server/schema.sql` (keep it idempotent), run `npm run seed` after changing `content.ts`, test with `npm test`, then apply both files to the project.
+
+Local development without Supabase: `npm run realm` starts the same SQL in an in-process Postgres (PGlite) plus a WebSocket relay on port 8787; open the game with `?realm=local` (or `?realm=ws://host:8787`). Two browser windows on that URL can create and join a world. `?realm=supabase` switches back.
+
+| Path | What |
+| --- | --- |
+| `web/server/schema.sql`, `seed.sql`, `gen-seed.mjs` | Tables and the authoritative functions; seed generated from `content.ts` |
+| `web/server/rpc.test.mjs`, `db.mjs`, `dev-server.mjs` | Server rules tests (PGlite), local realm |
+| `web/src/net/` | Device key and typed calls (`realm.ts`), Supabase and local transports, the world room (`room.ts`), save import |
+| `web/src/game/play/remote.ts` | Other players: interpolation, weapon, nameplate |
+| `web/src/ui/Online.tsx` | My Characters, Worlds, Create World, Join World, player key |
 
 ## Authority
 
