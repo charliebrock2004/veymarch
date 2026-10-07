@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Phase 2: the RPG (web, in progress)
+
+- Zones on one coordinate line (Hearthfen, Cookie's Castle, the Medieval Kingdom, the King's Hunting Grounds, the Royal Kennels, the Dark Mire, the Black Keep), each its own download, built the first time someone goes there; one world runner per zone.
+- XP and levels (to 20) with health, stamina and strike power; crowns, shops that buy and sell; armour slots (head, chest, hands, legs, feet, shield, trinket) with set bonuses; rarity from Common to Unique; weapon families (dagger, sword, axe, mace, spear, greatsword) with their own speed and reach; eight crafting stations.
+- Data-driven quests (main road and side work) with a journal and tracked objective; KINGDOM UNLOCKED when the Green Gate opens.
+- Shrines and fast travel between discovered shrines; waking at the last shrine you rested at.
+- Every boss (Cookie, Boe, Finlay) shares one interface: one runner simulates the fight, the server prices every blow against one pool whose size grows with the number of fighters, and personal hazards (Finlay's finger rite) are judged on each player's own client.
+- Server: per-boss health pools, quests, shops, travel, XP on kills and quests, zone-aware heartbeats; the live schema upgrades in place from the first Realms release.
+- Visible armour: helmets, chest pieces, gauntlets, legs and boots drawn on the character (leather, iron, steel, houndhide, Black Knight), also on other players.
+- Music: a procedural theme for every place and every boss (title, Hearthfen, the forest, the castle, the Kingsroad, Harrenvale, Blackwood, the kennels, the Mire, the Keep, Cookie, Boe, Finlay, the finger rite, the ending), crossfaded, with combat layers that rise when foes close in.
+- The chapter ends after the Black Keep with TO BE CONTINUED.
+
 ### Realms multiplayer (web)
 
 - Create a world, get a six-letter code, share it; friends join with their own characters. Up to four players. Worlds and characters persist on the server (Supabase Postgres); leaving or closing a phone does not end the world.
