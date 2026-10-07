@@ -807,12 +807,15 @@ export function buildOverworld(M: Mats, state: { gate: () => boolean }): Overwor
     const bx = VOSS.x + 4;
     const bMat = new THREE.MeshLambertMaterial({ map: bannerTex(), side: THREE.DoubleSide });
     for (let z = -60; z <= 60; z += 3.2) {
-      if (Math.abs(z) < 1) continue;
+      if (Math.abs(z) < 3) continue;
       const f = new Frame(bx, h(bx, z), z, 0);
       put(ctx, "bark", new THREE.CylinderGeometry(0.12, 0.12, 3.4, 5), f, 0, 0.9, 0, 0.7, 0, 0);
       put(ctx, "bark", new THREE.CylinderGeometry(0.12, 0.12, 3.4, 5), f, 0, 0.9, 0, -0.7, 0, 0);
     }
-    col.box(bx, 0, 1.6, 140, 0);
+    // the stakes run either side of the road; the road itself opens when the Green Gate does
+    col.box(bx, -37, 1.6, 66, 0);
+    col.box(bx, 37, 1.6, 66, 0);
+    col.box(bx, 0, 1.6, 8, 0, () => !state.gate());
     for (const z of [-5, 5]) {
       const f = new Frame(bx - 1.5, h(bx - 1.5, z), z, 0);
       put(ctx, "flat", new THREE.BoxGeometry(0.16, 6, 0.16), f, 0, 3, 0, 0, 0, 0, 0x3c342c);

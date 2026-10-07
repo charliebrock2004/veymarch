@@ -21,6 +21,8 @@ export type PlayerState = {
   zone: ZoneId;
   /** connection id of a remote player; undefined for the local one */
   cid?: string;
+  /** wears Elspeth's Hound Bell: hounds and wolves leave this player be until struck */
+  calm?: boolean;
 };
 
 /** Stands in for the audio engine when a sound is too far away to hear. */

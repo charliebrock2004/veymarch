@@ -22,6 +22,10 @@ export type NpcDef = {
   speed?: number;
   /** where they live (Hearthfen's people when omitted) */
   zone?: ZoneId;
+  /** what they say when they have no quest business with you (one line, picked at random) */
+  lines?: string[];
+  /** what they say instead once a world flag is set (e.g. after a boss falls) */
+  after?: { flag: string; lines: string[] };
 };
 
 export const NPCS: NpcDef[] = [
@@ -103,7 +107,7 @@ export const NPCS: NpcDef[] = [
 
 export const VOSS_NPCS: NpcDef[] = [
   {
-    id: "voss", name: "Castellan Voss", role: "Harrenvale road",
+    id: "hale", name: "Sergeant Hale", role: "Kingsroad checkpoint",
     look: { skin: 0xd8b8a0, hair: 0x4a4038, hairStyle: "short", shirt: 0x6e7378, coat: 0x2a2622, coatLong: true, trousers: 0x2a2622, boots: 0x1c1916, cape: 0x2f3a4a, frame: 1.15, height: 1.88, beard: true, pin: true },
     stops: [{ x: 196, z: 2, wait: 30, act: "none", face: -Math.PI / 2 }],
     night: "stay",

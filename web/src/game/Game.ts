@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { DESCRIPTIONS, ITEMS, MOB_SPAWNS, MORE_LINES, RECIPES, SET_BONUS, SPEEDS, TRADES, type ItemDef } from "./content";
+import { CACHE_DEFS, DESCRIPTIONS, ITEMS, MOB_SPAWNS, MORE_LINES, RECIPES, SET_BONUS, SPEEDS, TRADES, type ItemDef } from "./content";
 import { BOSSES, type BossDef } from "./data/bosses.ts";
 import { LEVEL_XP, armourCut, levelOf, statsFor } from "./data/progression.ts";
 import { QUEST_BY_ID, type QuestStep } from "./data/quests.ts";
@@ -15,7 +15,7 @@ import { Poser, buildHuman, poseHuman, type HumanAction, type HumanLook, type Ri
 import { buildSky } from "./engine/sky";
 import { blockTex } from "./engine/textures";
 import { buildDungeon, type Dungeon } from "./world/dungeon";
-import { DUN, GATE, REGION_TITLE, SPAWN, VOSS, regionAt } from "./world/layout";
+import { DUN, GATE, REGION_TITLE, SPAWN, regionAt } from "./world/layout";
 import { PORTALS, STATIONS, STATION_NAMES, ZONES, toWorld, zoneAt, type PortalDef, type Station, type ZoneId } from "./data/zones";
 import { buildOverworld, type NodeDef, type Overworld } from "./world/overworld";
 import { ZONE_BUILDERS, type ZoneBuild, type ZoneEnv } from "./world/zone";
@@ -388,6 +388,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let xpLo = 0;
   let xpHi = LEVEL_XP[1];
   let quests: QuestBook = {};
+  /** caches this character already opened in this world */
+  const cacheFlags = new Set<string>();
   const killCounts: Record<string, number> = {};
   /** quest calls in flight, or resting after a "not yet": id -> when it may be asked again */
   const questWait = new Map<string, number>();
@@ -638,6 +640,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
 
   function syncGear() {
+    P.calm = items.some((s) => s.equipped && s.def === "trk_hound_bell");
     if (!playerRig) return;
     const w = mainWeapon();
     if (heldMain) heldMain.parent?.remove(heldMain);
@@ -1033,6 +1036,19 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       interacts.push({ x: w.x, z: w.z, r: Math.min(2.8, st.r), zone: st.zone, label: () => st.name, act: () => openBag() });
     }
     for (const [zid, zb] of zones) for (const it of zb.interacts ?? []) interacts.push({ ...it, zone: zid });
+    // caches beyond Hearthfen: once per character per world (the server checks you stand by it)
+    for (const c of CACHE_DEFS) {
+      if (c.zone === "over" || !zones.has(c.zone)) continue;
+      const w = toWorld(c.zone, c.x, c.z);
+      interacts.push({
+        x: w.x, z: w.z, r: 2.0, zone: c.zone, label: () => (cacheFlags.has(c.id) ? null : "Search"),
+        act: () => {
+          cacheFlags.add(c.id);
+          audio.pickup();
+          void heartbeat().then(() => memberFlag(c.id));
+        },
+      });
+    }
     for (const p of PORTALS) {
       if (p.edge || !zones.has(p.from)) continue;
       const w = toWorld(p.from, p.x, p.z);
@@ -1361,23 +1377,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       lines = pick(L.corrin);
       trades = true;
     } else if (id.startsWith("child")) lines = flags.cookie ? L.childAfter : L.child;
-    else if (id === "voss") {
-      lines = flags.gate ? [L.voss[1]] : [L.voss[0]];
-      if (flags.gate)
-        end = () => {
-          if (!flags.voss) {
-            flags.voss = true;
-            charFlag("voss");
-          }
-          if (!flags.ended) {
-            flags.ended = true;
-            charFlag("ended");
-            mode = "end";
-            audio.reward();
-            push();
-          }
-        };
-    } else if (id.startsWith("guard")) lines = pick(L.guard);
+    else if (id === "hale") lines = flags.gate ? L.haleOpen : L.haleShut;
+    else if (id.startsWith("guard")) lines = flags.gate ? L.guardOpen : pick(L.guard);
+    else if (npc.def.after && (worldFlags[npc.def.after.flag] || (flags as Record<string, boolean>)[npc.def.after.flag])) lines = pick(npc.def.after.lines);
+    else if (npc.def.lines?.length) lines = pick(npc.def.lines);
     else lines = pick(L.villager);
     openTalkLines(npc.def.name, npc.def.role, lines, end, trades);
   }
@@ -2738,10 +2741,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           push();
         }
         if (P.zone === "over" && world && Math.hypot(P.x - GATE.x, P.z) < 15 && gateOpen(seals) && !flags.gate && !gateOpening) startGate();
-        if (P.zone === "over" && flags.gate && !flags.voss && Math.hypot(P.x - VOSS.x, P.z - VOSS.z) < 9 && mode === "play") {
-          const voss = npcs.find((n) => n.def.id === "voss");
-          if (voss) talkTo(voss);
-        }
+
       }
       worldUpdate(sim ? dt : rdt * 0.5, rdt);
       nanCheck("world");
@@ -3153,7 +3153,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function netState(): NetPlayer {
     return {
       x: r2(P.x), z: r2(P.z), y: r2(P.y), yw: r2(P.yaw), a: P.action, at: r2(P.action === "dead" ? P.at : P.at / P.dur), du: r2(P.dur), ac: actionCount,
-      mv: r2(P.speed), sp: P.sprint ? 1 : 0, b: P.blocking ? 1 : 0, d: P.dead ? 1 : 0, zn: P.zone,
+      mv: r2(P.speed), sp: P.sprint ? 1 : 0, b: P.blocking ? 1 : 0, d: P.dead ? 1 : 0, zn: P.zone, cm: P.calm ? 1 : 0,
       hp: Math.ceil(P.hp), mh: P.maxHp, w: mainWeapon().id, sh: P.shield ? 1 : 0,
     };
   }
@@ -3775,6 +3775,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       banner = null;
       level = c.level ?? 1;
       applyChar(c, false);
+      cacheFlags.clear();
+      for (const [f, on] of Object.entries(mem.flags ?? {})) if (on) cacheFlags.add(f);
       for (const k of Object.keys(worldFlags)) delete worldFlags[k];
       for (const [f, on] of Object.entries(w.flags ?? {})) if (on) worldFlags[f] = true;
       if (mem.x !== null && mem.z !== null) {

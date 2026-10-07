@@ -22,6 +22,8 @@ export type NetPlayer = {
   d: number;
   /** zone */
   zn: ZoneId;
+  /** wears the hound bell */
+  cm?: number;
   hp: number;
   mh: number;
   w: string;
@@ -118,6 +120,7 @@ export class RemotePlayer {
     s.maxHp = n.mh;
     s.dead = !!n.d;
     s.zone = n.zn;
+    s.calm = !!n.cm;
     s.blocking = !!n.b;
     s.shield = !!n.sh;
   }
