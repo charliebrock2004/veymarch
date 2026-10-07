@@ -2244,6 +2244,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         fogC.lerp(cA.setHex(0x8a9068), 0.18 * dayK);
       } else if (reg === "kingdom" || reg === "gate" || reg === "bridge") density = 0.0042;
     }
+    // a zone may bring its own air: Blackwood mist, the Mire's green murk, rain over the Keep
+    const zf = mode !== "title" && mode !== "create" ? zones.get(P.zone)?.fog : undefined;
+    if (zf) {
+      fogC.lerp(cA.setHex(zf.color), ZONES[P.zone].indoor ? 1 : 0.35 + 0.5 * dayK);
+      density = zf.density;
+    }
     const fog = scene.fog as THREE.FogExp2;
     fog.color.lerp(fogC, Math.min(1, rdt * 2));
     fog.density += (density - fog.density) * Math.min(1, rdt * 1.5);
@@ -2644,9 +2650,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     // ambience particles
     smokeT -= dt;
-    if (smokeT <= 0 && P.zone === "over") {
+    if (smokeT <= 0 && (P.zone === "over" || zones.get(P.zone)?.smoke?.length)) {
       smokeT = 0.18;
-      for (const s of world.smoke) {
+      for (const s of P.zone === "over" ? world.smoke : zones.get(P.zone)?.smoke ?? []) {
         if (Math.abs(s.x - P.x) > 90 || Math.abs(s.z - P.z) > 90) continue;
         dust.emit({ x: s.x + (Math.random() - 0.5) * 0.3, y: s.y, z: s.z + (Math.random() - 0.5) * 0.3, vx: 0.3 + Math.random() * 0.2, vy: 1.0 + Math.random() * 0.4, vz: 0.15, life: 4.5, size: 0.9, grow: 3.2, color: 0x9a928a, a: 0.16, drag: 0.2, grav: -0.05 });
       }
