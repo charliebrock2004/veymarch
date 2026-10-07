@@ -488,6 +488,7 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
       {hud.mode === "talk" && hud.talk && <Talk api={api} hud={hud} />}
       {hud.mode === "shop" && hud.shop && <Shop api={api} hud={hud} />}
       {hud.mode === "journal" && <Journal api={api} hud={hud} />}
+      {hud.mode === "map" && hud.map && <TravelMap api={api} hud={hud} />}
       {hud.banner && hud.mode !== "title" && (
         <div className="vm-banner" key={hud.banner.at}>
           <div>{hud.banner.title}</div>
@@ -748,6 +749,44 @@ function Shop({ api, hud }: { api: GameApi; hud: Hud }) {
   );
 }
 
+function TravelMap({ api, hud }: { api: GameApi; hud: Hud }) {
+  const m = hud.map!;
+  const zones = [...new Set(m.shrines.map((s) => s.zoneName))];
+  return (
+    <div className="vm-panel-screen">
+      <div className="vm-panel wide">
+        <div className="vm-panel-head">
+          <h2>Shrines</h2>
+          <button className="vm-icon" onClick={() => api.press("close")} aria-label="Close">
+            <Glyph name="close" size={22} />
+          </button>
+        </div>
+        <p className="vm-sub">{m.here ? "Rested. Travel to any shrine you have found, or close to stay." : "Rest at a shrine to travel."}</p>
+        <div className="vm-journal vm-scroll">
+          {zones.map((zn) => (
+            <div key={zn}>
+              <h3>{zn}</h3>
+              {m.shrines
+                .filter((s) => s.zoneName === zn)
+                .map((s) => (
+                  <div key={s.id} className={`vm-craft ${s.known ? "ok" : ""}`}>
+                    <div className="vm-craft-text">
+                      <b>{s.name}</b>
+                      <span>{s.here ? "You are here" : s.known ? "Found" : "Not found yet"}</span>
+                    </div>
+                    <button className="vm-mbtn small primary" disabled={!s.known || s.here || !m.here} onClick={() => api.travel(s.id)}>
+                      Travel
+                    </button>
+                  </div>
+                ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
   const live = hud.journal.filter((j) => !j.done);
   const done = hud.journal.filter((j) => j.done);
@@ -850,14 +889,19 @@ function Ending({ api, hud }: { api: GameApi; hud: Hud }) {
   return (
     <div className="vm-panel-screen">
       <div className="vm-panel ending">
-        <div className="vm-wordmark">The Edge of the Kingdom</div>
+        <div className="vm-wordmark">TO BE CONTINUED</div>
         <p>
-          Wheat to the walls of Harrenvale, and a fortress that is not yours. Not yet. The first seal is broken; the continent knows your name now, whether it likes it or not.
+          Finlay kneels in the black rain and does not get up. The Keep is quiet for the first time since the March. Somewhere past the Mire a seal you have never seen
+          shifts, and the continent learns your name whether it likes it or not.
         </p>
         <div className="vm-endstats">
           <div>
             <b>{fmtTime(hud.stats.time)}</b>
             <span>played</span>
+          </div>
+          <div>
+            <b>{hud.level}</b>
+            <span>level</span>
           </div>
           <div>
             <b>{hud.stats.kills}</b>
@@ -868,7 +912,7 @@ function Ending({ api, hud }: { api: GameApi; hud: Hud }) {
             <span>falls</span>
           </div>
         </div>
-        <p className="vm-sub">End of the VEYRMARCH slice. The Kingdom, the Black Knight and the rest of the continent come next.</p>
+        <p className="vm-sub">The end of this chapter of VEYRMARCH. Your character, gear and world are saved; the Frostlands, the Wasteland and the Tear come next.</p>
         <div className="vm-row">
           <button className="vm-mbtn primary" onClick={() => api.press("endClose")}>
             Keep exploring

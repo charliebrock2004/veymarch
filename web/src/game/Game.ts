@@ -16,7 +16,7 @@ import { buildSky } from "./engine/sky";
 import { blockTex } from "./engine/textures";
 import { buildDungeon, type Dungeon } from "./world/dungeon";
 import { DUN, GATE, REGION_TITLE, SPAWN, regionAt } from "./world/layout";
-import { PORTALS, STATIONS, STATION_NAMES, ZONES, toWorld, zoneAt, type PortalDef, type Station, type ZoneId } from "./data/zones";
+import { PORTALS, SHRINES, STATIONS, STATION_NAMES, ZONES, toWorld, zoneAt, type PortalDef, type Station, type ZoneId } from "./data/zones";
 import { buildOverworld, type NodeDef, type Overworld } from "./world/overworld";
 import { ZONE_BUILDERS, type ZoneBuild, type ZoneEnv } from "./world/zone";
 import "./world/zones/index";
@@ -41,10 +41,10 @@ export const HAIR_STYLES = ["tied", "short", "long", "bald"] as const;
 export const BODY_NAMES = ["Slight", "Average", "Broad"];
 
 export type Quality = "low" | "medium" | "high";
-export type Mode = "loading" | "title" | "create" | "play" | "bag" | "talk" | "dead" | "reward" | "end" | "pause" | "shop" | "journal";
+export type Mode = "loading" | "title" | "create" | "play" | "bag" | "talk" | "dead" | "reward" | "end" | "pause" | "shop" | "journal" | "map";
 
 /** Menus that sit over play (a shared world keeps running behind them). */
-export const MENU_MODES: Mode[] = ["bag", "talk", "pause", "shop", "journal"];
+export const MENU_MODES: Mode[] = ["bag", "talk", "pause", "shop", "journal", "map"];
 
 /** Multiplayer status for the HUD; null in single player. */
 export type OnlineHud = {
@@ -95,6 +95,8 @@ export type Hud = {
   /** a full-screen announcement (KINGDOM UNLOCKED, a level, a finished quest) */
   banner: { title: string; sub: string; at: number } | null;
   journal: JournalEntry[];
+  /** shrines for fast travel: open while resting at one */
+  map: { here: string | null; shrines: { id: string; name: string; zone: string; zoneName: string; known: boolean; here: boolean }[] } | null;
   shop: { id: string; name: string; buys: boolean; stock: { id: string; name: string; price: number; ok: boolean }[]; sell: { uid: string; id: string; name: string; count: number; price: number }[] } | null;
   boss: { id: string; name: string; hp: number; max: number; phase: number; phaseName: string } | null;
   /** the boss line on screen (Finlay speaks) */
@@ -140,6 +142,7 @@ export type GameApi = {
   buy: (item: string, n: number) => void;
   sell: (uid: string, n: number) => void;
   journal: () => void;
+  travel: (shrine: string) => void;
   setQuality: (q: Quality) => void;
   setMuted: (m: boolean) => void;
   /** Enters a persistent world with a server character (the result of vm_join / vm_enter). */
@@ -423,6 +426,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let gateOpening = false;
   let weightX = 0;
   let respawnShrine = false;
+  /** shrines this character has rested at in this world (fast travel targets), and where it wakes */
+  const discovered = new Set<string>(["hearthfen"]);
+  let lastShrine: string | null = null;
+  let mapHere: string | null = null;
   let introSeen = false;
   let stationNear: Station = "hand";
   let prompt = "";
@@ -840,6 +847,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       level, xp, xpLo, xpHi, crowns: countOf(items, "coin_crown"), defence: gearDefence(), banner,
       journal: online && (mode === "journal" || mode === "pause") ? journal(quests, questCtx()) : [],
       shop: mode === "shop" && shopId ? shopView(shopId) : null,
+      map: mode === "map" ? mapView() : null,
       crafts: RECIPES.map((r) => {
         const have = r.inputs.every((i) => countOf(items, i.id) >= i.n);
         const can = r.station === "hand" || r.station === stationNear;
@@ -1078,7 +1086,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         P.stam = P.maxStam;
         P.mana = P.maxMana;
         respawnShrine = false;
+        lastShrine = null;
         say("You rest. Mended.");
+        if (online && discovered.size > 1) setTimeout(() => openMap("hearthfen"), 700);
       }),
     });
     interacts.push({
@@ -1100,19 +1110,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         audio.pickup();
       },
     });
-    interacts.push({
-      x: a.shrine.x, z: a.shrine.z, r: 2.6, zone: "over", label: () => "Rest at the shrine",
-      act: () => {
-        if (online && !flags.shrine) memberFlag("shrine");
-        flags.shrine = true;
-        respawnShrine = true;
-        P.hp = P.maxHp;
-        P.mana = P.maxMana;
-        sparks.burst(30, a.shrine.x, world!.groundAt(a.shrine.x, a.shrine.z) + 1.2, a.shrine.z, 2, 0xffd28a, 1.2, 0.2, { up: 1.5, grav: -0.5 });
-        audio.bell(0.12, 523);
-        openTalkLines("Ruined shrine", "Giant Forest", MORE_LINES.shrine);
-      },
-    });
+    // shrines: rest, wake here after a fall, and travel between the ones you know
+    for (const sh of SHRINES) {
+      if (sh.id === "hearthfen" || !zones.has(sh.zone)) continue;
+      const w = sh.id === "forest" ? { x: a.shrine.x, z: a.shrine.z } : toWorld(sh.zone, sh.x, sh.z);
+      interacts.push({ x: w.x, z: w.z, r: 2.6, zone: sh.zone, label: () => "Rest at the " + sh.name.toLowerCase().replace(/^the /, ""), act: () => restAtShrine(sh.id, w.x, w.z) });
+    }
     interacts.push({
       x: a.bell.x, z: a.bell.z, r: 2.6, zone: "over", label: () => "Ring the bell",
       act: () => {
@@ -1389,6 +1392,72 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function fadeThen(cb: () => void) {
     fadeTarget = 1;
     fadeCb = cb;
+  }
+
+  function restAtShrine(id: string, x: number, z: number) {
+    const sh = SHRINES.find((s) => s.id === id);
+    if (!sh) return;
+    const first = !discovered.has(id);
+    discovered.add(id);
+    lastShrine = id;
+    if (id === "forest") {
+      if (online && !flags.shrine) memberFlag("shrine");
+      flags.shrine = true;
+      respawnShrine = true;
+    }
+    if (first) void heartbeat().then(() => memberFlag("sh_" + id));
+    P.hp = P.maxHp;
+    P.mana = P.maxMana;
+    P.stam = P.maxStam;
+    sparks.burst(30, x, groundAt(x, z) + 1.2, z, 2, 0xffd28a, 1.2, 0.2, { up: 1.5, grav: -0.5 });
+    audio.bell(0.12, 523);
+    if (first) {
+      showBanner(sh.name, "Shrine found · you will wake here, and travel between shrines you know");
+      if (id === "forest") openTalkLines("Ruined shrine", "Giant Forest", MORE_LINES.shrine);
+    } else openMap(id);
+  }
+
+  function openMap(here: string | null) {
+    if (mode !== "play" && mode !== "talk") return;
+    talk = null;
+    mapHere = here;
+    mode = "map";
+    audio.ui();
+    push();
+  }
+
+  function mapView(): Hud["map"] {
+    return {
+      here: mapHere,
+      shrines: SHRINES.map((sh) => ({ id: sh.id, name: sh.name, zone: sh.zone, zoneName: ZONES[sh.zone].name, known: discovered.has(sh.id), here: sh.id === mapHere })),
+    };
+  }
+
+  /** Fast travel: the server checks you stand at a shrine you know and moves you to another. */
+  function fastTravel(id: string) {
+    const o = online;
+    if (!o || !mapHere || id === mapHere || !discovered.has(id)) return;
+    mode = "play";
+    push();
+    heartbeat()
+      .then(() => rpc<{ zone: ZoneId; x: number; z: number }>("vm_travel", { p_shrine: id }))
+      .then(async (r) => {
+        if (online !== o) return;
+        if (!(await ensureZone(r.zone))) return say("That road is not open yet.");
+        fadeThen(() => {
+          const from = P.zone;
+          setZone(r.zone);
+          P.x = r.x;
+          P.z = r.z;
+          P.y = groundAt(P.x, P.z);
+          P.kx = P.kz = P.vx = P.vz = 0;
+          snapCam();
+          lastShrine = id;
+          arrived(from, r.zone);
+          void heartbeat();
+        });
+      })
+      .catch(netError);
   }
 
   /** Shows one zone, hides the rest, and tells the room (each zone has its own runner). */
@@ -1838,6 +1907,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         P.x = w.x;
         P.z = w.z - 2.5;
         P.yaw = 0;
+      } else if (!atDoor && lastShrine && lastShrine !== "forest" && lastShrine !== "hearthfen" && zones.has(SHRINES.find((x) => x.id === lastShrine)!.zone)) {
+        const sh = SHRINES.find((x) => x.id === lastShrine)!;
+        setZone(sh.zone);
+        const w = toWorld(sh.zone, sh.x, sh.z);
+        P.x = w.x;
+        P.z = w.z + 1.4;
+        P.yaw = Math.PI;
       } else {
         setZone("over");
         const at = atDoor ? world!.anchors.castleDoor : respawnShrine && flags.shrine ? world!.anchors.shrine : world!.anchors.bed;
@@ -2928,7 +3004,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         }
         return;
       case "close":
-        if (mode === "bag" || mode === "pause" || mode === "shop" || mode === "journal") mode = "play";
+        if (mode === "bag" || mode === "pause" || mode === "shop" || mode === "journal" || mode === "map") mode = "play";
         else if (mode === "talk") {
           talkQueue = [];
           advanceTalk();
@@ -3507,6 +3583,15 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const gifts = [q.rewards.xp ? q.rewards.xp + " XP" : "", q.rewards.crowns ? q.rewards.crowns + " crowns" : "", ...q.rewards.items.map(([it, n]) => (n > 1 ? n + " " : "") + item(it).name)].filter(Boolean).join(" · ");
       if (id === "q_gate") showBanner("KINGDOM UNLOCKED", "Harrenvale opens its gates: smiths, armourers, a tavern, the Castellan's work.");
       else showBanner(q.name, "Quest complete · " + gifts);
+      // the last road of this chapter ends here
+      if (id === "q_keep")
+        setTimeout(() => {
+          if (mode === "play" || mode === "reward") {
+            mode = "end";
+            audio.reward();
+            push();
+          } else rewardWaiting = rewardWaiting || false;
+        }, 5600);
       return;
     }
     const next = q.steps[r.step];
@@ -3692,6 +3777,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     openShop,
     buy,
     sell,
+    travel: fastTravel,
     journal() {
       if (mode === "play" || mode === "pause") {
         mode = "journal";
@@ -3777,6 +3863,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       applyChar(c, false);
       cacheFlags.clear();
       for (const [f, on] of Object.entries(mem.flags ?? {})) if (on) cacheFlags.add(f);
+      discovered.clear();
+      discovered.add("hearthfen");
+      for (const f of cacheFlags) if (f.startsWith("sh_")) discovered.add(f.slice(3));
+      if (cacheFlags.has("shrine")) discovered.add("forest");
+      lastShrine = null;
       for (const k of Object.keys(worldFlags)) delete worldFlags[k];
       for (const [f, on] of Object.entries(w.flags ?? {})) if (on) worldFlags[f] = true;
       if (mem.x !== null && mem.z !== null) {
