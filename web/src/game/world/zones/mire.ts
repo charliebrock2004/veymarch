@@ -270,6 +270,8 @@ export function buildMire(env: ZoneEnv): ZoneBuild {
     { x: -100, z: 40, r: 6, h: 0.32 },
   ];
   for (const n of nodeDefs) if (n.kind === "rotcap") LANDS.push({ x: n.x, z: n.z, r: 5, h: 0.3 });
+  // every spawn stands on a mud bank (the drowned climb out to wait; the crocs bask)
+  for (const sp of spawns) if (!LANDS.some((l) => Math.hypot(l.x - sp.x, l.z - sp.z) < l.r * 0.4) && causeDist(sp.x, sp.z) > CAUSE_HW + 1) LANDS.push({ x: sp.x, z: sp.z, r: 6.5, h: 0.22 });
   for (const n of nodeDefs) if (n.kind === "widowsveil" && !LANDS.some((l) => Math.hypot(l.x - n.x, l.z - n.z) < l.r * 0.6)) LANDS.push({ x: n.x, z: n.z, r: 5, h: 0.3 });
   /** knee-deep under the chapel nave: the floor went under with it */
   const CHAPEL_FLOOR = -0.24;
