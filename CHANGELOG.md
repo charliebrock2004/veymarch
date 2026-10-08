@@ -13,6 +13,11 @@
 - Visible armour: helmets, chest pieces, gauntlets, legs and boots drawn on the character (leather, iron, steel, houndhide, Black Knight), also on other players.
 - Music: a procedural theme for every place and every boss (title, Hearthfen, the forest, the castle, the Kingsroad, Harrenvale, Blackwood, the kennels, the Mire, the Keep, Cookie, Boe, Finlay, the finger rite, the ending), crossfaded, with combat layers that rise when foes close in.
 - The chapter ends after the Black Keep with TO BE CONTINUED.
+- Content: Harrenvale (walls, market cross shrine, smithy, armoury, tavern, church, Old Tower, Voss's hall, the Royal Fortress on its ridge), Millcross, bandits, the quarry and the causeway chain; Blackwood and its ruined lodge; the Royal Kennels (trap run, secret nook, cart-and-plates puzzle with a solo solution, the Kennelmaster, the bell gate); the Dark Mire and Drear on stilts; the Black Keep (winch, armoury, crypt, throne room, the broken ring). Seventeen Kingdom townsfolk with routes and lines, Drear's villagers.
+- Thirteen new foes, from bandits to keep knights; the Hound Bell keeps hounds calm until you strike them.
+- Boe: Elspeth's black cocker spaniel with the red collar, three phases (play, the collar, ear-wings). Finlay: guard and riposte, helm off, "Smell my fingers" with a circle under each player.
+- Item modifiers (Keen, Heavy, Balanced, Sturdy, of the Fleet): sometimes on crafted gear, set by the enchanter.
+- Server hardening: loot and gathering need you near; waking after a fall only at the bedroll, a known shrine or a dungeon's front door; no buy-craft-sell loops; old-save imports limited; no double soulbound crafts.
 
 ### Realms multiplayer (web)
 
