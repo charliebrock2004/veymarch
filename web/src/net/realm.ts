@@ -7,7 +7,7 @@ import { RealmError, getBackend, type Backend } from "./backend";
  */
 
 export type LookJson = { body: 0 | 1 | 2; skin: number; hair: 0 | 1 | 2 | 3; hairColor: number; coat: number };
-export type StackJson = { uid: string; def: string; count: number; equipped: boolean };
+export type StackJson = { uid: string; def: string; count: number; equipped: boolean; mod?: string | null };
 
 export type CharacterJson = {
   id: string;

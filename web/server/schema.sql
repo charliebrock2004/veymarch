@@ -185,6 +185,11 @@ create table if not exists vm_shop_stock (
 create table if not exists vm_quests (id text primary key, def jsonb not null);
 create table if not exists vm_cache_spots (cache text primary key, zone text not null, x real not null, z real not null);
 create table if not exists vm_world_flag_rules (flag text primary key, needs_mob text, needs_flag text);
+-- modifiers (data/items.ts MODIFIERS): one per piece of gear, on the item row
+create table if not exists vm_mods (id text primary key, on_kind text not null, dmg real not null default 0, def int not null default 0);
+create table if not exists vm_mod_costs (mod text not null references vm_mods on delete cascade, item text not null references vm_item_defs, n int not null,
+  primary key (mod, item));
+alter table vm_items add column if not exists mod text;
 
 do $$
 declare t text;
@@ -192,7 +197,7 @@ begin
   foreach t in array array['vm_item_defs','vm_recipes','vm_recipe_inputs','vm_trades','vm_trade_inputs','vm_loot','vm_mob_spawns','vm_nodes','vm_caches','vm_config',
                            'vm_players','vm_characters','vm_items','vm_worlds','vm_members','vm_boss_hits','vm_grants',
                            'vm_zones','vm_stations','vm_portals','vm_shrines','vm_mob_kinds','vm_bosses','vm_shops','vm_shop_stock','vm_quests',
-                           'vm_cache_spots','vm_world_flag_rules'] loop
+                           'vm_cache_spots','vm_world_flag_rules','vm_mods','vm_mod_costs'] loop
     execute format('alter table %I enable row level security', t);
     if exists (select 1 from pg_roles where rolname = 'anon') then execute format('revoke all on table %I from anon', t); end if;
     if exists (select 1 from pg_roles where rolname = 'authenticated') then execute format('revoke all on table %I from authenticated', t); end if;
@@ -254,7 +259,7 @@ $$;
 
 create or replace function vm_items_json(p_char uuid) returns jsonb
 language sql stable security definer set search_path = public as $$
-  select coalesce(jsonb_agg(jsonb_build_object('uid', uid, 'def', def, 'count', count, 'equipped', equipped) order by length(uid), uid), '[]'::jsonb)
+  select coalesce(jsonb_agg(jsonb_build_object('uid', uid, 'def', def, 'count', count, 'equipped', equipped, 'mod', mod) order by length(uid), uid), '[]'::jsonb)
   from vm_items where character_id = p_char
 $$;
 
@@ -888,7 +893,7 @@ end $$;
 -- (the last saved position is a little old). p_station is only the client's hint.
 create or replace function vm_craft(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_recipe text, p_station text) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_r vm_recipes; v_in record; v_m vm_members; v_d vm_item_defs; v_n int;
+declare v_r vm_recipes; v_in record; v_m vm_members; v_d vm_item_defs; v_n int; v_mod text;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
   v_m := vm_member(p_world, p_char);
@@ -914,8 +919,16 @@ begin
   v_n := greatest(1, coalesce(v_r.n, 1));
   perform vm_add_item(p_char, v_r.out_item, v_n);
   select * into v_d from vm_item_defs where id = v_r.out_item;
+  -- a smith's or armourer's piece sometimes comes out better than the recipe promised
+  if v_r.station in ('forge', 'blacksmith', 'armourer') and v_d.kind in ('weapon', 'armour') and v_d.stack = 1 and not v_d.soulbound
+     and v_d.moveset not like '%pick%' and random() < 0.25 then
+    select id into v_mod from vm_mods where on_kind = v_d.kind order by random() limit 1;
+    update vm_items set mod = v_mod
+      where character_id = p_char and uid = (select uid from vm_items where character_id = p_char and def = v_r.out_item and mod is null
+                                             order by length(uid) desc, uid desc limit 1);
+  end if;
   if v_d.slot <> 'none' and v_d.moveset not like '%pick%' then perform vm_equip_def(p_char, v_r.out_item); end if;
-  return jsonb_build_object('items', vm_items_json(p_char), 'made', v_r.out_item, 'n', v_n);
+  return jsonb_build_object('items', vm_items_json(p_char), 'made', v_r.out_item, 'n', v_n, 'mod', v_mod);
 end $$;
 
 create or replace function vm_equip(p_player uuid, p_secret text, p_char uuid, p_uid text) returns jsonb
@@ -1126,7 +1139,9 @@ begin
   else
     select d.* into v_d from vm_items i join vm_item_defs d on d.id = i.def where i.character_id = p_char and i.equipped and d.slot = 'main' limit 1;
     if not found then select * into v_d from vm_item_defs where id = 'wpn_fists'; end if;
-    v_dmg := coalesce(v_d.damage, 4) * v_power * (case when p_heavy then 1.6 else 1 end) * (0.92 + random() * 0.16);
+    v_dmg := coalesce(v_d.damage, 4) * v_power * (case when p_heavy then 1.6 else 1 end) * (0.92 + random() * 0.16)
+             * (1 + coalesce((select m.dmg from vm_items i join vm_mods m on m.id = i.mod join vm_item_defs d on d.id = i.def
+                               where i.character_id = p_char and i.equipped and d.slot = 'main' limit 1), 0));
     if p_heavy and p_behind and not p_perched then v_dmg := v_dmg * 1.3; end if;
     if p_perched then v_dmg := v_dmg * 0.5; end if;
   end if;
@@ -1212,6 +1227,38 @@ end $$;
 
 -- Shops sell their stock for crowns at the counter (you stand within 6 m, plus the age of your
 -- last saved position). Nothing is handed over unless every crown is there.
+-- The enchanter sets one modifier on a piece you carry, for its price in materials, replacing any
+-- it had. You stand at an enchanter's lectern; uniques take none.
+create or replace function vm_enchant(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_uid text, p_mod text) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare v_m vm_members; v_i vm_items; v_d vm_item_defs; v_mod vm_mods; v_c record;
+begin
+  perform vm_own_char(p_player, p_secret, p_char);
+  v_m := vm_member(p_world, p_char);
+  if v_m.x is null or not exists (select 1 from vm_stations s where s.kind = 'enchanter' and s.zone = v_m.zone
+                                  and vm_dist(v_m.x, v_m.z, s.x, s.z) <= s.r + 8) then
+    raise exception 'station';
+  end if;
+  select * into v_mod from vm_mods where id = p_mod;
+  if not found then raise exception 'Unknown modifier'; end if;
+  perform vm_lock_char(p_char);
+  select * into v_i from vm_items where character_id = p_char and uid = p_uid;
+  if not found then raise exception 'You do not have that'; end if;
+  select * into v_d from vm_item_defs where id = v_i.def;
+  if v_i.soulbound or v_d.soulbound or v_d.kind <> v_mod.on_kind or v_d.stack <> 1 or v_d.moveset like '%pick%' then
+    raise exception 'That will not take it';
+  end if;
+  if v_i.mod = p_mod then raise exception 'It already has that'; end if;
+  for v_c in select item, n from vm_mod_costs where mod = p_mod loop
+    if vm_count(p_char, v_c.item) < v_c.n then raise exception 'materials'; end if;
+  end loop;
+  for v_c in select item, n from vm_mod_costs where mod = p_mod loop
+    if not vm_take_item(p_char, v_c.item, v_c.n) then raise exception 'materials'; end if;
+  end loop;
+  update vm_items set mod = p_mod where character_id = p_char and uid = p_uid;
+  return jsonb_build_object('items', vm_items_json(p_char), 'uid', p_uid, 'mod', p_mod);
+end $$;
+
 create or replace function vm_buy(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_shop text, p_item text, p_n int) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare v_m vm_members; v_s vm_shops; v_price int; v_d vm_item_defs; v_cost int;
@@ -1377,7 +1424,7 @@ update vm_characters set max_hp = 100 + 9 * (vm_level_of(xp) - 1),
 do $$
 declare f record; api text[] := array['vm_register','vm_profile','vm_create_character','vm_import_character','vm_delete_character','vm_character',
   'vm_create_world','vm_join','vm_enter','vm_heartbeat','vm_leave','vm_gather','vm_craft','vm_equip','vm_use','vm_trade','vm_loot',
-  'vm_world_flag','vm_char_flag','vm_member_flag','vm_boss_hit','vm_boss_reset','vm_died','vm_leave_world','vm_kick','vm_rest','vm_delete_world',
+  'vm_world_flag','vm_char_flag','vm_member_flag','vm_boss_hit','vm_boss_reset','vm_died','vm_leave_world','vm_kick','vm_rest','vm_delete_world','vm_enchant',
   'vm_quest','vm_buy','vm_sell','vm_travel'];
 begin
   for f in select p.oid::regprocedure as sig, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace

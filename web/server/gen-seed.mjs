@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { TRADES } from "../src/game/content.ts";
 import { BOSSES } from "../src/game/data/bosses.ts";
-import { ITEMS, RECIPES } from "../src/game/data/items.ts";
+import { ITEMS, MODIFIERS, RECIPES } from "../src/game/data/items.ts";
 import { LEVEL_XP, MOB_XP } from "../src/game/data/progression.ts";
 import { QUESTS } from "../src/game/data/quests.ts";
 import { SELL_RATE, SHOPS } from "../src/game/data/shops.ts";
@@ -36,6 +36,7 @@ for (const t of TRADES) {
 for (const [kind, list] of Object.entries(MOB_LOOT)) for (const [id] of list) item(id, "loot " + kind);
 for (const [key, , , , z] of MOB_SPAWNS) zone(z, "spawn " + key);
 for (const n of NODE_DEFS) item(n.item, n.id);
+for (const m of Object.values(MODIFIERS)) for (const [id] of m.cost) item(id, "modifier " + m.id);
 for (const c of CACHE_DEFS) {
   zone(c.zone, c.id);
   for (const [id] of c.items) item(id, c.id);
@@ -121,6 +122,8 @@ upsert("vm_trades", ["id", "get_item", "get_n"], ["id"], TRADES.map((t) => [t.id
 upsert("vm_trade_inputs", ["trade", "item", "n"], ["trade", "item"], TRADES.flatMap((t) => t.give.map((g) => [t.id, g.id, g.n])));
 const loot = Object.entries(MOB_LOOT).flatMap(([kind, list]) => list.map(([id, n, chance]) => [kind, id, n, chance]));
 upsert("vm_loot", ["kind", "item", "n", "chance"], ["kind", "item"], loot);
+upsert("vm_mods", ["id", "on_kind", "dmg", "def"], ["id"], Object.values(MODIFIERS).map((m) => [m.id, m.on, m.dmg ?? 0, m.def ?? 0]));
+upsert("vm_mod_costs", ["mod", "item", "n"], ["mod", "item"], Object.values(MODIFIERS).flatMap((m) => m.cost.map(([id, n]) => [m.id, id, n])));
 upsert("vm_mob_kinds", ["kind", "xp"], ["kind"], Object.entries(MOB_XP).map(([kind, xp]) => [kind, xp]));
 // indoor zones, soldiers and the kennelmaster do not come back
 const spawns = MOB_SPAWNS.map(([key, kind, x, z, zn]) => [key, kind, zn === "castle", !ZONES[zn].indoor && kind !== "soldier" && kind !== "kennelmaster", zn, wx(zn, x), z]);

@@ -1084,7 +1084,8 @@ test("B14 an older realm database is migrated in place, and the schema re-applie
   const e = await rpc("vm_enter", { ...A, p_world: w.id, p_char: ca.id });
   assert.equal(e.member.zone, "castle");
   assert.deepEqual([e.character.level, e.character.max_hp, e.character.mana_max], [levelOf(xpA), statsFor(levelOf(xpA)).maxHp, statsFor(levelOf(xpA)).mana]);
-  assert.deepEqual(e.character.items, itemsA, "the bag is untouched");
+  assert.deepEqual(e.character.items.map(({ mod, ...s }) => s), itemsA, "the bag is untouched");
+  assert.ok(e.character.items.every((s) => s.mod === null), "no modifiers on old items");
   for (const b of Object.values(BOSSES)) assert.ok(e.world.boss[b.id], b.id);
   const bh = await rpc("vm_boss_hit", { ...A, p_world: w.id, p_char: ca.id, p_heavy: true, p_fire: false, p_behind: false, p_perched: false, p_dizzy: false });
   assert.equal(bh.boss, "cookie");
@@ -1130,4 +1131,26 @@ test("review fixes: far nodes, forged imports and a second soulbound craft are r
   await assert.rejects(call("vm_craft", { ...s.args, p_recipe: "recipe_fangbreaker", p_station: "blacksmith" }), /already have one/);
   const c = await me(s);
   assert.equal(count(c.items, "mat_boe_fang"), 1);
+});
+
+test("modifiers: the enchanter sets one for its price; uniques and the wrong kind refuse; a boss feels a keen edge", async () => {
+  const s = await setup("Enchanter");
+  const lectern = STATIONS.find((x) => x.kind === "enchanter");
+  await give(s.c.id, "wpn_iron_sword", 1, true);
+  await give(s.c.id, "wpn_cookie_blade");
+  let c = await me(s);
+  const sword = c.items.find((x) => x.def === "wpn_iron_sword");
+  const enchant = (uid, mod) => call("vm_enchant", { ...s.args, p_uid: uid, p_mod: mod });
+  await place(s.c.id, s.w.id, "over", 0, 0);
+  await assert.rejects(enchant(sword.uid, "keen"), /station/);
+  await place(s.c.id, s.w.id, lectern.zone, lectern.x, lectern.z);
+  await assert.rejects(enchant(sword.uid, "keen"), /materials/);
+  await give(s.c.id, "mat_ember_shard", 1);
+  await give(s.c.id, "mat_steel", 1);
+  let r = await enchant(sword.uid, "keen");
+  assert.equal(r.items.find((x) => x.uid === sword.uid).mod, "keen");
+  assert.equal(count(r.items, "mat_ember_shard"), 0);
+  await assert.rejects(enchant(sword.uid, "sturdy"), /will not take/, "armour modifiers do not go on swords");
+  await assert.rejects(enchant(c.items.find((x) => x.def === "wpn_cookie_blade").uid, "keen"), /will not take/, "uniques keep their own rule");
+  await assert.rejects(enchant(sword.uid, "nonsense"), /Unknown modifier/);
 });

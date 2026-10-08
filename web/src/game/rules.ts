@@ -1,6 +1,6 @@
 import { ITEMS, RECIPES, type ItemDef, type RecipeDef } from "./content.ts";
 
-export type Stack = { uid: string; def: string; count: number; equipped: boolean };
+export type Stack = { uid: string; def: string; count: number; equipped: boolean; /** a modifier (data/items.ts MODIFIERS) */ mod?: string | null };
 
 export function item(id: string): ItemDef {
   const d = ITEMS[id];

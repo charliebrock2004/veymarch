@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { CACHE_DEFS, DESCRIPTIONS, ITEMS, MOB_SPAWNS, MORE_LINES, RECIPES, SET_BONUS, SPEEDS, TRADES, type ItemDef } from "./content";
+import { MODIFIERS, moddedName } from "./data/items.ts";
 import { BOSSES, type BossDef } from "./data/bosses.ts";
 import { LEVEL_XP, armourCut, levelOf, statsFor } from "./data/progression.ts";
 import { QUEST_BY_ID, type QuestStep } from "./data/quests.ts";
@@ -103,7 +104,7 @@ export type Hud = {
   boss: { id: string; name: string; hp: number; max: number; phase: number; phaseName: string } | null;
   /** the boss line on screen (Finlay speaks) */
   bossLine: { text: string; at: number } | null;
-  items: { uid: string; id: string; name: string; count: number; equipped: boolean; kind: string; slot: string; desc: string; dmg: number; def: number; rarity: string; tier: number; passive: string; set: string }[];
+  items: { uid: string; id: string; name: string; count: number; equipped: boolean; kind: string; slot: string; desc: string; dmg: number; def: number; rarity: string; tier: number; passive: string; set: string; mod: string; modText: string; enchants: { id: string; name: string; text: string; cost: string; ok: boolean }[] }[];
   crafts: { id: string; name: string; out: string; ok: boolean; have: string; station: string; can: boolean }[];
   station: Station;
   hour: number;
@@ -139,6 +140,8 @@ export type GameApi = {
   equip: (uid: string) => void;
   use: (uid: string) => void;
   craft: (id: string) => void;
+  /** at the enchanter's lectern: set a modifier on a piece you carry */
+  enchant: (uid: string, mod: string) => void;
   trade: (id: string) => void;
   openShop: (id: string) => void;
   buy: (item: string, n: number) => void;
@@ -658,6 +661,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
   }
 
+  /** the modifier on the weapon in hand ("" for none) */
+  function mainMod() {
+    return items.find((s) => s.equipped && ITEMS[s.def]?.slot === "main")?.mod ?? "";
+  }
   function mainWeapon() {
     const eq = equipped(items, "main");
     return item(eq?.def ?? "wpn_fists");
@@ -672,6 +679,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function gearDefence() {
     let d = 0;
     for (const it of equippedDefs()) if (it.kind === "armour" && it.slot !== "off") d += it.defence;
+    for (const s of items) if (s.equipped && s.mod) d += MODIFIERS[s.mod]?.def ?? 0;
     return d;
   }
   function setWorn(set: string) {
@@ -891,8 +899,16 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       items: items.filter((s) => ITEMS[s.def] && ITEMS[s.def].kind !== "coin").map((s) => {
         const d = item(s.def);
         return {
-          uid: s.uid, id: s.def, name: d.name, count: s.count, equipped: s.equipped, kind: d.kind, slot: d.slot, desc: DESCRIPTIONS[s.def] ?? "",
+          uid: s.uid, id: s.def, name: moddedName(d.name, s.mod), count: s.count, equipped: s.equipped, kind: d.kind, slot: d.slot, desc: DESCRIPTIONS[s.def] ?? "",
           dmg: d.damage, def: d.defence, rarity: d.rarity, tier: d.tier, passive: d.passive ?? "", set: d.set ?? "",
+          mod: s.mod ?? "", modText: s.mod && MODIFIERS[s.mod] ? MODIFIERS[s.mod].text : "",
+          // at the enchanter's lectern: the modifiers this piece can take, and their price
+          enchants: stationNear === "enchanter" && !d.soulbound && d.stack === 1 && d.moveset.indexOf("pick") < 0 && (d.kind === "weapon" || d.kind === "armour")
+            ? Object.values(MODIFIERS).filter((m) => m.on === d.kind && m.id !== s.mod).map((m) => ({
+                id: m.id, name: m.name, text: m.text, cost: m.cost.map(([id, n]) => n + " " + item(id).name).join(", "),
+                ok: m.cost.every(([id, n]) => countOf(items, id) >= n),
+              }))
+            : [],
         };
       }),
       level, xp, xpLo, xpHi, crowns: countOf(items, "coin_crown"), defence: gearDefence(), banner,
@@ -1683,7 +1699,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function attack(heavy: boolean) {
     if (mode !== "play" || P.dead) return;
     const w = mainWeapon();
-    const cost = Math.round((heavy ? w.stamHeavy * 1.3 : w.stamLight * 1.4) + 2);
+    const cost = Math.round(((heavy ? w.stamHeavy * 1.3 : w.stamLight * 1.4) + 2) * (1 + (MODIFIERS[mainMod()]?.stam ?? 0)));
     if (P.action !== "none" && P.action !== "charge") {
       if (P.action.startsWith("light") && P.at > P.dur * 0.45) P.queued = true;
       return;
@@ -1719,7 +1735,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const chain = P.action === "light3" ? 1.2 : 1;
     // level, the Black Knight's Oath and a Finlay riposte all add to the weapon's own number
     const ripo = riposte > 0 ? 2 : 1;
-    const dmgBase = strikeDamage({ weapon: w, heavy, skillRank: 0, weakness: false, blocking: false, shield: false, defence: 0 }) * statsFor(level).power * (setWorn("bk") ? 1.15 : 1) * ripo;
+    const dmgBase = strikeDamage({ weapon: w, heavy, skillRank: 0, weakness: false, blocking: false, shield: false, defence: 0 }) * statsFor(level).power * (setWorn("bk") ? 1.15 : 1) * ripo * (1 + (MODIFIERS[mainMod()]?.dmg ?? 0));
     const tryHit = (x: number, z: number, r: number, hit: (dmg: number) => number) => {
       const dx = x - P.x;
       const dz = z - P.z;
@@ -2480,7 +2496,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.yaw += Math.sign(diff) * Math.min(Math.abs(diff), dt * 12);
     }
     // stamina, health, mana
-    if (P.stamT <= 0 && !(P.sprint && inCombat)) P.stam = Math.min(P.maxStam, P.stam + (P.blocking ? 10 : 32) * dt * (setWorn("hound") ? 1.25 : 1));
+    const regenMod = 1 + items.reduce((a, it) => a + (it.equipped && it.mod ? MODIFIERS[it.mod]?.regen ?? 0 : 0), 0);
+    if (P.stamT <= 0 && !(P.sprint && inCombat)) P.stam = Math.min(P.maxStam, P.stam + (P.blocking ? 10 : 32) * dt * (setWorn("hound") ? 1.25 : 1) * regenMod);
     if (P.maxMana > 0) P.mana = Math.min(P.maxMana, P.mana + (inCombat ? 1.2 : 3) * dt);
     if (!inCombat && P.regenT <= 0 && P.hp > 0 && P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + 2 * dt);
     // footsteps
@@ -3140,7 +3157,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   /** The server's inventory replaces ours. */
   function setItems(list: StackJson[]) {
-    items = list.map((s) => ({ uid: s.uid, def: s.def, count: s.count, equipped: s.equipped }));
+    items = list.map((s) => ({ uid: s.uid, def: s.def, count: s.count, equipped: s.equipped, mod: s.mod ?? null }));
     syncGear();
     push();
   }
@@ -3834,6 +3851,20 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     },
     use: useItem,
     craft: doCraft,
+    enchant(uid: string, mod: string) {
+      if (!online || stationNear !== "enchanter") return;
+      const o = online;
+      void heartbeat()
+        .then(() => rpc<{ items: StackJson[] }>("vm_enchant", { p_uid: uid, p_mod: mod }))
+        .then((r) => {
+          if (online !== o) return;
+          setItems(r.items);
+          audio.craft();
+          const s = items.find((x) => x.uid === uid);
+          if (s) say(moddedName(item(s.def).name, s.mod) + ".");
+        })
+        .catch(netError);
+    },
     trade: doTrade,
     openShop,
     buy,

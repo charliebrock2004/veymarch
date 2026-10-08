@@ -303,6 +303,27 @@ insert into vm_loot (kind, item, n, chance) values
   ('crypt_dead', 'herb_rotcap', 1, 0.3)
 on conflict (kind, item) do update set n = excluded.n, chance = excluded.chance;
 
+insert into vm_mods (id, on_kind, dmg, def) values
+  ('keen', 'weapon', 0.1, 0),
+  ('heavy', 'weapon', 0.18, 0),
+  ('balanced', 'weapon', 0, 0),
+  ('sturdy', 'armour', 0, 2),
+  ('fleet', 'armour', 0, 0)
+on conflict (id) do update set on_kind = excluded.on_kind, dmg = excluded.dmg, def = excluded.def;
+
+insert into vm_mod_costs (mod, item, n) values
+  ('keen', 'mat_ember_shard', 1),
+  ('keen', 'mat_steel', 1),
+  ('heavy', 'mat_iron', 3),
+  ('heavy', 'mat_coal', 2),
+  ('balanced', 'mat_leather', 2),
+  ('balanced', 'mat_steel', 1),
+  ('sturdy', 'mat_iron', 2),
+  ('sturdy', 'mat_leather', 1),
+  ('fleet', 'herb_widowsveil', 2),
+  ('fleet', 'mat_fibre', 3)
+on conflict (mod, item) do update set n = excluded.n;
+
 insert into vm_mob_kinds (kind, xp) values
   ('wolf', 12),
   ('goblin', 14),

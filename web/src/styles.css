@@ -1834,3 +1834,11 @@ input {
   letter-spacing: 0.2em;
   color: #fff4dc;
 }
+
+/* the enchanter's runes in the bag's detail pane */
+.vm-enchants { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.vm-enchant { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid rgba(215, 190, 140, 0.18); border-radius: 8px; opacity: 0.7; }
+.vm-enchant.ok { opacity: 1; border-color: rgba(215, 190, 140, 0.45); }
+.vm-enchant b { color: #e8c878; }
+.vm-enchant span { font-size: 12px; }
+.vm-enchant em { display: block; font-size: 11px; opacity: 0.75; font-style: normal; }

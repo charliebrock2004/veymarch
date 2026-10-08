@@ -293,3 +293,22 @@ export const SET_BONUS: Record<string, { name: string; pieces: number; text: str
   hound: { name: "Pack Runner", pieces: 5, text: "Stamina returns 25% faster." },
   bk: { name: "Black Knight's Oath", pieces: 5, text: "Hits deal 15% more, and blocking costs half the stamina." },
 };
+
+/**
+ * Modifiers: one per piece of gear. Smiths and armourers sometimes turn out a better piece than
+ * the recipe promised (a quarter of the time); the enchanter sets the one you choose, for a price,
+ * replacing any it had. Uniques (soulbound) keep their own rule and take none. Shared with the server.
+ */
+export type ModDef = { id: string; name: string; suffix?: boolean; on: "weapon" | "armour"; dmg?: number; stam?: number; def?: number; regen?: number; text: string; cost: [string, number][] };
+export const MODIFIERS: Record<string, ModDef> = {
+  keen: { id: "keen", name: "Keen", on: "weapon", dmg: 0.1, text: "+10% damage", cost: [["mat_ember_shard", 1], ["mat_steel", 1]] },
+  heavy: { id: "heavy", name: "Heavy", on: "weapon", dmg: 0.18, stam: 0.12, text: "+18% damage; swings cost 12% more stamina", cost: [["mat_iron", 3], ["mat_coal", 2]] },
+  balanced: { id: "balanced", name: "Balanced", on: "weapon", stam: -0.15, text: "Swings cost 15% less stamina", cost: [["mat_leather", 2], ["mat_steel", 1]] },
+  sturdy: { id: "sturdy", name: "Sturdy", on: "armour", def: 2, text: "+2 defence", cost: [["mat_iron", 2], ["mat_leather", 1]] },
+  fleet: { id: "fleet", name: "of the Fleet", suffix: true, on: "armour", regen: 0.1, text: "Stamina returns 10% faster", cost: [["herb_widowsveil", 2], ["mat_fibre", 3]] },
+};
+/** A piece's name with its modifier ("Keen Iron Sword", "Leather Boots of the Fleet"). */
+export function moddedName(name: string, mod?: string | null): string {
+  const m = mod ? MODIFIERS[mod] : undefined;
+  return !m ? name : m.suffix ? `${name} ${m.name}` : `${m.name} ${name}`;
+}

@@ -644,6 +644,7 @@ function Bag({ api, hud }: { api: GameApi; hud: Hud }) {
                   <p>{selected.desc}</p>
                   {selected.dmg > 0 && <p className="vm-sub">Damage {selected.dmg}</p>}
                   {selected.def > 0 && <p className="vm-sub">Defence {selected.def}</p>}
+                  {selected.modText && <p className="vm-passive">{selected.modText}</p>}
                   {selected.passive && <p className="vm-passive">{selected.passive}</p>}
                   {selected.set && SET_BONUS[selected.set] && <p className="vm-sub">Set: {SET_BONUS[selected.set].name}, {SET_BONUS[selected.set].pieces} pieces. {SET_BONUS[selected.set].text}</p>}
                   {selected.kind === "consumable" && (
@@ -657,6 +658,22 @@ function Bag({ api, hud }: { api: GameApi; hud: Hud }) {
                     </button>
                   )}
                   {selected.equipped && <p className="vm-sub">Equipped</p>}
+                  {selected.enchants.length > 0 && (
+                    <div className="vm-enchants">
+                      <p className="vm-sub">The enchanter can set one rune (it replaces any other):</p>
+                      {selected.enchants.map((e) => (
+                        <div key={e.id} className={`vm-enchant ${e.ok ? "ok" : ""}`}>
+                          <div>
+                            <b>{e.name}</b> <span>{e.text}</span>
+                            <em>{e.cost}</em>
+                          </div>
+                          <button className="vm-mbtn small primary" disabled={!e.ok} onClick={() => api.enchant(selected.uid, e.id)}>
+                            Set
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </>
               ) : (
                 <p className="vm-sub">Tap an item.</p>
