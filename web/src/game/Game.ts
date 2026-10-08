@@ -2258,7 +2258,21 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     let exposure = THREE.MathUtils.lerp(a.ex, b.ex, t);
     let density = 0.0065;
     const reg = region ?? "hearthfen";
-    if (ZONES[P.zone].indoor && mode !== "title") {
+    // the Keep's courtyards and broken ring are open to a grey rain sky (a high ceiling there)
+    const openSky = ZONES[P.zone].indoor && P.zone !== "castle" && (zones.get(P.zone)?.ceiling?.(P.x, P.z) ?? 0) >= 10;
+    if (ZONES[P.zone].indoor && mode !== "title" && openSky) {
+      sun.color.setHex(0xc8d0dc);
+      sun.intensity = 0.55 + 0.6 * dayK;
+      hemi.color.setHex(0x9aa4b4);
+      hemi.groundColor.setHex(0x2a2a30);
+      hemi.intensity = 0.75 + 0.45 * dayK;
+      zen.setHex(0x3a4250);
+      hor.setHex(0x6a7280);
+      fogC.setHex(0x3a4048);
+      density = 0.02;
+      exposure = 1.2;
+      sunDir.set(0.3, 0.9, -0.3).normalize();
+    } else if (ZONES[P.zone].indoor && mode !== "title") {
       const court = P.zone === "castle" && P.z > DUN.galleryZ1 + 4;
       sun.color.setHex(court ? 0xffc890 : 0xffb070);
       sun.intensity = court ? 1.6 : 0.35;
@@ -2278,7 +2292,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       } else if (reg === "kingdom" || reg === "gate" || reg === "bridge") density = 0.0042;
     }
     // a zone may bring its own air: Blackwood mist, the Mire's green murk, rain over the Keep
-    const zf = mode !== "title" && mode !== "create" ? zones.get(P.zone)?.fog : undefined;
+    const zf = mode !== "title" && mode !== "create" && !openSky ? zones.get(P.zone)?.fog : undefined;
     if (zf) {
       fogC.lerp(cA.setHex(zf.color), ZONES[P.zone].indoor ? 1 : 0.35 + 0.5 * dayK);
       density = zf.density;
