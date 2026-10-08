@@ -32,7 +32,7 @@ export type ItemDef = {
   element: "none" | "fire";
   soulbound: boolean;
   rarity: Rarity;
-  /** price in crowns at a shop; selling pays 40% */
+  /** price in crowns at a shop; selling pays 30% */
   value: number;
   /** armour set this piece belongs to */
   set?: string;
@@ -154,7 +154,7 @@ const LIST: ItemDef[] = [
 
   // ---- consumables
   food("cons_bandage", "Bandage", 28, 6, { stack: 10 }),
-  food("cons_draught", "Healing Draught", 60, 30, { stack: 10, rarity: "uncommon" }),
+  food("cons_draught", "Healing Draught", 60, 28, { stack: 10, rarity: "uncommon" }),
   food("cons_greater_draught", "Greater Draught", 110, 90, { stack: 10, rarity: "rare" }),
   food("cons_rot_tonic", "Rot Tonic", 25, 40, { stack: 10, rarity: "uncommon", passive: "Clears rot and the Mire's sickness." }),
   food("cons_bread", "Harrenvale Loaf", 30, 8),

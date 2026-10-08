@@ -2,7 +2,7 @@ import type { ZoneId } from "./zones.ts";
 
 /**
  * Shops sell for crowns at the item's value (or the listed price) and buy anything that is not
- * soulbound for 40% of its value. Shared with the server, which checks you stand at the counter.
+ * soulbound for 30% of its value (so no buy, craft and sell loop makes crowns: gen-seed checks). Shared with the server, which checks you stand at the counter.
  */
 export type ShopDef = {
   id: string;
@@ -16,7 +16,7 @@ export type ShopDef = {
   buys: boolean;
 };
 
-export const SELL_RATE = 0.4;
+export const SELL_RATE = 0.3;
 
 export const SHOPS: ShopDef[] = [
   { id: "hf_corrin", name: "Corrin's Stall", keeper: "corrin", zone: "over", x: 4.6, z: -4.2, buys: true,

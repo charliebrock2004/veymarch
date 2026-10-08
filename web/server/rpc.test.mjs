@@ -10,7 +10,7 @@ import { BOSSES, bossHp } from "../src/game/data/bosses.ts";
 import { ITEMS } from "../src/game/data/items.ts";
 import { LEVEL_XP, MOB_XP, levelOf, statsFor } from "../src/game/data/progression.ts";
 import { QUESTS } from "../src/game/data/quests.ts";
-import { MOB_SPAWNS, WORLD_FLAGS } from "../src/game/data/world.ts";
+import { MOB_SPAWNS, NODE_DEFS, WORLD_FLAGS } from "../src/game/data/world.ts";
 import { PORTALS, SHRINES, STATIONS, ZONES } from "../src/game/data/zones.ts";
 
 const db = await openDb();
@@ -50,6 +50,12 @@ async function give(charId, def, n = 1, equip = false) {
 async function setXp(charId, xp) {
   await db.exec(`update vm_characters set xp = ${xp} where id = '${charId}'`);
   await db.pg.query("select vm_sync_stats($1::uuid)", [charId]);
+}
+/** Stand by a foe's ground and claim it, as the player who killed it would. */
+async function loot(s, key) {
+  const m = MOB_SPAWNS.find((x) => x[0] === key);
+  await place(s.c.id, s.w.id, m[4], m[2], m[3]);
+  return call("vm_loot", { ...s.args, p_mob: key });
 }
 const count = (items, def) => items.filter((s) => s.def === def).reduce((a, s) => a + s.count, 0);
 const one = async (sql, params = []) => (await db.pg.query(sql, params)).rows[0];
@@ -109,7 +115,13 @@ test("gathering, crafting, loot and positions are checked by the server", async 
   await call("vm_enter", { ...a, p_world: w.id, p_char: c.id });
   const args = { ...a, p_world: w.id, p_char: c.id };
 
-  let r = await call("vm_gather", { ...args, p_node: "flint_0" });
+  // a new member is nowhere yet: the first heartbeat must be where you start, not anywhere
+  let r = await call("vm_heartbeat", { ...args, p_x: 1200, p_z: 100, p_yaw: 0, p_zone: "castle", p_hp: 90, p_play: 1 });
+  assert.equal(r.ok, false);
+  r = await call("vm_heartbeat", { ...args, p_x: 1.5, p_z: -22, p_yaw: 0, p_zone: "over", p_hp: 90, p_play: 1 });
+  assert.equal(r.ok, true);
+
+  r = await call("vm_gather", { ...args, p_node: "flint_0" });
   assert.equal(r.item, "mat_flint");
   await assert.rejects(call("vm_gather", { ...args, p_node: "flint_0" }), /too fast/);
   await db.exec(`update vm_characters set flags = flags - 'gather_at' where id = '${c.id}'`);
@@ -133,7 +145,12 @@ test("gathering, crafting, loot and positions are checked by the server", async 
   assert.ok(!r.items.some((s) => s.def === "mat_wood"));
   await assert.rejects(call("vm_craft", { ...args, p_recipe: "recipe_stone_knife", p_station: "hand" }), /materials/);
 
-  // a foe dies once: the second claim gets nothing
+  // a foe dies once: the second claim gets nothing; and only someone near it can claim it
+  const w1 = MOB_SPAWNS.find((m) => m[0] === "w1");
+  await assert.rejects(call("vm_loot", { ...args, p_mob: MOB_SPAWNS.find((m) => m[4] === "keep")[0] }), /not near you/);
+  await place(c.id, w.id, "over", w1[2] + 120, w1[3]);
+  await assert.rejects(call("vm_loot", { ...args, p_mob: "w1" }), /not near you/);
+  await place(c.id, w.id, "over", w1[2] + 3, w1[3]);
   const first = await call("vm_loot", { ...args, p_mob: "w1" });
   assert.equal(first.dup, false);
   assert.ok(first.drops.some((d) => d.item === "mat_bone"));
@@ -142,6 +159,7 @@ test("gathering, crafting, loot and positions are checked by the server", async 
   assert.equal(second.drops.length, 0);
 
   // teleporting is refused, walking is kept
+  await place(c.id, w.id, "over", 1, -1, { ago: 1 });
   r = await call("vm_heartbeat", { ...args, p_x: 1, p_z: 2, p_yaw: 0, p_dungeon: false, p_hp: 90, p_play: 5 });
   assert.equal(r.ok, true);
   r = await call("vm_heartbeat", { ...args, p_x: 500, p_z: 500, p_yaw: 0, p_dungeon: false, p_hp: 90, p_play: 5 });
@@ -170,7 +188,11 @@ test("Cookie has one health pool and pays each fighter exactly once", async () =
 
   // nobody can hit Cookie from outside the courtyard
   await assert.rejects(call("vm_boss_hit", { ...a, p_world: w.id, p_char: ca.id, p_heavy: true, p_fire: false, p_behind: false, p_perched: false, p_dizzy: false }), /not within reach/);
-  for (const [who, id] of [[a, ca.id], [b, cb.id]]) await call("vm_heartbeat", { ...who, p_world: w.id, p_char: id, p_x: 1200, p_z: 100, p_yaw: 0, p_dungeon: true, p_hp: 100, p_play: 1 });
+  // waking from a fall does not let you choose the courtyard
+  await call("vm_died", { ...a, p_world: w.id, p_char: ca.id });
+  const woke = await call("vm_heartbeat", { ...a, p_world: w.id, p_char: ca.id, p_x: 1200, p_z: 100, p_yaw: 0, p_dungeon: true, p_hp: 100, p_play: 1 });
+  assert.equal(woke.ok, false);
+  for (const id of [ca.id, cb.id]) await place(id, w.id, "castle", 0, 100);
   // Ember fire needs Ember
   await assert.rejects(call("vm_boss_hit", { ...a, p_world: w.id, p_char: ca.id, p_heavy: false, p_fire: true, p_behind: false, p_perched: false, p_dizzy: false }), /Ember/);
   let hp = 280;
@@ -200,6 +222,7 @@ test("Cookie has one health pool and pays each fighter exactly once", async () =
   // the world remembers: the gate can now open, iron can be mined
   const flags = await call("vm_world_flag", { ...a, p_world: w.id, p_char: ca.id, p_flag: "gate" });
   assert.equal(flags.gate, true);
+  await place(ca.id, w.id, "over", 0, 0);
   const r = await call("vm_gather", { ...a, p_world: w.id, p_char: ca.id, p_node: "iron_0" });
   assert.equal(r.item, "mat_iron");
 });
@@ -416,10 +439,16 @@ test("B3 zones change only through an open door near where you last stood", asyn
     call("vm_heartbeat", { ...s.args, p_x: ZONES[zone].ox + x, p_z: z, p_yaw: 0, p_hp: 100, p_play: 1, p_zone: zone, ...extra });
   const portal = (id) => PORTALS.find((p) => p.id === id);
   const member = () => one("select zone, dungeon, x, z from vm_members where character_id = $1", [s.c.id]);
-  // no saved position yet (first entry): you may wake in any zone
+  // no saved position yet (first entry): only at a place you could wake, never deep in a zone
   let r = await beat("hunt", 0, -100);
-  assert.equal(r.ok, true);
+  assert.equal(r.ok, false);
+  const kennelDoor = portal("hunt_kennel");
+  assert.equal((await beat("hunt", kennelDoor.x, kennelDoor.z - 2)).ok, false, "the kennel door, but nobody opened the way to Blackwood");
+  await db.exec(`update vm_worlds set flags = flags || '{"gate": true}' where id = '${s.w.id}'`);
+  r = await beat("hunt", kennelDoor.x, kennelDoor.z - 2);
+  assert.equal(r.ok, true, "the kennel door once the road is open");
   assert.equal(r.zone, "hunt");
+  await db.exec(`update vm_worlds set flags = flags - 'gate' where id = '${s.w.id}'`);
   // no stepping into another zone away from a door
   r = await beat("kingdom", 60, 152);
   assert.equal(r.ok, false);
@@ -454,9 +483,15 @@ test("B3 zones change only through an open door near where you last stood", asyn
   assert.equal((await beat("over", 1200, 100)).ok, false, "castle coordinates are not the overworld");
   r = await call("vm_heartbeat", { ...s.args, p_x: 0, p_z: 0, p_yaw: 0, p_hp: 100, p_play: 1, p_zone: "moon" });
   assert.equal(r.ok, false);
-  // dying clears the position: wake anywhere, and the old dungeon column follows the zone
+  // dying clears the position: you wake at a shrine, a dungeon's front door or the bedroll,
+  // and the old dungeon column follows the zone
   await call("vm_died", s.args);
-  assert.equal((await beat("castle", 0, 4)).ok, true);
+  assert.equal((await beat("castle", 0, 4)).ok, false, "not inside the castle");
+  assert.equal((await beat("over", 60, 60)).ok, false, "not in the middle of the forest");
+  const oc2 = portal("over_castle");
+  assert.equal((await beat("over", oc2.x, oc2.z - 2.5)).ok, true, "at the castle's front door");
+  await place(s.c.id, s.w.id, "over", oc2.x, oc2.z, { ago: 1 });
+  assert.equal((await beat("castle", oc2.tx, oc2.tz)).ok, true);
   let m = await member();
   assert.equal(m.zone, "castle");
   assert.equal(m.dungeon, true);
@@ -482,11 +517,11 @@ test("B4 experience: each kill pays its worth once, and levels raise health and 
   assert.deepEqual([c.xp, c.level, c.xp_lo, c.xp_hi, c.crowns], [0, 1, 0, LEVEL_XP[1], 0]);
   assert.deepEqual(c.kill_counts, {});
   assert.deepEqual(c.quests, {});
-  let r = await call("vm_loot", { ...s.args, p_mob: "w1" });
+  let r = await loot(s, "w1");
   assert.equal(r.dup, false);
   assert.equal(r.xp_gained, MOB_XP.wolf);
   assert.equal(r.level, 1);
-  r = await call("vm_loot", { ...s.args, p_mob: "w1" });
+  r = await loot(s, "w1");
   assert.equal(r.dup, true);
   assert.equal(r.xp_gained, 0, "a dead foe pays nothing twice");
   c = await me(s);
@@ -497,7 +532,7 @@ test("B4 experience: each kill pays its worth once, and levels raise health and 
   c = await call("vm_char_flag", { ...s.p, p_char: s.c.id, p_flag: "ember" });
   assert.equal(c.mana_max, statsFor(1).mana);
   // the kennelmaster is worth a level, never comes back, and crowns are ordinary drops
-  r = await call("vm_loot", { ...s.args, p_mob: "knm" });
+  r = await loot(s, "knm");
   const xp = MOB_XP.wolf + MOB_XP.kennelmaster;
   assert.equal(r.level, levelOf(xp));
   assert.ok(r.drops.some((d) => d.item === "coin_crown"));
@@ -671,18 +706,17 @@ test("B6 shops: buy at the counter for crowns, sell from an exact stack, nothing
   await place(s.c.id, s.w.id, "kingdom", -6, 6);
   r = await buy("mat_wheat", 5, "hv_market");
   assert.equal(r.crowns, 82 - 10);
-  // selling: 40% of value, at least a crown each, from the stack named
+  // selling: 30% of value (rounded down), from the stack named
   await place(s.c.id, s.w.id, "over", corrin.x, corrin.z);
   const bandage = r.items.find((x) => x.def === "cons_bandage");
   r = await sell(bandage.uid, 1);
-  assert.equal(r.crowns, 72 + Math.floor(ITEMS.cons_bandage.value * 0.4));
+  assert.equal(r.crowns, 72 + Math.floor(ITEMS.cons_bandage.value * 0.3));
   assert.equal(r.items.find((x) => x.uid === bandage.uid).count, 2);
   await assert.rejects(sell(bandage.uid, 3), /that many/);
   await assert.rejects(sell(bandage.uid, 0), /that many/);
   await assert.rejects(sell("nope", 1), /do not have that/);
   const cloth = r.items.find((x) => x.def === "arm_cloth");
-  r = await sell(cloth.uid, 1);
-  assert.equal(r.crowns, 74 + 1, "worthless things still fetch a crown");
+  await assert.rejects(sell(cloth.uid, 1), /Not worth a crown/, "nothing worth less than a crown is bought (no free crowns)");
   // not soulbound, not keys, not coin, and not at a shop that does not buy
   await give(s.c.id, "wpn_cookie_blade");
   await give(s.c.id, "key_red_collar");
@@ -692,28 +726,29 @@ test("B6 shops: buy at the counter for crowns, sell from an exact stack, nothing
   }
   await place(s.c.id, s.w.id, "kingdom", 18, 16);
   await assert.rejects(sell(bandage.uid, 1, "hv_ox"), /do not buy/);
-  // two stacks of wood: selling from the second leaves the first alone; the emptied stack is gone
+  // two stacks of iron: selling from the second leaves the first alone; the emptied stack is gone
   await place(s.c.id, s.w.id, "over", corrin.x, corrin.z);
-  await give(s.c.id, "mat_wood", 120);
+  await give(s.c.id, "mat_iron", 120);
   c = await me(s);
-  const woods = c.items.filter((x) => x.def === "mat_wood");
-  assert.deepEqual(woods.map((x) => x.count), [99, 21]);
+  const irons = c.items.filter((x) => x.def === "mat_iron");
+  assert.deepEqual(irons.map((x) => x.count), [99, 21]);
   const crowns0 = c.crowns;
-  r = await sell(woods[1].uid, 21);
-  assert.equal(r.crowns, crowns0 + 21);
-  assert.deepEqual(r.items.filter((x) => x.def === "mat_wood").map((x) => [x.uid, x.count]), [[woods[0].uid, 99]]);
+  r = await sell(irons[1].uid, 21);
+  const each = Math.floor(ITEMS.mat_iron.value * 0.3);
+  assert.equal(r.crowns, crowns0 + 21 * each);
+  assert.deepEqual(r.items.filter((x) => x.def === "mat_iron").map((x) => [x.uid, x.count]), [[irons[0].uid, 99]]);
   // a double tap sells once
-  const twice = await Promise.allSettled([sell(woods[0].uid, 99), sell(woods[0].uid, 99)]);
+  const twice = await Promise.allSettled([sell(irons[0].uid, 99), sell(irons[0].uid, 99)]);
   assert.deepEqual(twice.map((t) => t.status).sort(), ["fulfilled", "rejected"]);
   c = await me(s);
-  assert.equal(c.crowns, crowns0 + 21 + 99);
-  assert.equal(count(c.items, "mat_wood"), 0);
+  assert.equal(c.crowns, crowns0 + (21 + 99) * each);
+  assert.equal(count(c.items, "mat_iron"), 0);
   // selling the weapon in your hand leaves you with fists
   await give(s.c.id, "wpn_iron_sword", 1, true);
   c = await me(s);
   assert.equal(c.weapon, "Iron Sword");
   r = await sell(c.items.find((x) => x.def === "wpn_iron_sword").uid, 1);
-  assert.equal(r.crowns, c.crowns + Math.floor(ITEMS.wpn_iron_sword.value * 0.4));
+  assert.equal(r.crowns, c.crowns + Math.floor(ITEMS.wpn_iron_sword.value * 0.3));
   assert.equal((await me(s)).weapon, "Fists");
 });
 
@@ -752,13 +787,13 @@ test("B7 quests: start rules, steps checked by the server, rewards paid exactly 
   await assert.rejects(quest("q_bell", "start"), /already have/);
   assert.equal((await me(s)).xp, r.xp, "paid once");
   // Wolves at Dusk: kills count from the moment the step begins
-  await call("vm_loot", { ...s.args, p_mob: "w1" });
+  await loot(s, "w1");
   r = await quest("q_wolves", "start");
   assert.equal(r.quests.q_wolves.b, 1);
   await assert.rejects(quest("q_wolves", "step"), /not yet/);
-  for (const k of ["w2", "w3", "w4", "w5"]) await call("vm_loot", { ...s.args, p_mob: k });
+  for (const k of ["w2", "w3", "w4", "w5"]) await loot(s, k);
   await assert.rejects(quest("q_wolves", "step"), /not yet/, "four is not five");
-  await call("vm_loot", { ...s.args, p_mob: "w6" });
+  await loot(s, "w6");
   r = await quest("q_wolves", "step");
   assert.equal(r.step, 1);
   const leather = count(r.items, "mat_leather");
@@ -846,7 +881,7 @@ test("B8 quests: reach with a radius, level steps, skip-ahead, start flags, doub
   await quest("q_causeway", "step");
   await quest("q_causeway", "step");
   await give(s.c.id, "herb_rotcap", 3);
-  await call("vm_loot", { ...s.args, p_mob: "md1" });
+  await loot(s, "md1");
   r = await quest("q_causeway", "step");
   assert.equal(r.quests.q_causeway.s, 3);
   assert.equal(r.quests.q_causeway.b, 1, "the drowned laid to rest before this step do not count");
@@ -932,15 +967,15 @@ test("B11 world flags follow their rules", async () => {
   const flag = (f) => call("vm_world_flag", { ...s.args, p_flag: f });
   assert.equal((await flag("slab")).slab, true);
   await assert.rejects(flag("nursery"), /will not budge/);
-  await call("vm_loot", { ...s.args, p_mob: "dh" });
+  await loot(s, "dh");
   assert.equal((await flag("nursery")).nursery, true);
   await assert.rejects(flag("gate"), /does not answer/);
   await assert.rejects(flag("kennel_gate"), /will not budge/);
-  await call("vm_loot", { ...s.args, p_mob: "knm" });
+  await loot(s, "knm");
   assert.equal((await flag("kennel_gate")).kennel_gate, true);
   await assert.rejects(flag("crypt"), /does not answer/);
   await assert.rejects(flag("armoury"), /will not budge/);
-  await call("vm_loot", { ...s.args, p_mob: "kk1" });
+  await loot(s, "kk1");
   assert.equal((await flag("armoury")).armoury, true);
   assert.equal((await flag("crypt")).crypt, true);
   assert.equal((await flag("kennel_plates")).kennel_plates, true);
@@ -1066,4 +1101,33 @@ test("B14 an older realm database is migrated in place, and the schema re-applie
     where n.nspname = 'public' and p.proname like 'vm\\_%' group by proname having count(*) > 1`)).rows;
   assert.deepEqual(dup, []);
   await pg.close();
+});
+
+test("review fixes: far nodes, forged imports and a second soulbound craft are refused", async () => {
+  const s = await setup("Careful");
+  // a Mire herb cannot be picked from Hearthfen; standing by it, it can
+  const herb = NODE_DEFS.find((n) => n.zone === "mire" && n.x !== undefined && n.tier < 2 && !n.seal);
+  await place(s.c.id, s.w.id, "over", 0, 0);
+  await assert.rejects(call("vm_gather", { ...s.args, p_node: herb.id }), /Too far/);
+  await place(s.c.id, s.w.id, "mire", herb.x + 1, herb.z);
+  const g = await call("vm_gather", { ...s.args, p_node: herb.id });
+  assert.equal(g.item, herb.item);
+  // an "old save" can only bring what the first release could hold, one of each piece of gear
+  const p = await player();
+  const forged = await call("vm_import_character", { ...p, p_payload: { source: "slot0:x", name: "Forger", look: {},
+    items: [{ def: "cons_greater_draught", count: 20 }, { def: "arm_leather_chest", count: 5 }, { def: "wpn_copper_sword", count: 9 }, { def: "mat_wood", count: 50 }] } });
+  assert.equal(count(forged.items, "cons_greater_draught"), 0);
+  assert.equal(count(forged.items, "arm_leather_chest"), 0);
+  assert.equal(count(forged.items, "wpn_copper_sword"), 1);
+  assert.equal(count(forged.items, "mat_wood"), 20);
+  // a soulbound item you already own is not crafted again (and nothing is taken)
+  const smith = STATIONS.find((x) => x.kind === "blacksmith");
+  await place(s.c.id, s.w.id, smith.zone, smith.x, smith.z);
+  await give(s.c.id, "wpn_fangbreaker");
+  await give(s.c.id, "mat_boe_fang", 1);
+  await give(s.c.id, "mat_steel", 2);
+  await give(s.c.id, "mat_wood", 2);
+  await assert.rejects(call("vm_craft", { ...s.args, p_recipe: "recipe_fangbreaker", p_station: "blacksmith" }), /already have one/);
+  const c = await me(s);
+  assert.equal(count(c.items, "mat_boe_fang"), 1);
 });

@@ -92,6 +92,27 @@ const upsert = (table, cols, keys, list) => {
 /** world x of a zone-local x */
 const wx = (z, x) => ZONES[z].ox + x;
 
+
+// No loop may print crowns: buying an item and selling it back, or buying a recipe's inputs,
+// crafting and selling the result, must always lose money.
+{
+  const sell = (id) => (ITEMS[id] && !ITEMS[id].soulbound ? Math.floor(ITEMS[id].value * SELL_RATE) : 0);
+  const buy = {};
+  for (const s of SHOPS) for (const [id, price] of s.stock) buy[id] = Math.min(buy[id] ?? Infinity, price ?? ITEMS[id].value);
+  const bad = [];
+  for (const [id, cost] of Object.entries(buy)) if (sell(id) >= cost) bad.push(`${id}: buy ${cost}, sell ${sell(id)}`);
+  for (const r of RECIPES) {
+    if (!r.inputs.every((i) => buy[i.id] !== undefined)) continue;
+    const cost = r.inputs.reduce((a, i) => a + buy[i.id] * i.n, 0);
+    const gain = sell(r.out) * (r.n ?? 1);
+    if (gain >= cost) bad.push(`${r.id}: inputs ${cost}, sells for ${gain}`);
+  }
+  if (bad.length) {
+    console.error("crowns from nothing:\n  " + bad.join("\n  "));
+    process.exit(1);
+  }
+}
+
 upsert("vm_item_defs", ["id", "name", "kind", "stack", "damage", "tier", "slot", "moveset", "heal", "soulbound", "defence", "rarity", "value", "family"], ["id"],
   Object.values(ITEMS).map((d) => [d.id, d.name, d.kind, d.stack, d.damage, d.tier, d.slot, d.moveset, d.heal, d.soulbound, d.defence, d.rarity, d.value, d.family]));
 upsert("vm_recipes", ["id", "out_item", "station", "n"], ["id"], RECIPES.map((r) => [r.id, r.out, r.station, r.n ?? 1]));
@@ -102,9 +123,10 @@ const loot = Object.entries(MOB_LOOT).flatMap(([kind, list]) => list.map(([id, n
 upsert("vm_loot", ["kind", "item", "n", "chance"], ["kind", "item"], loot);
 upsert("vm_mob_kinds", ["kind", "xp"], ["kind"], Object.entries(MOB_XP).map(([kind, xp]) => [kind, xp]));
 // indoor zones, soldiers and the kennelmaster do not come back
-const spawns = MOB_SPAWNS.map(([key, kind, , , z]) => [key, kind, z === "castle", !ZONES[z].indoor && kind !== "soldier" && kind !== "kennelmaster", z]);
-upsert("vm_mob_spawns", ["key", "kind", "dungeon", "respawns", "zone"], ["key"], spawns);
-upsert("vm_nodes", ["id", "item", "tier", "seal", "max_left"], ["id"], NODE_DEFS.map((n) => [n.id, n.item, n.tier, n.seal, n.max]));
+const spawns = MOB_SPAWNS.map(([key, kind, x, z, zn]) => [key, kind, zn === "castle", !ZONES[zn].indoor && kind !== "soldier" && kind !== "kennelmaster", zn, wx(zn, x), z]);
+upsert("vm_mob_spawns", ["key", "kind", "dungeon", "respawns", "zone", "x", "z"], ["key"], spawns);
+upsert("vm_nodes", ["id", "item", "tier", "seal", "max_left", "zone", "x", "z"], ["id"],
+  NODE_DEFS.map((n) => [n.id, n.item, n.tier, n.seal, n.max, n.zone, n.x === undefined ? null : wx(n.zone, n.x), n.z ?? null]));
 upsert("vm_caches", ["cache", "item", "n"], ["cache", "item"], CACHE_DEFS.flatMap((c) => c.items.map(([id, n]) => [c.id, id, n])));
 upsert("vm_cache_spots", ["cache", "zone", "x", "z"], ["cache"], CACHE_DEFS.map((c) => [c.id, c.zone, wx(c.zone, c.x), c.z]));
 

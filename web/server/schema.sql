@@ -134,6 +134,12 @@ alter table vm_item_defs add column if not exists value int not null default 0;
 alter table vm_item_defs add column if not exists family text not null default '';
 alter table vm_recipes add column if not exists n int not null default 1;
 alter table vm_mob_spawns add column if not exists zone text;
+-- where a foe stands (world coordinates): a kill is paid only to someone near it
+alter table vm_mob_spawns add column if not exists x real;
+alter table vm_mob_spawns add column if not exists z real;
+alter table vm_nodes add column if not exists zone text;
+alter table vm_nodes add column if not exists x real;
+alter table vm_nodes add column if not exists z real;
 
 -- Phase B: a member stands in a zone. Older rows only knew "in the castle or not".
 alter table vm_members add column if not exists zone text;
@@ -479,6 +485,8 @@ end $$;
 create or replace function vm_shrine_known(p_flags jsonb, p_shrine text) returns boolean
 language sql immutable set search_path = pg_catalog as $$
   select p_shrine = 'hearthfen' or coalesce(p_flags ? ('sh_' || p_shrine), false)
+         -- the forest shrine lit before shrines were data
+         or (p_shrine = 'forest' and coalesce(p_flags ? 'shrine', false))
 $$;
 
 create or replace function vm_enter_internal(p_world uuid, p_char uuid, p_player uuid) returns jsonb
@@ -613,8 +621,10 @@ begin
               from jsonb_array_elements(case when jsonb_typeof(p_payload->'items') = 'array' then p_payload->'items' else '[]'::jsonb end) e
               group by e->>'def' loop
     select * into v_def from vm_item_defs where id = v_it->>'def';
-    continue when not found or v_def.id = 'arm_cloth' or v_def.kind in ('key', 'coin') or v_def.soulbound or v_def.tier >= 4 or v_def.id = 'mat_iron';
-    perform vm_add_item(v_id, v_def.id, least((v_it->>'count')::int, 20));
+    -- only what a first-release save could hold, and one of each piece of gear
+    continue when not found or not (v_def.id = any (array['mat_wood','mat_flint','mat_fibre','mat_stone','mat_bone','mat_leather',
+      'mat_copper','wpn_stone_knife','wpn_stone_pick','wpn_copper_pick','wpn_copper_sword','arm_stump_shield','cons_bandage']));
+    perform vm_add_item(v_id, v_def.id, least((v_it->>'count')::int, case when v_def.stack = 1 then 1 else 20 end));
   end loop;
   perform vm_add_item(v_id, 'arm_cloth', 1);
   update vm_items set equipped = true where character_id = v_id and def = 'arm_cloth';
@@ -724,7 +734,23 @@ begin
     -- an unknown zone, or a position that is not in the zone it claims
     v_ok := false;
   elsif v_m.x is null then
-    null;
+    -- a first entry or a wake after a fall: only at a place you can wake (the bedroll and the
+    -- start of the road, a shrine you know, or a doorway of the zone you wake in)
+    if not (
+         (v_zone = 'over' and least(vm_dist(p_x, p_z, 1.5, -22), vm_dist(p_x, p_z, -7.4, -11.9)) < 25)
+      or exists (select 1 from vm_shrines s where s.zone = v_zone and vm_shrine_known(v_m.flags, s.id) and vm_dist(p_x, p_z, s.x, s.z) < 25)
+      -- the front door of a dungeon, out in a zone this world has opened the way to
+      or (not v_z.indoor and exists (
+            with recursive open_zones(z) as (
+              select 'over'::text
+              union
+              select p2.to_zone from vm_portals p2 join open_zones o on p2.from_zone = o.z
+                where p2.flag is null or coalesce((v_w.flags->>p2.flag)::boolean, false))
+            select 1 from vm_portals p join vm_zones tz on tz.id = p.to_zone
+              where p.from_zone = v_zone and tz.indoor and vm_dist(p_x, p_z, p.x, p.z) < p.r + 20
+                and v_zone in (select z from open_zones)))) then
+      v_ok := false;
+    end if;
   elsif v_m.zone = v_zone then
     if vm_dist(p_x, p_z, v_m.x, v_m.z) > 9.5 * v_dt + 8 then v_ok := false; end if;
   elsif not exists (select 1 from vm_portals p
@@ -825,12 +851,17 @@ end $$;
 
 create or replace function vm_gather(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_node text) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare v_c vm_characters; v_n vm_nodes; v_w vm_worlds; v_st jsonb; v_left int; v_regrow timestamptz;
+declare v_c vm_characters; v_n vm_nodes; v_w vm_worlds; v_st jsonb; v_left int; v_regrow timestamptz; v_m vm_members;
 begin
   v_c := vm_own_char(p_player, p_secret, p_char);
-  perform vm_member(p_world, p_char);
+  v_m := vm_member(p_world, p_char);
   select * into v_n from vm_nodes where id = p_node;
   if not found then raise exception 'Nothing to gather there'; end if;
+  -- Hearthfen's hand-placed nodes have no position in the data: those are checked by zone only
+  if v_m.x is null or v_m.zone is distinct from coalesce(v_n.zone, 'over')
+     or (v_n.x is not null and vm_dist(v_m.x, v_m.z, v_n.x, v_n.z) > 6 + 9.5 * least(extract(epoch from now() - v_m.pos_at), 2)) then
+    raise exception 'Too far away';
+  end if;
   select * into v_w from vm_worlds where id = p_world for update;
   perform vm_lock_char(p_char);
   select * into v_c from vm_characters where id = p_char;
@@ -869,6 +900,10 @@ begin
                                      and vm_dist(v_m.x, v_m.z, s.x, s.z) <= s.r + 8) then
       raise exception 'station';
     end if;
+  end if;
+  select * into v_d from vm_item_defs where id = v_r.out_item;
+  if v_d.soulbound and exists (select 1 from vm_items where character_id = p_char and def = v_r.out_item) then
+    raise exception 'You already have one';
   end if;
   for v_in in select item, n from vm_recipe_inputs where recipe = p_recipe loop
     if vm_count(p_char, v_in.item) < v_in.n then raise exception 'materials'; end if;
@@ -934,11 +969,17 @@ end $$;
 create or replace function vm_loot(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_mob text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare v_s vm_mob_spawns; v_w vm_worlds; v_dead jsonb; v_r record; v_drops jsonb := '[]'::jsonb; v_until timestamptz; v_xp int; v_level int;
+        v_m vm_members;
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  perform vm_member(p_world, p_char);
+  v_m := vm_member(p_world, p_char);
   select * into v_s from vm_mob_spawns where key = p_mob;
   if not found then raise exception 'Unknown foe'; end if;
+  -- only someone in the foe's zone and near its ground can claim it (foes chase, so the reach is wide)
+  if v_m.x is null or v_m.zone is distinct from coalesce(v_s.zone, v_m.zone)
+     or (v_s.x is not null and vm_dist(v_m.x, v_m.z, v_s.x, v_s.z) > 70 + 9.5 * least(extract(epoch from now() - v_m.pos_at), 6)) then
+    raise exception 'That foe is not near you';
+  end if;
   select * into v_w from vm_worlds where id = p_world for update;
   perform vm_lock_char(p_char);
   v_dead := v_w.dead_mobs -> p_mob;
@@ -1160,9 +1201,10 @@ create or replace function vm_died(p_player uuid, p_secret text, p_world uuid, p
 language plpgsql security definer set search_path = public as $$
 begin
   perform vm_own_char(p_player, p_secret, p_char);
-  -- waking somewhere else is allowed: the next position is not checked against the last one.
+  perform vm_member(p_world, p_char);
+  -- you wake somewhere else: the next heartbeat must be at a wake point (see vm_heartbeat).
   -- Member before character (lock order).
-  update vm_members set x = null, z = null where world_id = p_world and character_id = p_char;
+  update vm_members set x = null, z = null where world_id = p_world and character_id = p_char and left_at is null;
   perform vm_lock_char(p_char);
   update vm_characters set deaths = deaths + 1, hp = max_hp, updated_at = now() where id = p_char;
   return vm_char_json(p_char);
@@ -1191,8 +1233,8 @@ begin
   return jsonb_build_object('items', vm_items_json(p_char), 'crowns', vm_count(p_char, 'coin_crown'), 'item', p_item, 'n', p_n, 'cost', v_cost);
 end $$;
 
--- A shop that buys pays 40% of an item's value (at least a crown each) for anything that is not
--- soulbound, a key or coin. It takes from the exact stack you hand over.
+-- A shop that buys pays 30% of an item's value (rounded down) for anything that is not
+-- soulbound, a key or coin, and worth at least a crown that way. It takes from the exact stack you hand over.
 create or replace function vm_sell(p_player uuid, p_secret text, p_world uuid, p_char uuid, p_shop text, p_uid text, p_n int) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare v_m vm_members; v_s vm_shops; v_i vm_items; v_d vm_item_defs; v_each int;
@@ -1209,7 +1251,8 @@ begin
   select * into v_d from vm_item_defs where id = v_i.def;
   if v_i.soulbound or v_d.soulbound or v_d.kind in ('key', 'coin') then raise exception 'They will not buy that'; end if;
   if p_n is null or p_n < 1 or p_n > v_i.count then raise exception 'You do not have that many'; end if;
-  v_each := greatest(1, floor(v_d.value * coalesce((vm_cfg('sell_rate') #>> '{}')::numeric, 0.4))::int);
+  v_each := floor(v_d.value * coalesce((vm_cfg('sell_rate') #>> '{}')::numeric, 0.3))::int;
+  if v_each < 1 then raise exception 'Not worth a crown'; end if;
   perform vm_take_item(p_char, v_i.def, p_n, p_uid);
   perform vm_add_item(p_char, 'coin_crown', v_each * p_n);
   return jsonb_build_object('items', vm_items_json(p_char), 'crowns', vm_count(p_char, 'coin_crown'), 'item', v_i.def, 'n', p_n, 'paid', v_each * p_n);

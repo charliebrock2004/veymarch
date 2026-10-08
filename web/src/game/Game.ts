@@ -3676,9 +3676,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         ? items
             .filter((s) => {
               const d = ITEMS[s.def];
-              return d && !d.soulbound && d.kind !== "key" && d.kind !== "coin" && !s.equipped && d.value > 0;
+              return d && !d.soulbound && d.kind !== "key" && d.kind !== "coin" && !s.equipped && Math.floor(d.value * SELL_RATE) >= 1;
             })
-            .map((s) => ({ uid: s.uid, id: s.def, name: item(s.def).name, count: s.count, price: Math.max(1, Math.floor(item(s.def).value * SELL_RATE)) }))
+            .map((s) => ({ uid: s.uid, id: s.def, name: item(s.def).name, count: s.count, price: Math.floor(item(s.def).value * SELL_RATE) }))
         : [],
     };
   }
