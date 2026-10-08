@@ -6,7 +6,7 @@
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
-    "test": "node --experimental-strip-types --test src/game/rules.test.ts src/game/systems/quests.test.ts server/rpc.test.mjs",
+    "test": "node --experimental-strip-types --test src/net/ident.test.ts src/game/rules.test.ts src/game/systems/quests.test.ts server/rpc.test.mjs",
     "seed": "node --experimental-strip-types server/gen-seed.mjs",
     "realm": "node --experimental-strip-types server/dev-server.mjs"
   },

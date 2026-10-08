@@ -8,7 +8,13 @@ anything odd with the time it happened; a screenshot helps.
 ## Before you start
 
 - Two phones (iPhone Safari or Android Chrome), both on the internet. Landscape, sound on.
-- The production link from the latest deployment (Vercel → project `veymarch` → Production).
+  Mobile data on one phone and Wi-Fi on the other is a good test; a school or office network
+  that blocks `*.supabase.co` will stop online play.
+- The production link: **https://veyrmarch.vercel.app** on both phones. Do not use a link with a
+  long hash in it (`veyrmarch-xxxxxxxx-charlie-brock.vercel.app`): those are single deployments,
+  protected by Vercel login, and a friend's phone gets a Vercel sign-in page instead of the game.
+- Close any old VEYRMARCH tab first, or pull down to reload: a tab left open from before a new
+  deployment is running the old build.
 - Optional: Add to Home Screen on iPhone for full screen (Share → Add to Home Screen).
 
 ## 1. Single Player (one phone, 5 minutes)
@@ -22,15 +28,42 @@ anything odd with the time it happened; a screenshot helps.
 
 Pass if: nothing freezes, the save survives, the music changes between the village and the forest.
 
-## 2. Create and join a world (two phones, 5 minutes)
+## 2. Create and join a world (two phones, 10 minutes)
 
-1. Phone A: **Play** → New Character → Create → Continue → **Create World**. A six-letter code shows.
-2. Phone B: **Play** → New Character → Create → Continue → **Join World** → type the code.
-3. Both: you see each other with the right clothes, a quiet nameplate, and smooth movement.
-4. Phone A locks the screen for 20 seconds, then unlocks. Enemies pause for a few seconds at
-   most, then carry on; nobody is thrown back in time.
+Phone A:
+1. Open https://veyrmarch.vercel.app. Tap **Play**.
+2. New Character → Create → **Continue** (or Continue on an existing character).
+3. **Create World** → Create. A six-letter code shows. Write it down.
+4. **Enter World**. You are in Hearthfen; the party list shows only you.
 
-Pass if: both are in the same world, each sees the other move, the code works first time.
+Phone B:
+1. Open https://veyrmarch.vercel.app. Tap **Play**.
+2. New Character → Create → **Continue**.
+3. **Join World** → type the code (lower case and spaces are fine) → **Join**.
+4. "Looking for that world…" then you are in the same place as Phone A.
+
+Then check, writing pass or fail for each:
+
+- [ ] Both are in the same world (same code in Pause, both names in the party list).
+- [ ] Phone A sees Phone B's character, with a nameplate and the right clothes.
+- [ ] Phone B sees Phone A's character.
+- [ ] Walking on one phone moves the character on the other within about a second.
+- [ ] Combat: hit a wolf together. Both see its health drop and it dies once; whoever loots
+      gets the loot once.
+- [ ] World state: one player opens a door or gathers a node; the other sees it changed.
+- [ ] Disconnect: Phone B locks its screen for 30 seconds. Phone A sees B stop and then vanish
+      within about half a minute, and keeps playing; enemies keep moving.
+- [ ] Reconnect: Phone B unlocks. Within a few seconds B sees A again and A sees B, with no
+      second copy of B standing where B was.
+- [ ] Leave and rejoin: Phone B Pause → Leave, then Play → Continue → the world is in the Worlds
+      list (no code needed) → Enter. Only one B appears on Phone A.
+- [ ] Wrong code: Phone B types a code that does not exist. It says "No world has that code"
+      and stays on the code screen; nothing spins forever.
+- [ ] No screen ever spins for more than about 20 seconds: a stalled network shows "The realm is
+      not answering" with Try again.
+
+If Phone B never gets past the title or "Reaching the realm…": note the phone model, iOS or
+Android version and browser, and whether the address bar shows exactly `veyrmarch.vercel.app`.
 
 ## 3. Fight together (10 minutes)
 

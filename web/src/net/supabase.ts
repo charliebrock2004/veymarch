@@ -1,9 +1,21 @@
 import { createClient, type RealtimeChannel } from "@supabase/supabase-js";
 import { RealmError, type Backend, type Channel, type ChannelStatus, type PresenceMeta } from "./backend";
 
+/** How long a realm call may take before the player is told the realm is not answering. */
+const CALL_MS = 20_000;
+
+/** fetch with a deadline: a phone on a stalled network otherwise waits on a spinner forever. */
+const timedFetch: typeof fetch = (input, init) => {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), CALL_MS);
+  init?.signal?.addEventListener("abort", () => ctl.abort());
+  return fetch(input, { ...init, signal: ctl.signal }).finally(() => clearTimeout(timer));
+};
+
 export function supabaseBackend(url: string, key: string): Backend {
   const sb = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch: timedFetch },
     realtime: { params: { eventsPerSecond: 25 } },
   });
   return {

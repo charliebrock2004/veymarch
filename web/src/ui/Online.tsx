@@ -54,7 +54,7 @@ export async function copyText(text: string) {
 
 const errText = (e: unknown) => {
   const m = String((e as Error)?.message ?? e);
-  if (/Failed to fetch|NetworkError|Load failed|not running/i.test(m)) return "The realm is not answering. Check your connection and try again.";
+  if (/Failed to fetch|NetworkError|Load failed|not running|abort/i.test(m)) return "The realm is not answering. Check your connection and try again.";
   return m;
 };
 

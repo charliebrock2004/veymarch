@@ -1,4 +1,5 @@
 import { RealmError, getBackend, type Backend } from "./backend";
+import { ensureIdent, readIdent, writeIdent, type Ident, type KeyStore } from "./ident";
 
 /**
  * Typed calls to the realm functions (web/server/schema.sql). The player is identified by a
@@ -87,41 +88,22 @@ export type Profile = { characters: CharacterJson[]; worlds: WorldCard[] };
 
 export type HeartbeatJson = { ok: boolean; hour: number; day: number; flags: Record<string, boolean>; boss: Record<string, BossJson | undefined>; now: string; online: number };
 
-type Ident = { id: string; secret: string };
 const KEY = "veyrmarch.player";
 
-function readIdent(key: string): Ident | null {
+function storage(): KeyStore | null {
   try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const v = JSON.parse(raw) as Ident;
-    return v.id && v.secret ? v : null;
+    return localStorage;
   } catch {
     return null;
   }
 }
 
-function writeIdent(key: string, v: Ident) {
-  try {
-    localStorage.setItem(key, JSON.stringify(v));
-  } catch {
-    /* private mode: the key lives for this session only */
-  }
-}
-
-function randomSecret() {
-  const b = new Uint8Array(32);
-  crypto.getRandomValues(b);
-  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-}
-
 export class Realm {
   private ident: Ident | null;
-  private registering: Promise<Ident> | null = null;
 
   /** `key` is where this device keeps its player key: online and single player use separate ones. */
   constructor(public backend: Backend, private key = KEY) {
-    this.ident = readIdent(key);
+    this.ident = readIdent(storage(), key);
   }
 
   static async open(): Promise<Realm | null> {
@@ -150,7 +132,7 @@ export class Realm {
 
   /** The key this device used before the last switch (kept so a switch can be undone). */
   get previousKey() {
-    const v = readIdent(this.key + ".prev");
+    const v = readIdent(storage(), this.key + ".prev");
     return v ? `VM1.${v.id}.${v.secret}` : "";
   }
 
@@ -161,23 +143,16 @@ export class Realm {
     if (this.ident && this.ident.id === next.id && this.ident.secret === next.secret) return;
     await this.backend.rpc("vm_profile", { p_player: next.id, p_secret: next.secret });
     // the old key exists only on this device (the server keeps a hash): keep it to switch back
-    if (this.ident) writeIdent(this.key + ".prev", this.ident);
+    if (this.ident) writeIdent(storage(), this.key + ".prev", this.ident);
     this.ident = next;
-    writeIdent(this.key, next);
+    writeIdent(storage(), this.key, next);
   }
 
-  private async me(): Promise<Ident> {
-    if (this.ident) return this.ident;
-    if (!this.registering)
-      this.registering = (async () => {
-        const secret = randomSecret();
-        const id = await this.backend.rpc<string>("vm_register", { p_secret: secret });
-        const v = { id, secret };
-        this.ident = v;
-        writeIdent(this.key, v);
-        return v;
-      })().finally(() => (this.registering = null));
-    return this.registering;
+  /** This device's key, registering it once (shared with every other Realm on the page). */
+  private async me(stale?: Ident): Promise<Ident> {
+    if (this.ident && !stale) return this.ident;
+    this.ident = await ensureIdent(storage(), this.key, (secret) => this.backend.rpc<string>("vm_register", { p_secret: secret }), stale);
+    return this.ident;
   }
 
   /** Every authenticated call. A key the server no longer knows is replaced once. */
@@ -187,8 +162,7 @@ export class Realm {
       return await this.backend.rpc<T>(fn, { p_player: me.id, p_secret: me.secret, ...args });
     } catch (e) {
       if (e instanceof RealmError && e.code === "28000" && fn === "vm_profile") {
-        this.ident = null;
-        const again = await this.me();
+        const again = await this.me(me);
         return this.backend.rpc<T>(fn, { p_player: again.id, p_secret: again.secret, ...args });
       }
       throw e;
