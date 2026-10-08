@@ -733,7 +733,8 @@ export function buildKeep(env: ZoneEnv): ZoneBuild {
     const uv = disc.getAttribute("uv");
     const pp = disc.getAttribute("position");
     for (let i = 0; i < uv.count; i++) uv.setXY(i, pp.getX(i) / 3, pp.getZ(i) / 3);
-    put(ctx, "flagstone", disc, F(A.x, A.z), 0, 0.0, 0, 0, 0, 0, 0x4a4c52, false);
+    // a hair below y = 0 so the throne room's floor wins where the disc runs under it (no z-fight)
+    put(ctx, "flagstone", disc, F(A.x, A.z), 0, -0.015, 0, 0, 0, 0, 0x4a4c52, false);
     // the drum of the tower falling away below, and the edge of the floor
     const drum = new THREE.CylinderGeometry(19.0, 21.0, 44, 40, 4, true);
     put(ctx, "stoneDark", drum, F(A.x, A.z), 0, -22.2, 0, 0, 0, 0, 0x2e2e34);

@@ -117,7 +117,7 @@ export const MIRE_NPCS: NpcDef[] = [
     after: { flag: "finlay", lines: ["The rain's stopped over the Keep. First time I can remember. Doesn't feel right. Feels better."] },
   },
   {
-    id: "nell", name: "Nell Abb", role: "Widow",
+    id: "nell_abb", name: "Nell Abb", role: "Widow",
     look: { skin: 0xe2c8b0, hair: 0x9a9286, hairStyle: "hood", shirt: 0x3a3a34, coat: 0x1e201c, coatLong: true, trousers: 0x2a2620, boots: 0x1c1814, frame: 0.86, height: 1.6 },
     stops: [
       S(-37.6, 54.6, 14, "none", look(-37.6, 54.6, -36, 52.3)),

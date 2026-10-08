@@ -1154,7 +1154,9 @@ export class Mob {
     g.position.set(this.x, this.state === "dead" && this.deadT > 3.5 ? g.position.y : this.y, this.z);
     g.rotation.y = this.yaw;
     const t = this.env.time;
-    const stride = this.kind === "wolf" || this.kind === "deer" ? 1.6 : this.kind === "mouse" ? 0.5 : 1.1;
+    const stride =
+      this.kind === "wolf" || this.kind === "deer" || this.kind === "hound" || this.kind === "blackwolf" || this.kind === "kennel_hound" ? 1.6
+      : this.kind === "mouse" ? 0.5 : this.kind === "croc" || this.kind === "boar" ? 0.9 : 1.1;
     this.phase += (this.speed / stride) * dt * Math.PI;
     if (this.mouse) {
       this.mouse.position.y = Math.abs(Math.sin(this.phase * 2)) * 0.05;
@@ -1166,23 +1168,33 @@ export class Mob {
     }
     const poser = this.poser!;
     const k = this.atk && this.state === "tell" ? 1 - Math.max(0, this.t) / this.atk.tell : this.atk && this.state === "active" ? 1 - Math.max(0, this.t) / this.atk.active : 0;
-    if (this.kind === "wolf" || this.kind === "deer") {
+    if (QUADS.has(this.kind)) {
       let action: QuadAction = "none";
       let at = 0;
+      const tailSwipe = this.kind === "croc" && this.atk?.hitPose === "tail";
       if (this.state === "tell") {
         action = "crouch";
         at = k;
+        // a croc coils before its tail swipe: the body bends away from the target
+        if (tailSwipe) g.rotation.y = this.yaw - 0.5 * Math.sin(k * Math.PI * 0.5);
       } else if (this.state === "active") {
-        action = this.atk?.hitPose === "pounce" ? "pounce" : "bite";
+        if (tailSwipe) {
+          // the tail swipe: one full turn on the spot, the tail sweeping the circle
+          action = "none";
+          g.rotation.y = this.yaw - 0.5 + (Math.PI * 2 + 0.5) * Math.min(1, k);
+        } else action = this.atk?.hitPose === "pounce" ? "pounce" : "bite";
         at = k;
       } else if (this.state === "stagger") {
         action = "hurt";
-        at = 1 - this.t / 0.7;
+        at = Math.min(1, 1 - this.t / 0.7);
       } else if (this.state === "dead") {
         action = "dead";
         at = this.deadT;
       } else if (this.kind === "deer" && this.speed < 0.3 && Math.sin(t * 0.3 + this.homeX) > 0.2) action = "graze";
-      poseQuad(poser, { t, move: this.speed / (this.kind === "deer" ? 2.4 : 2.8), phase: this.phase, action, at }, dt);
+      else if (this.kind === "boar" && this.speed < 0.3 && Math.sin(t * 0.4 + this.homeZ) > 0.3) action = "graze";
+      else if (this.cfg.family === "hound" && this.state === "idle" && this.speed < 0.3 && Math.sin(t * 0.21 + this.homeX * 1.7) > 0.93) action = "howl";
+      const gait = this.kind === "deer" ? 2.4 : this.kind === "croc" ? 1.6 : this.kind === "boar" ? 2.2 : 2.8;
+      poseQuad(poser, { t, move: this.speed / gait, phase: this.phase, action, at }, dt);
     } else if (this.kind === "horse") {
       const rock = this.state === "tell" ? 1 : this.state === "recover" ? 0.15 : this.speed > 0.2 ? 0.4 : 0.2;
       poseHorse(poser, { t: t * (this.state === "tell" ? 2 : 1), rock, charge: this.state === "active", dead: this.state === "dead" ? Math.min(1, this.deadT) : 0 }, dt);
@@ -1202,7 +1214,12 @@ export class Mob {
         action = "dead";
         at = this.deadT;
       } else if (this.kind === "soldier") action = "march";
-      poseHuman(poser, { t, move: this.speed / 2.2, phase: this.phase, action, at, block: false, armed: true }, dt);
+      const cfg = this.cfg;
+      // shield bearers keep the guard up while they close in or wait out a cooldown
+      const block = !!cfg.guard && (this.state === "chase" || this.state === "idle" && this.aggro);
+      poseHuman(poser, { t, move: this.speed / (this.kind === "drowned" ? 1.6 : 2.2), phase: this.phase, action, at, block, armed: !cfg.unarmed }, dt);
+      // the drowned shamble: a slow side-to-side lurch of the whole body (set absolutely each frame)
+      if (this.kind === "drowned") g.rotation.z = this.state === "dead" ? 0 : Math.sin(this.phase * 0.5 + t * 0.9 + this.homeX) * 0.09;
       const key = this.rig.sockets.back?.getObjectByName("key");
       if (key) key.rotation.z += dt * (this.state === "dead" ? 0 : this.state === "recover" ? 1 : 5);
     }

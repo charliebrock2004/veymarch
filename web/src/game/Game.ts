@@ -1785,7 +1785,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       combatT = 3;
       return d;
     }
-    const dealt = m.takeHit(dmg, P.x, P.z, heavy, fire);
+    const dealt = m.takeHit(dmg, P.x, P.z, heavy, fire, P);
     // Smacko's charged hits and a mace's heavy blows keep foes reeling
     const w = mainWeapon();
     if (heavy && m.alive && (w.id === "wpn_smacko" || w.family === "mace")) m.stagger(w.family === "mace" ? 1.4 : 1.1);
@@ -3376,7 +3376,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         if (!m || !m.alive) return;
         // only the client that runs the world applies blows (a hidden tab that used to run it must not)
         if (!m.puppet && o.room.isRunner) {
-          m.takeHit(Math.min(80, Math.max(0, num(ev.d))), num(ev.x, m.x), num(ev.z, m.z), !!ev.hv, !!ev.f);
+          m.takeHit(Math.min(80, Math.max(0, num(ev.d))), num(ev.x, m.x), num(ev.z, m.z), !!ev.hv, !!ev.f, o.remotes.get(from)?.state);
           if (!m.alive) o.room.event({ k: "kill", m: m.key, to: from }, true);
         } else m.flash = 0.12;
         return;
