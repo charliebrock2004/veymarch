@@ -19,6 +19,9 @@
 - Item modifiers (Keen, Heavy, Balanced, Sturdy, of the Fleet): sometimes on crafted gear, set by the enchanter.
 - Server hardening: loot and gathering need you near; waking after a fall only at the bedroll, a known shrine or a dungeon's front door; no buy-craft-sell loops; old-save imports limited; no double soulbound crafts.
 
+- Between quests the HUD no longer shows the old slice's "Walk the wheat · Harrenvale road, to Castellan Voss" (it pointed outside Harrenvale and never cleared). It now follows the quests: the next step of the main road, a quest giver to speak to with an arrow (through the doors between zones), or the level the next work needs and who gives it. The Green Gate's open line says to walk east to Harrenvale.
+- Online play: one player key per phone (two screens could register a phone twice), realm calls give up after 20 s instead of spinning forever, and a tab left open across a deployment reloads once instead of hanging.
+
 ### Realms multiplayer (web)
 
 - Create a world, get a six-letter code, share it; friends join with their own characters. Up to four players. Worlds and characters persist on the server (Supabase Postgres); leaving or closing a phone does not end the world.
