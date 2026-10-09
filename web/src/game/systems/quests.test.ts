@@ -8,7 +8,7 @@ import { SHOPS } from "../data/shops.ts";
 import { BOSSES, bossHp } from "../data/bosses.ts";
 import { LEVEL_XP, levelOf, MOB_XP } from "../data/progression.ts";
 import { RECIPES } from "../data/items.ts";
-import { autoStarts, aheadDone, journal, looksDone, npcBusiness, readyToStep, tracked, type QuestBook, type QuestCtx } from "./quests.ts";
+import { autoStarts, aheadDone, journal, looksDone, nextWork, npcBusiness, readyToStep, tracked, type QuestBook, type QuestCtx } from "./quests.ts";
 
 const ctx = (o: Partial<QuestCtx> = {}): QuestCtx => ({
   level: 1, zone: "over", x: 0, z: 0, count: () => 0, charFlag: () => false, worldFlag: () => false, kills: () => 0, boss: () => false, ...o,
@@ -94,4 +94,41 @@ test("levels and boss health scale sensibly", () => {
   assert.equal(bossHp(BOSSES.cookie, 1), 280);
   assert.equal(bossHp(BOSSES.cookie, 4), Math.round(280 * 2.8));
   assert.ok(bossHp(BOSSES.cookie, 4) < 280 * 4, "not four times");
+});
+
+// Between quests the HUD used to fall back to the old slice's "Walk the wheat · Harrenvale road,
+// to Castellan Voss", pointing outside Harrenvale and waiting on a flag nothing sets.
+const done = (...ids: string[]): QuestBook => Object.fromEntries(ids.map((id) => [id, { s: 9, b: 0, done: true }]));
+const homes: Record<string, string> = { tanic: "over", sera: "over", mara: "over", penn: "over", voss: "kingdom", elspeth: "kingdom", holt: "kingdom", odo: "kingdom", aldo: "kingdom", maree: "kingdom", brannoc: "kingdom", phem: "mire", liss: "mire" };
+const home = (id: string) => (homes[id] ?? null) as QuestCtx["zone"] | null;
+
+test("between quests: the Green Gate starting by itself shows its first open step", () => {
+  const w = nextWork(done("q_bell", "q_cookie"), ctx({ worldFlag: (f) => f === "gate" }), home);
+  assert.equal(w?.kind, "auto");
+  assert.equal(w?.quest.id, "q_gate");
+  assert.equal(w?.kind === "auto" && w.step.text, "Walk the Kingsroad to Harrenvale");
+});
+
+test("between quests: after the Green Gate, the Castellan's work in Harrenvale comes first", () => {
+  const w = nextWork(done("q_bell", "q_cookie", "q_gate"), ctx({ level: 4, zone: "kingdom" }), home);
+  assert.equal(w?.kind, "talk");
+  assert.equal(w?.quest.giver, "voss");
+});
+
+test("between quests: too low for anything left, it names the nearest level and who gives the work", () => {
+  const book = done("q_bell", "q_cookie", "q_gate", "q_wolves", "q_mara", "q_penn");
+  const w = nextWork(book, ctx({ level: 3, zone: "kingdom" }), home);
+  assert.equal(w?.kind, "level");
+  assert.equal(w?.quest.level, 4);
+  assert.equal(w?.quest.id, "q_oath");
+});
+
+test("between quests: Hearthfen's side work is offered when nothing else can be taken", () => {
+  const w = nextWork(done("q_bell", "q_cookie", "q_gate"), ctx({ level: 3, zone: "kingdom" }), home);
+  assert.equal(w?.kind, "talk");
+  assert.equal(home(w!.quest.giver), "over");
+});
+
+test("between quests: nothing left, nothing shown", () => {
+  assert.equal(nextWork(done(...QUESTS.map((q) => q.id)), ctx({ level: 20 }), home), null);
 });

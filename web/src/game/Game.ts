@@ -5,7 +5,7 @@ import { BOSSES, type BossDef } from "./data/bosses.ts";
 import { LEVEL_XP, armourCut, levelOf, statsFor } from "./data/progression.ts";
 import { QUEST_BY_ID, type QuestStep } from "./data/quests.ts";
 import { SELL_RATE, SHOPS } from "./data/shops.ts";
-import { autoStarts, journal, npcBusiness, readyToStep, tracked, type JournalEntry, type QuestBook, type QuestCtx } from "./systems/quests.ts";
+import { autoStarts, journal, nextWork, npcBusiness, readyToStep, tracked, type JournalEntry, type QuestBook, type QuestCtx } from "./systems/quests.ts";
 import { addItem, canMine, consume, countOf, equip, equipped, gateOpen, grantUniques, item, recipeHint, strikeDamage, tryCraft, type Stack } from "./rules";
 import { Audio } from "./engine/audio";
 import type { ThemeId } from "./engine/music";
@@ -28,13 +28,18 @@ import { BOSS_FACTORIES, type Boss, type BossEnv, type Hazard } from "./play/bos
 import "./play/bosses/index";
 import type { Env, HurtOpts, PlayerState } from "./play/env";
 import { MOBS, Mob, type MobKind, type MobSnap } from "./play/mobs";
-import { NPCS, Npc, VOSS_NPCS } from "./play/npcs";
+import { NPCS, Npc, VOSS_NPCS, type NpcDef } from "./play/npcs";
+import { KINGDOM_NPCS } from "./world/zones/kingdom_npcs";
+import { MIRE_NPCS } from "./world/zones/mire_npcs";
 import { RemotePlayer, type NetPlayer } from "./play/remote";
 import { weaponModel } from "./play/weapons";
 import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Realm, StackJson } from "../net/realm";
 import { Room, type Bundle, type Ev } from "../net/room";
 
 // ------------------------------------------------------------------ public types
+
+/** Every quest giver's name and home zone, for pointing at one whose zone is not built yet. */
+const NPC_HOMES = new Map<string, NpcDef>([...NPCS, ...KINGDOM_NPCS, ...MIRE_NPCS].map((d) => [d.id, d]));
 
 export type Look = { body: 0 | 1 | 2; skin: number; hair: 0 | 1 | 2 | 3; hairColor: number; coat: number };
 export const SKINS = [0xf0d8c0, 0xe2c0a0, 0xc8a080, 0xa07858, 0x6e4a32];
@@ -781,9 +786,19 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   /** Where a quest step points: its NPC, place, foe, boss arena or the door toward its zone. */
   function stepTarget(step: QuestStep): THREE.Vector3 | null {
+    // the castle's own puzzle points at its pieces; the Green Gate is in the overworld
+    if (step.k === "flag" && step.flag === "slab" && P.zone === "castle" && dun) return dun.weight.position.clone();
+    if (step.k === "flag" && step.flag === "nursery" && P.zone === "castle" && dun) {
+      const horse = mobs.find((m) => m.kind === "horse" && m.alive);
+      return horse ? new THREE.Vector3(horse.x, 0, horse.z) : dun.anchors.nurseryDoor;
+    }
+    if (step.k === "flag" && step.flag === "gate" && world) return P.zone === "over" ? world.anchors.gate : wayTo("over");
     if (step.npc) {
       const n = npcs.find((x) => x.def.id === step.npc);
       if (n) return n.zone === P.zone ? new THREE.Vector3(n.x, 0, n.z) : wayTo(n.zone);
+      // their zone is not built yet: the door toward it
+      const home = NPC_HOMES.get(step.npc);
+      if (home) return wayTo(home.zone ?? "over");
     }
     if (step.zone) {
       if (step.zone !== P.zone) return wayTo(step.zone);
@@ -825,17 +840,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const st = quests[q.id];
       const step = q.steps[st.s];
       if (step) {
-        // the castle's own puzzle points at its pieces
-        if (step.k === "flag" && step.flag === "slab" && P.zone === "castle") return { text: step.text, sub: step.sub, at: dun.weight.position.clone() };
-        if (step.k === "flag" && step.flag === "nursery" && P.zone === "castle") {
-          const horse = mobs.find((m) => m.kind === "horse" && m.alive);
-          return { text: step.text, sub: step.sub, at: horse ? new THREE.Vector3(horse.x, 0, horse.z) : dun.anchors.nurseryDoor };
-        }
-        if (step.k === "flag" && step.flag === "gate") return { text: step.text, sub: step.sub, at: P.zone === "over" ? world.anchors.gate : wayTo("over") };
         const prog = step.k === "kill" ? ` · ${Math.min(step.n ?? 1, Math.max(0, (killCounts[step.kind!] ?? 0) - st.b))}/${step.n ?? 1}` : (step.k === "have" || step.k === "give") && (step.n ?? 1) > 1 ? ` · ${Math.min(step.n ?? 1, step.item!.split("|").reduce((n, id) => Math.max(n, countOf(items, id)), 0))}/${step.n}` : "";
         return { text: step.text, sub: step.sub + prog, at: stepTarget(step) };
       }
     }
+    // between quests (the last one just ended, or the next is still on its way from the server)
+    if (online) return betweenQuests();
     const a = world.anchors;
     const tanic = npcs.find((n) => n.def.id === "tanic");
     const tanicAt = tanic ? new THREE.Vector3(tanic.x, 0, tanic.z) : a.tanicDoor;
@@ -870,8 +880,31 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     if (P.zone === "castle") return { text: "Leave the castle", sub: "The courtyard gate is open", at: dun.anchors.exitGate };
     if (!flags.gate) return { text: "Take the Core to the Green Gate", sub: "East of Hearthfen, over the Broken Kingsbridge", at: a.gate };
-    if (!flags.voss) return { text: "Walk the wheat", sub: "Harrenvale road, to Castellan Voss", at: a.voss };
-    return { text: "The Kingdom waits", sub: "End of the slice. Cookie's Pickaxe breaks the iron by the gate.", at: null };
+    return { text: "", sub: "", at: null };
+  }
+
+  /** Where a quest giver lives and stands now (loaded zones), or just their home zone. */
+  function giverAt(id: string): { name: string; zone: ZoneId; at: THREE.Vector3 | null } | null {
+    const n = npcs.find((x) => x.def.id === id);
+    if (n) return { name: n.def.name, zone: n.zone, at: n.zone === P.zone ? new THREE.Vector3(n.x, 0, n.z) : wayTo(n.zone) };
+    const d = NPC_HOMES.get(id);
+    return d ? { name: d.name, zone: d.zone ?? "over", at: wayTo(d.zone ?? "over") } : null;
+  }
+
+  /**
+   * No quest is live: point at the next work the quests offer. The road's next quest starts by
+   * itself (show its first open step), a giver has work (go and speak to them), or the next
+   * work needs a higher level (say which, and who gives it).
+   */
+  function betweenQuests(): { text: string; sub: string; at: THREE.Vector3 | null } {
+    const w = nextWork(quests, questCtx(), (id) => giverAt(id)?.zone ?? null);
+    if (!w) return { text: "", sub: "", at: null };
+    if (w.kind === "auto") return { text: w.step.text, sub: w.step.sub, at: stepTarget(w.step) };
+    const g = giverAt(w.quest.giver);
+    const who = g?.name ?? "the quest giver";
+    const where = g ? ZONES[g.zone].name : "";
+    if (w.kind === "talk") return { text: `Speak to ${who}`, sub: `${where ? where + " · " : ""}they have work for you`, at: g?.at ?? null };
+    return { text: `Reach level ${w.quest.level}`, sub: `Then ${who} has work for you · foes on the roads give experience`, at: null };
   }
 
   // ------------------------------------------------------------ hud
@@ -2569,7 +2602,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         flags.gate = true;
         gateOpening = false;
         audio.quest();
-        say("The Green Gate is open. Walk the wheat.");
+        say("The Green Gate is open. Walk the wheat east to Harrenvale.");
       }
     } else if (flags.gate) {
       world.gate.sealMat.uniforms.uOpen.value = 1.3;
@@ -4070,6 +4103,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       (P as { god?: boolean }).god = on;
     },
     prompt: () => prompt,
+    objective: () => {
+      const s = snapshot();
+      return { text: s.objective, sub: s.objectiveSub, bearing: s.bearing, dist: s.dist, quests: { ...quests }, level };
+    },
     breakdown: () => {
       const out: Record<string, number> = {};
       const frustum = new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));

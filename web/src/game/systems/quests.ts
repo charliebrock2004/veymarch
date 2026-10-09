@@ -113,6 +113,38 @@ export function tracked(book: QuestBook): QuestDef | null {
   return null;
 }
 
+/**
+ * What to do when no quest is live: the main road's next quest that starts by itself (its
+ * first step still open), else a quest giver worth seeing now, else the level the next one
+ * needs.
+ */
+export type NextWork =
+  | { kind: "auto"; quest: QuestDef; step: QuestStep }
+  | { kind: "talk"; quest: QuestDef }
+  | { kind: "level"; quest: QuestDef };
+
+export function nextWork(book: QuestBook, ctx: QuestCtx, giverZone: (npc: string) => ZoneId | null = () => null): NextWork | null {
+  const open = QUESTS.filter((q) => !book[q.id] && q.requires.every((r) => isDone(book, r)));
+  if (!open.length) return null;
+  const here = (q: QuestDef) => giverZone(q.giver) === ctx.zone;
+  // work you can take now: the main road first, then whoever is nearby; otherwise the lowest level away
+  const rank = (q: QuestDef) => (ctx.level >= q.level ? [0, Number(!q.main), Number(!here(q)), q.level] : [1, q.level, Number(!q.main), Number(!here(q))]);
+  const sorted = open
+    .map((q, i) => ({ q, r: [...rank(q), i] }))
+    .sort((a, b) => {
+      for (let k = 0; k < a.r.length; k++) if (a.r[k] !== b.r[k]) return a.r[k] - b.r[k];
+      return 0;
+    });
+  const q = sorted[0].q;
+  if (ctx.level < q.level) return { kind: "level", quest: q };
+  if (q.main && q.offer.length === 0) {
+    const fresh: QuestState = { s: 0, b: 0, done: false };
+    const step = q.steps.find((s) => !looksDone(s, fresh, ctx)) ?? q.steps[q.steps.length - 1];
+    return { kind: "auto", quest: q, step };
+  }
+  return { kind: "talk", quest: q };
+}
+
 export type JournalEntry = { id: string; name: string; main: boolean; done: boolean; step: string; sub: string; progress: string; stepN: number; steps: number };
 
 export function journal(book: QuestBook, ctx: QuestCtx): JournalEntry[] {
