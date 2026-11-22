@@ -630,6 +630,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const remarked: Record<string, string> = {};
   /** villagers who have already passed on a rumour this session */
   const gossiped = new Set<string>();
+  /** the cold open: a brand-new solo character meets a dead knight on the Kingsroad, loses, and wakes in Hearthfen */
+  let cold: { mob: Mob; t: number; x: number; z: number } | null = null;
+  let coldDue = false;
   const placeFound = (id: string) => codex.f.includes(id) || cacheFlags.has(id) || !!(flags as Record<string, boolean>)[id];
   const camPos = new THREE.Vector3(0, 8, -40);
   const camTgt = new THREE.Vector3();
@@ -2344,7 +2347,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       startAction("hurt", 0.35, 2);
       P.holding = false;
     }
-    if (P.hp <= 0) die();
+    if (P.hp <= 0) {
+      if (cold) endCold();
+      else die();
+    }
     push();
     return true;
   }
@@ -2366,6 +2372,56 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         if (m.state !== "dead") m.state = "return";
       }
     push();
+  }
+
+  function startCold() {
+    coldDue = false;
+    if (!world || !("undead_knight" in MOBS)) return;
+    const g = world.anchors.gate;
+    const at = world.col.resolve(g.x - 12, g.z, 0.5);
+    P.x = at.x;
+    P.z = at.z;
+    P.yaw = Math.PI / 2;
+    P.y = groundAt(P.x, P.z);
+    hour = 23.5;
+    const k = world.col.resolve(g.x - 4, g.z, 0.7);
+    const m = new Mob("undead_knight", k.x, k.z, "over", env, true);
+    m.key = "cold_open";
+    m.hp = 1e6;
+    m.aggro = true;
+    mobs.push(m);
+    cold = { mob: m, t: 0, x: P.x, z: P.z };
+    camYaw = P.yaw;
+    snapCam();
+    showBanner("THE KINGSROAD, AT NIGHT", "Something dead is standing on the bridge.");
+  }
+
+  /** However the cold open ends (struck down, run off, or time), you wake in your bed and nothing is counted against you. */
+  function endCold() {
+    const c = cold;
+    if (!c) return;
+    cold = null;
+    P.hp = 1;
+    P.iframe = 5;
+    fadeThen(() => {
+      const i = mobs.indexOf(c.mob);
+      if (i >= 0) mobs.splice(i, 1);
+      c.mob.remove();
+      const bed = world!.anchors.bed;
+      P.x = bed.x;
+      P.z = bed.z + 0.6;
+      P.yaw = 0.4;
+      P.hp = P.maxHp;
+      P.stam = P.maxStam;
+      P.iframe = 0;
+      P.action = "none";
+      P.kx = P.kz = 0;
+      hour = 7.5;
+      camYaw = P.yaw;
+      snapCam();
+      mode = "play";
+      showBanner("THE MARCH MARKS YOU", "You should have died on that bridge. You woke in Hearthfen instead.");
+    });
   }
 
   function wake() {
@@ -3314,6 +3370,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       // a shared world keeps running behind menus; your own single player world waits for you
       const shared = online && !online.realm.solo;
       const sim = shared ? mode !== "title" && mode !== "create" && mode !== "loading" : mode === "play" || mode === "dead";
+      if (cold && mode === "play") {
+        cold.t += dt;
+        cold.mob.aggro = true;
+        if (cold.t > 45 || Math.hypot(P.x - cold.x, P.z - cold.z) > 30 || P.zone !== "over") endCold();
+      }
       if (sim) {
         hour = (hour + dt / 90) % 24;
         playTime += rdt;
@@ -4715,6 +4776,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         }
       } else {
         // first time in this world: wake by the bell, a step apart from whoever is already here
+        coldDue = realm.solo && c.level <= 1 && !flags.talked && codex.falls === 0 && Object.keys(codex.k).length === 0;
         const others = w.members.filter((m) => m.online && m.character_id !== c.id).length;
         const a = others * 2.1 + 0.6;
         P.x = SPAWN.x + (others ? Math.cos(a) * 2.2 : 0);
@@ -4742,6 +4804,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       buildPlayer();
       fadeThen(() => {
         beginPlay();
+        if (coldDue) startCold();
         placeAt = performance.now();
         setTimeout(() => say(`${w.name} · Day ${w.day}. Code ${w.code}.`), 1200);
       });
