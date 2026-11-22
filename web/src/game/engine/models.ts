@@ -126,6 +126,37 @@ export class ModelActor {
     return this;
   }
 
+  /** A gold crown on the skull, with a soft glow. */
+  crown(color: number, glow: number) {
+    let skull: THREE.Object3D | undefined;
+    this.root.traverse((o) => {
+      if (/_Head$/.test(o.name)) skull = o;
+    });
+    if (!skull || !this.head) return this;
+    this.root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(skull);
+    const c = box.getCenter(new THREE.Vector3());
+    const d = box.getSize(new THREE.Vector3());
+    const r = Math.max(d.x, d.z) * 0.4;
+    const g = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ color, emissive: glow, emissiveIntensity: 0.6, metalness: 0.3, roughness: 0.4 });
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.94, d.y * 0.16, 12, 1, true), mat);
+    mat.side = THREE.DoubleSide;
+    g.add(band);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(r * 0.16, d.y * (i % 2 ? 0.22 : 0.36), 4), mat);
+      spike.position.set(Math.sin(a) * r, d.y * (i % 2 ? 0.17 : 0.24), Math.cos(a) * r);
+      g.add(spike);
+    }
+    g.position.set(c.x, c.y + d.y * 0.06, c.z);
+    g.traverse((o) => (o.castShadow = true));
+    this.root.add(g);
+    g.updateMatrixWorld(true);
+    this.head.attach(g);
+    return this;
+  }
+
   /** Fit the model's bind-pose height to `h` metres. */
   fit(h: number) {
     this.root.scale.setScalar(1);
