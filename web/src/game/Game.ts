@@ -12,6 +12,7 @@ import { Audio } from "./engine/audio";
 import type { ThemeId } from "./engine/music";
 import { armourCode, armourLook } from "./play/gear";
 import { Beam, DecalPool, Flashes, Trail } from "./engine/fx";
+import { ADV, ADV_HEAD, ADV_HEIGHT, ModelActor, loadAdventurer, poseAdventurer } from "./engine/models";
 import { installHeightFog, shared } from "./engine/kit";
 import { makeMaterials } from "./engine/materials";
 import { Particles, buildGlows } from "./engine/particles";
@@ -566,6 +567,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   };
   let playerRig: Rig | null = null;
   let playerPoser: Poser | null = null;
+  let playerActor: ModelActor | null = null;
   let heldMain: THREE.Object3D | null = null;
   // blade base and tip in the grip socket's space, for the swing trail
   const bladeBase = new THREE.Vector3(), bladeTip = new THREE.Vector3();
@@ -584,7 +586,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const _tb = new THREE.Vector3(), _tt = new THREE.Vector3();
   function updateTrail(dt: number) {
     const cutting = heldMain && (P.action.startsWith("light") || P.action === "heavy") && P.at > P.dur * P.hitAt * 0.45 && P.at < P.dur * Math.min(0.95, P.hitAt + 0.3);
-    const grip = playerRig?.sockets.gripR;
+    const grip = playerActor?.handR ?? playerRig?.sockets.gripR;
     if (!cutting || !grip) return swingTrail.update(dt);
     grip.updateWorldMatrix(true, false);
     const heavy = P.action === "heavy";
@@ -770,7 +772,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (w.id !== "wpn_fists") {
       heldMain = weaponModel(w.id);
       measureBlade(heldMain);
-      playerRig.sockets.gripR.add(heldMain);
+      if (playerActor?.handR) {
+        const k = 1 / playerActor.root.scale.x;
+        heldMain.scale.multiplyScalar(k);
+        bladeBase.multiplyScalar(k);
+        bladeTip.multiplyScalar(k);
+        playerActor.handR.add(heldMain);
+      } else playerRig.sockets.gripR.add(heldMain);
     }
     const shield = items.find((s) => s.equipped && ITEMS[s.def]?.moveset === "shield");
     const sh = !!shield;
@@ -781,7 +789,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       heldOff = weaponModel(shield.def === "arm_stump_shield" ? "shield" : shield.def);
       heldOff.rotation.set(0, Math.PI / 2, 0);
       heldOff.position.set(0.06, 0.05, -0.1);
-      playerRig.bones.foreL.add(heldOff);
+      if (playerActor?.handL) {
+        heldOff.scale.multiplyScalar(1 / playerActor.root.scale.x);
+        heldOff.position.set(0, 0, 0);
+        playerActor.handL.add(heldOff);
+      } else playerRig.bones.foreL.add(heldOff);
     }
   }
 
@@ -799,7 +811,22 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     playerPoser = new Poser(playerRig);
     zoneRoot(P.zone).add(playerRig.group);
     heldMain = heldOff = null;
+    playerActor = null;
     syncGear();
+    // the modelled body replaces the code-built one once it has loaded
+    const rig = playerRig;
+    const chest = armourLook(equippedDefs()).chest;
+    const url = chest === "leather" ? ADV.hooded : chest === "hound" ? ADV.barbarian : chest ? ADV.knight : [ADV.rogue, ADV.hooded, ADV.barbarian][look.body];
+    loadAdventurer(url).then(([body, anim]) => {
+      if (playerRig !== rig) return;
+      for (const c of rig.group.children) c.visible = false;
+      playerActor = new ModelActor(body, 1.78 / ADV_HEIGHT, ADV_HEAD, chest === "bk" ? 0x6a6470 : 0xd8d0c4, anim).emptyHands();
+      rig.group.add(playerActor.root);
+      heldMain?.parent?.remove(heldMain);
+      heldOff?.parent?.remove(heldOff);
+      heldMain = heldOff = null;
+      syncGear();
+    }, () => {});
   }
 
   function hasEdge() {
@@ -2649,10 +2676,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     g.rotation.y = P.yaw;
     const armed = mainWeapon().id !== "wpn_fists";
     const isPick = mainWeapon().moveset.includes("pick");
-    poseHuman(playerPoser, {
+    const hp = {
       t, move: sp / SPEEDS.walk * (P.sprint ? 1.45 : 1), phase: P.phase,
       action: P.action, at: P.action === "dead" ? P.at : P.at / P.dur, block: P.blocking && P.action === "none", armed: armed || isPick,
-    }, dt);
+    };
+    if (playerActor) poseAdventurer(playerActor, hp, dt);
+    else poseHuman(playerPoser, hp, dt);
   }
 
   function worldUpdate(dt: number, rdt: number) {
