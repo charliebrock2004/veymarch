@@ -48,6 +48,8 @@ export type ZoneBuild = {
   update?: (dt: number, t: number) => void;
   /** light and air: outdoor zones keep the sky; indoor zones are lit by their fires */
   fog?: { color: number; density: number };
+  /** an outdoor zone's own sky: zenith and horizon tints, sunlight colour and strength, 0..1 mix */
+  sky?: { zen: number; hor: number; sun: number; dim: number; mix: number };
 };
 
 export type ZoneInteract = { x: number; z: number; r: number; label: () => string | null; act: () => void };

@@ -444,8 +444,8 @@ export function grassGeo(seed: number, blades = 7, height = 0.55) {
   // roots match the turf so tufts grow out of the ground instead of sitting on it
   const base = new THREE.Color(0x5f7a3c);
   const mid = new THREE.Color(0x86a04c);
-  const tip = new THREE.Color(0xd2d684);
-  const tipB = new THREE.Color(0xa9bf62);
+  const tip = new THREE.Color(0xb9c96a);
+  const tipB = new THREE.Color(0x93b055);
   const tc = new THREE.Color();
   const mc = new THREE.Color();
   const n = Math.round(blades * 1.5);

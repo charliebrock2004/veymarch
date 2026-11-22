@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { CACHE_DEFS } from "../../data/world.ts";
 import { ZONES } from "../../data/zones.ts";
-import { Batch, boxUV, rockGeo, tint, treeGeo } from "../../engine/kit";
+import { Batch, boxUV, grassGeo, rockGeo, tint, treeGeo } from "../../engine/kit";
 import { fbm, noise2, rng, smoothstep } from "../../engine/noise";
+import { glowTex } from "../../engine/textures";
 import { buildFieldTerrain } from "../../engine/terrain";
 import type { NpcDef, Stop } from "../../play/npcs";
 import { zoneNodes } from "../nodes";
@@ -67,7 +68,7 @@ export function buildWaste(env: ZoneEnv): ZoneBuild {
     h += smoothstep(GATE.z + 6, GATE.z + 30, z) * 18 * (1 - smoothstep(3, 8, Math.abs(x)) * 0.0);
     return h;
   };
-  const cc = { ash: new THREE.Color(0xb6b2aa), dark: new THREE.Color(0x67635c), road: new THREE.Color(0x4a4640), bed: new THREE.Color(0x35322e) };
+  const cc = { ash: new THREE.Color(0x8f897e), dark: new THREE.Color(0x4c4842), road: new THREE.Color(0x3a3631), bed: new THREE.Color(0x282522) };
   const tc = new THREE.Color();
   const terrain = buildFieldTerrain({
     ox: X,
@@ -121,6 +122,64 @@ export function buildWaste(env: ZoneEnv): ZoneBuild {
     const s = 0.5 + r() * 1.8;
     put(ctx, "flat", rockGeo(i * 13 + 5, false, 0x77736b).scale(s, s * 0.7, s), F(x, z, r() * 6, H(x, z) - 0.25 * s), 0, 0, 0, 0, 0, 0, 0xffffff);
     if (s > 1) col.circle(X + x, z, s * 0.7);
+  }
+
+  // ------------------------------------------------------------ the field of the fallen: bones, cairns, broken spears, toppled columns
+  const BONE = 0xd9d0b8;
+  for (let i = 0; i < 260; i++) {
+    const x = (r() - 0.5) * (B.maxX - B.minX - 12);
+    const z = B.minZ + 6 + r() * (B.maxZ - B.minZ - 16);
+    if (busy(x, z, -4)) continue;
+    const f = F(x, z, r() * 6, H(x, z));
+    const k = r();
+    if (k < 0.3) {
+      // a skull, half sunk, and a scatter of long bones
+      put(ctx, "flat", new THREE.SphereGeometry(0.17, 7, 5), f, 0, 0.1, 0, 0, 0, 0, BONE, false);
+      put(ctx, "flat", new THREE.BoxGeometry(0.16, 0.1, 0.14), f, 0, 0.03, 0.13, 0, 0, 0, 0xc4baa2, false);
+      for (let b = 0; b < 3; b++) put(ctx, "flat", new THREE.CylinderGeometry(0.03, 0.04, 0.5 + r() * 0.4, 5), f, (r() - 0.5) * 1.6, 0.04, (r() - 0.5) * 1.6, Math.PI / 2, r() * 6, 0, BONE, false);
+    } else if (k < 0.5) {
+      // a rib cage standing out of the ash
+      for (let b = 0; b < 5; b++) put(ctx, "flat", new THREE.TorusGeometry(0.34 - Math.abs(b - 2) * 0.04, 0.025, 4, 9, Math.PI), f, 0, 0, (b - 2) * 0.17, 0, 0, 0, BONE, false);
+      put(ctx, "flat", new THREE.CylinderGeometry(0.035, 0.035, 0.95, 5), f, 0, 0.33, 0, Math.PI / 2, 0, 0, 0xc4baa2, false);
+    } else if (k < 0.72) {
+      // a spear driven in where its bearer fell, a rag still on it
+      const lean = (r() - 0.5) * 0.7;
+      put(ctx, "planksDark", boxUV(0.06, 2.3, 0.06), f, 0, 1.0, 0, lean, 0, lean * 0.6, 0x3e342c);
+      put(ctx, "metal", new THREE.ConeGeometry(0.07, 0.34, 5), f, lean * -0.7, 2.2, lean * 1.1, lean, 0, lean * 0.6, 0x6a6a70, false);
+      if (r() < 0.5) put(ctx, "flat", new THREE.PlaneGeometry(0.5, 0.34, 2, 1), f, 0.27, 1.75, lean * 0.8, 0, 0, 0.15, r() < 0.5 ? 0x5a1e22 : 0x3a3a48, false);
+    } else if (k < 0.86) {
+      // a cairn over someone who had a friend left
+      for (let b = 0; b < 6; b++) {
+        const s2 = 0.34 - b * 0.035;
+        put(ctx, "flat", rockGeo(i * 7 + b, false, 0x6c6860).scale(s2, s2 * 0.7, s2), f, (r() - 0.5) * 0.5 * (1 - b / 6), b * 0.13, (r() - 0.5) * 0.5 * (1 - b / 6), 0, r() * 6, 0, 0xffffff);
+      }
+    } else if (k < 0.95) {
+      // a leaning headstone
+      put(ctx, "stoneGrey", boxUV(0.6, 1.0, 0.16), f, 0, 0.42, 0, (r() - 0.5) * 0.5, 0, (r() - 0.5) * 0.3, 0x77736b);
+      put(ctx, "stoneGrey", new THREE.CylinderGeometry(0.3, 0.3, 0.16, 8, 1, false, 0, Math.PI), f, 0, 0.9, 0, Math.PI / 2, Math.PI / 2, 0, 0x77736b);
+    } else {
+      // a fallen column in drums
+      for (let b = 0; b < 3; b++) put(ctx, "stoneGrey", new THREE.CylinderGeometry(0.5, 0.5, 1.3, 9), f, b * 1.45 + (r() - 0.5) * 0.2, 0.42, (r() - 0.5) * 0.5, Math.PI / 2, 0, Math.PI / 2 + (r() - 0.5) * 0.3, 0x8a867e);
+      put(ctx, "stoneGrey", boxUV(1.4, 0.5, 1.4), f, -1.3, 0.2, 0, 0, 0.3, 0.1, 0x8a867e);
+      col.circle(X + x, z, 0.9);
+    }
+  }
+  // dead, colourless grass in drifts
+  const deadGrass = grassGeo(77, 12, 0.42);
+  {
+    // drain the green out of the blades but keep their root-to-tip shading
+    const c = deadGrass.getAttribute("color");
+    for (let i = 0; i < c.count; i++) {
+      const l = (c.getX(i) + c.getY(i) + c.getZ(i)) / 3;
+      c.setXYZ(i, l * 0.98, l * 0.9, l * 0.72);
+    }
+  }
+  for (let i = 0; i < 1500; i++) {
+    const x = (r() - 0.5) * (B.maxX - B.minX - 8);
+    const z = B.minZ + 4 + r() * (B.maxZ - B.minZ - 10);
+    if (Math.abs(x - roadX(z)) < 4.5 || fbm(x * 0.09, z * 0.09, 2) < 0.48) continue;
+    const s2 = 0.7 + r() * 0.7;
+    put(ctx, "grass", deadGrass.clone().scale(s2, s2, s2), F(x, z, r() * 6, H(x, z) - 0.03), 0, 0, 0, 0, 0, 0, 0xffffff, false);
   }
 
   // ------------------------------------------------------------ the rib causeway over the dead river
@@ -249,6 +308,19 @@ export function buildWaste(env: ZoneEnv): ZoneBuild {
     put(ctx, "stoneDark", boxUV(70, 30, 30), m, 0, 15, 0, 0, 0, 0, 0x26242a);
     put(ctx, "stoneDark", boxUV(14, 50, 14), m, 0, 25, -4, 0, 0, 0, 0x2a2830);
     for (const side of [-1, 1]) put(ctx, "stoneDark", boxUV(9, 40, 9), m, side * 26, 20, -2, 0, 0, 0, 0x2a2830);
+    // battlements, spires and lit slits, so it reads as a fortress and not a block
+    for (let k = -8; k <= 8; k++) put(ctx, "stoneDark", boxUV(2.4, 3, 2.4), m, k * 4.1, 31.5, 13.6, 0, 0, 0, 0x26242a);
+    put(ctx, "stoneDark", new THREE.ConeGeometry(9.5, 22, 4), m, 0, 61, -4, 0, Math.PI / 4, 0, 0x1e1c22);
+    for (const side of [-1, 1]) {
+      put(ctx, "stoneDark", new THREE.ConeGeometry(6.2, 16, 4), m, side * 26, 48, -2, 0, Math.PI / 4, 0, 0x1e1c22);
+      put(ctx, "stoneDark", boxUV(5, 26, 5), m, side * 13, 13, 14, 0, 0, 0, 0x2a2830);
+      put(ctx, "stoneDark", new THREE.ConeGeometry(3.6, 9, 4), m, side * 13, 30.5, 14, 0, Math.PI / 4, 0, 0x1e1c22);
+      for (let k = 0; k < 3; k++) {
+        const g = m.at(side * 26, 16 + k * 8, 2.8);
+        put(ctx, "flat", new THREE.PlaneGeometry(0.7, 2.6), m, side * 26, 16 + k * 8, 2.56, 0, 0, 0, 0x8affc0, false);
+        glows.push({ x: g.x, y: g.y, z: g.z, size: 3, color: 0x6aff9a });
+      }
+    }
     const w = m.at(0, 44, 3.2);
     glows.push({ x: w.x, y: w.y, z: w.z, size: 10, color: 0x7affb0 });
     anchors.gate = new V3(X + GATE.x, H(GATE.x, GATE.z), GATE.z - 4);
@@ -275,7 +347,7 @@ export function buildWaste(env: ZoneEnv): ZoneBuild {
   }
   const ashGeo = new THREE.BufferGeometry();
   ashGeo.setAttribute("position", new THREE.BufferAttribute(ashPos, 3));
-  const ash = new THREE.Points(ashGeo, new THREE.PointsMaterial({ color: 0xe0dcd4, size: 0.14, transparent: true, opacity: 0.75, depthWrite: false }));
+  const ash = new THREE.Points(ashGeo, new THREE.PointsMaterial({ map: glowTex(), color: 0xe0dcd4, size: 0.3, transparent: true, opacity: 0.7, depthWrite: false }));
   ash.frustumCulled = false;
   root.add(ash);
 
@@ -350,6 +422,7 @@ export function buildWaste(env: ZoneEnv): ZoneBuild {
     anchors,
     npcs: WASTE_NPCS,
     update,
-    fog: { color: 0x9a968e, density: 0.017 },
+    fog: { color: 0x7d776f, density: 0.015 },
+    sky: { zen: 0x4a4650, hor: 0xa08a78, sun: 0xffc9a0, dim: 0.8, mix: 0.82 },
   };
 }

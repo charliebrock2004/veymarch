@@ -86,6 +86,16 @@ export function cottage(ctx: Ctx, x: number, z: number, w: number, d: number, ro
   put(ctx, "flat", new THREE.BoxGeometry(w + 0.2, 0.22, 0.24), f, 0, top, d / 2, 0, 0, 0, C.timber);
   put(ctx, "flat", new THREE.BoxGeometry(w + 0.2, 0.22, 0.24), f, 0, top, -d / 2, 0, 0, 0, C.timber);
   put(ctx, "flat", new THREE.BoxGeometry(w + 0.2, 0.2, 0.22), f, 0, plinth + 0.08, d / 2 + 0.01, 0, 0, 0, C.timber);
+  // half-timber framing: studs, a mid rail and corner braces on the long walls
+  if (!o.stoneGround) {
+    for (const s of [1, -1]) {
+      const zf = s * (d / 2 + 0.015);
+      put(ctx, "flat", new THREE.BoxGeometry(w, 0.13, 0.1), f, 0, plinth + H * 0.42, zf, 0, 0, 0, C.timber, false);
+      const n = Math.max(2, Math.round(w / 1.9));
+      for (let i = 1; i < n; i++) put(ctx, "flat", new THREE.BoxGeometry(0.13, H * 0.58, 0.1), f, -w / 2 + (i * w) / n, plinth + H * 0.71, zf, 0, 0, 0, C.timber, false);
+      for (const e of [1, -1]) put(ctx, "flat", new THREE.BoxGeometry(0.11, 1.25, 0.09), f, e * (w / 2 - 0.5), plinth + H - 0.5, zf, 0, 0, e * s * 0.78, C.timber, false);
+    }
+  }
   // roof
   const over = 0.5;
   const half = d / 2 + over;
@@ -120,6 +130,7 @@ export function cottage(ctx: Ctx, x: number, z: number, w: number, d: number, ro
   const dx = o.doorX ?? (r() - 0.5) * (w - 2.4);
   put(ctx, "planksDark", boxUV(1.05, 1.95, 0.12, 1, 2), f, dx, plinth + 0.98, d / 2 + 0.04);
   put(ctx, "flat", new THREE.BoxGeometry(1.35, 0.18, 0.2), f, dx, plinth + 2.0, d / 2 + 0.06, 0, 0, 0, C.timber);
+  for (const hy of [0.45, 1.5]) put(ctx, "metal", new THREE.BoxGeometry(0.6, 0.07, 0.03), f, dx - 0.2, plinth + hy, d / 2 + 0.115, 0, 0, 0, 0x2e3034, false);
   put(ctx, "metal", new THREE.SphereGeometry(0.05, 6, 4), f, dx + 0.35, plinth + 1.0, d / 2 + 0.13, 0, 0, 0, C.copper, false);
   put(ctx, "stone", boxUV(1.6, 0.18, 0.7, 1, 1), f, dx, plinth - 0.05, d / 2 + 0.45);
   const wins: [number, number, number][] = [];
@@ -136,6 +147,15 @@ export function cottage(ctx: Ctx, x: number, z: number, w: number, d: number, ro
       const sx = wr === Math.PI / 2 ? lx + 0.04 : lx + s * 0.55;
       const sz = wr === Math.PI / 2 ? lz + s * 0.55 : lz + (wr === Math.PI ? -0.04 : 0.04);
       put(ctx, "planks", boxUV(0.36, 0.66, 0.05, 0.5, 1), f, sx, plinth + 1.55, sz, 0, wr + s * 0.25, 0, 0xc0b0a0);
+    }
+    if (wr === 0) {
+      // window box with a few blooms
+      put(ctx, "planksDark", boxUV(0.86, 0.16, 0.2, 1, 0.3), f, lx, plinth + 1.07, lz + 0.14);
+      for (let i = 0; i < 5; i++) {
+        const bx = lx - 0.32 + i * 0.16;
+        put(ctx, "flat", new THREE.SphereGeometry(0.075, 5, 4), f, bx, plinth + 1.2 + r() * 0.04, lz + 0.14, 0, 0, 0, 0x4f7a3a, false);
+        put(ctx, "flat", new THREE.SphereGeometry(0.045, 5, 4), f, bx + (r() - 0.5) * 0.06, plinth + 1.27 + r() * 0.04, lz + 0.17, 0, 0, 0, [0xd8584a, 0xe8c04a, 0xe6dccc, 0xb86ad0][Math.floor(r() * 4)], false);
+      }
     }
     const wp = f.at(lx, plinth + 1.55, lz);
     ctx.glows.push({ x: wp.x, y: wp.y, z: wp.z, size: 2.2, color: 0xffa040 });

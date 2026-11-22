@@ -720,13 +720,16 @@ function Bag({ api, hud }: { api: GameApi; hud: Hud }) {
               </div>
             </div>
             <div className="vm-grid vm-scroll">
-              {items.length === 0 && <p className="vm-sub">Empty. Gather flint and wood in the forest.</p>}
+              {items.length === 0 && <p className="vm-sub vm-grid-note">Empty. Gather flint and wood in the forest.</p>}
               {items.map((i) => (
                 <button key={i.uid} className={`vm-item ${sel === i.uid ? "on" : ""} ${i.equipped ? "eq" : ""}`} style={{ borderColor: i.rarity !== "common" ? RARITY_COLOR[i.rarity as Rarity] : undefined }} onClick={() => setSel(i.uid)}>
                   <ItemIcon id={i.id} size={38} />
                   {i.count > 1 && <b>{i.count}</b>}
                   {i.equipped && <em>E</em>}
                 </button>
+              ))}
+              {Array.from({ length: Math.max(0, 32 - items.length) }, (_, k) => (
+                <div key={`e${k}`} className="vm-item vm-item-empty" aria-hidden />
               ))}
             </div>
             <div className="vm-detail">

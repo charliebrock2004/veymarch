@@ -44,18 +44,38 @@ function speckle(g: CanvasRenderingContext2D, w: number, h: number, r: Rand, n: 
 
 /** Near-white grain multiplied over terrain vertex colour. */
 export const detailTex = () =>
-  make("detail", 256, 256, (g, w, h, r) => {
-    g.fillStyle = rgb(226, 226, 226);
+  make("detail", 512, 512, (g, w, h, r) => {
+    g.fillStyle = rgb(228, 228, 226);
     g.fillRect(0, 0, w, h);
-    speckle(g, w, h, r, 2600, 170, 255, 3);
-    for (let i = 0; i < 260; i++) {
-      g.strokeStyle = rgb(160 + r() * 60, 170 + r() * 60, 140 + r() * 50, 0.55);
+    // broad soft washes, like a brush dragged through wet paint
+    for (let i = 0; i < 70; i++) {
+      const v = r() < 0.5 ? 150 : 255;
+      g.fillStyle = rgb(v, v, v - 8, 0.05);
+      g.beginPath();
+      g.ellipse(r() * w, r() * h, 30 + r() * 90, 12 + r() * 40, r() * Math.PI, 0, Math.PI * 2);
+      g.fill();
+    }
+    speckle(g, w, h, r, 9000, 196, 250, 1.6, 0.4);
+    // scattered grit and small stones, each with a lit edge
+    for (let i = 0; i < 90; i++) {
+      const x = r() * w, y = r() * h, s = 1.5 + r() * 3.5;
+      g.fillStyle = rgb(150, 146, 138, 0.5);
+      g.beginPath();
+      g.ellipse(x, y, s, s * 0.7, r() * Math.PI, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = rgb(250, 248, 240, 0.45);
+      g.beginPath();
+      g.ellipse(x - s * 0.25, y - s * 0.3, s * 0.5, s * 0.3, 0, 0, Math.PI * 2);
+      g.fill();
+    }
+    for (let i = 0; i < 700; i++) {
+      g.strokeStyle = rgb(170 + r() * 50, 180 + r() * 50, 150 + r() * 40, 0.3);
       g.lineWidth = 1;
       const x = r() * w;
       const y = r() * h;
       g.beginPath();
       g.moveTo(x, y);
-      g.lineTo(x + (r() - 0.5) * 6, y - 4 - r() * 6);
+      g.lineTo(x + (r() - 0.5) * 5, y - 3 - r() * 6);
       g.stroke();
     }
   });

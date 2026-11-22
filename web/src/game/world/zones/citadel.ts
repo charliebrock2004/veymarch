@@ -96,6 +96,32 @@ export function buildCitadel(env: ZoneEnv): ZoneBuild {
     lamps.push(p.clone());
     col.circle(p.x, p.z, 0.5);
   }
+  // vaulting: capitals, pointed ribs across the nave, and a rotted runner down its middle
+  for (let z = 36; z <= 90; z += 9) {
+    for (const s of [-1, 1]) {
+      const f = F(s * 9.5, z);
+      put(ctx, "stoneDark", new THREE.CylinderGeometry(1.25, 0.78, 0.8, 8), f, 0, WALL_H - 2.6, 0, 0, 0, 0, 0x4a4852);
+      put(ctx, "stoneDark", new THREE.TorusGeometry(0.86, 0.1, 5, 10), f, 0, 0.75, 0, Math.PI / 2, 0, 0, 0x4a4852);
+      // one half of a pointed rib, rising from the capital to meet its twin at the ridge
+      put(ctx, "stoneDark", boxUV(10.1, 0.55, 0.6, 3, 3), F(0, z), s * 4.75, WALL_H - 1.9, 0, 0, 0, s * -0.3, 0x55535e, false);
+      // a skull niche in the outer wall behind each bay
+      const n = F(s * 13.95, z, s > 0 ? -Math.PI / 2 : Math.PI / 2);
+      put(ctx, "flat", boxUV(1.3, 1.7, 0.12), n, 0, 2.3, 0, 0, 0, 0, 0x0c0c10, false);
+      put(ctx, "stoneDark", boxUV(1.7, 0.22, 0.4), n, 0, 1.36, 0.1, 0, 0, 0, 0x55535e, false);
+      put(ctx, "stoneDark", new THREE.TorusGeometry(0.66, 0.1, 4, 8, Math.PI), n, 0, 3.15, 0.08, 0, 0, 0, 0x55535e, false);
+      for (let k = 0; k < 3; k++) put(ctx, "flat", new THREE.SphereGeometry(0.2, 7, 5), n, (k - 1) * 0.4, 1.66, 0.14, 0, 0, 0, 0xd9d0b8, false);
+      put(ctx, "flat", new THREE.SphereGeometry(0.2, 7, 5), n, 0.2, 2.0, 0.14, 0, 0, 0, 0xcfc6ae, false);
+    }
+  }
+  put(ctx, "flat", new THREE.PlaneGeometry(3.4, 60, 1, 1), F(0, 62), 0, 0.02, 0, -Math.PI / 2, 0, 0, 0x3a1218, false);
+  for (const s of [-1, 1]) put(ctx, "flat", new THREE.PlaneGeometry(0.18, 60), F(s * 1.5, 62), 0, 0.03, 0, -Math.PI / 2, 0, 0, 0x8a6a2c, false);
+  // a dressed plinth course and a dark cornice along the long walls
+  for (const s of [-1, 1]) {
+    put(ctx, "stoneDark", boxUV(0.5, 0.9, 64, 3, 3), F(s * 13.85, 62), 0, 0.45, 0, 0, 0, 0, 0x5c5a66, false);
+    put(ctx, "stoneDark", boxUV(0.7, 0.5, 64, 3, 3), F(s * 13.8, 62), 0, WALL_H - 0.6, 0, 0, 0, 0, 0x34323a, false);
+    put(ctx, "stoneDark", boxUV(0.4, 0.8, 32, 3, 3), F(s * 8.9, 14), 0, 0.4, 0, 0, 0, 0, 0x5c5a66, false);
+  }
+
   // the gate hall: torches and a pair of kneeling stone kings
   for (const s of [-1, 1]) {
     for (let z = 6; z < 30; z += 8) {

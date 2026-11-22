@@ -267,6 +267,15 @@ export function buildHuman(look: HumanLook): Rig {
     b.part("head", ell(0.025, 0.018, 0.01, -0.06, 0.085, 0.105, 6), 0xb05a50);
   }
   if (look.ears === "goblin") {
+    const dark = new THREE.Color(look.skin).multiplyScalar(0.6).getHex();
+    for (const sx of [1, -1]) {
+      // lamp-yellow eyes under a jutting brow, and a tusk from the lower jaw
+      b.part("head", ell(0.024 * hs, 0.017 * hs, 0.008, sx * 0.047 * hs, 0.128 * hs, 0.112 * hs, 8), 0xe8c83a);
+      b.part("head", ell(0.006 * hs, 0.015 * hs, 0.006, sx * 0.047 * hs, 0.128 * hs, 0.118 * hs, 6), 0x14100c);
+      b.part("head", rot(box(0.06 * hs, 0.018 * hs, 0.03, 0, 0, 0), 0, 0, sx * -0.38).translate(sx * 0.048 * hs, 0.152 * hs, 0.108 * hs), dark);
+      b.part("head", at(cone(0.011 * hs, 0.045 * hs, 0, 0, 0, 5), sx * 0.03 * hs, 0.062 * hs, 0.108 * hs), 0xeee4c8);
+    }
+    b.part("head", at(rot(cone(0.03 * hs, 0.085 * hs, 0, 0, 0, 5), 1.9, 0, 0), 0, 0.095 * hs, 0.135 * hs), dark);
     b.part("head", at(rot(cone(0.04 * hs, 0.2 * hs, 0, 0, 0, 5), 0, 0, -1.25), 0.15 * hs, 0.13 * hs, -0.01), look.skin);
     b.part("head", at(rot(cone(0.04 * hs, 0.2 * hs, 0, 0, 0, 5), 0, 0, 1.25), -0.15 * hs, 0.13 * hs, -0.01), look.skin);
   } else if (!toy) {

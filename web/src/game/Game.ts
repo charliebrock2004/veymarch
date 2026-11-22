@@ -2374,6 +2374,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       fogC.lerp(cA.setHex(zf.color), ZONES[P.zone].indoor ? 1 : 0.35 + 0.5 * dayK);
       density = zf.density;
     }
+    const zs = mode !== "title" && mode !== "create" && !ZONES[P.zone].indoor ? zones.get(P.zone)?.sky : undefined;
+    if (zs) {
+      zen.lerp(cA.setHex(zs.zen), zs.mix);
+      hor.lerp(cA.setHex(zs.hor), zs.mix);
+      sun.color.lerp(cA.setHex(zs.sun), zs.mix);
+      sun.intensity *= zs.dim;
+    }
     const fog = scene.fog as THREE.FogExp2;
     fog.color.lerp(fogC, Math.min(1, rdt * 2));
     fog.density += (density - fog.density) * Math.min(1, rdt * 1.5);
