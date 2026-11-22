@@ -132,6 +132,70 @@ export function windyBaked<T extends THREE.Material>(mat: T, strength: number): 
   return mat;
 }
 
+/**
+ * The painted look for world surfaces: brush-scale mottling in world space so no wall, roof or
+ * field is one flat tone, and a hemisphere tint (cool from the sky, warm bounce from the ground).
+ * Wraps whatever the material already injects (wind), so it can go on anything Lambert.
+ */
+export function painted<T extends THREE.Material>(mat: T, amount = 1): T {
+  const prev = mat.onBeforeCompile;
+  const prevKey = mat.customProgramCacheKey;
+  mat.onBeforeCompile = (shader, renderer) => {
+    prev?.call(mat, shader, renderer);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vPaintW;")
+      .replace(
+        "#include <project_vertex>",
+        `#include <project_vertex>
+        {
+          vec4 pw = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            pw = instanceMatrix * pw;
+          #endif
+          vPaintW = (modelMatrix * pw).xyz;
+        }`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+        varying vec3 vPaintW;
+        float pHash(vec2 p) { p = mod(p, 289.0); return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        float pNoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(pHash(i), pHash(i + vec2(1.0, 0.0)), f.x), mix(pHash(i + vec2(0.0, 1.0)), pHash(i + vec2(1.0, 1.0)), f.x), f.y);
+        }`,
+      )
+      .replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+        vec3 pFn = normalize(cross(dFdx(vPaintW), dFdy(vPaintW)));
+        {
+          vec3 an = abs(pFn);
+          vec2 pu = an.y > 0.6 ? vPaintW.xz : (an.x > an.z ? vPaintW.zy : vPaintW.xy);
+          float n1 = pNoise(pu * 0.55);
+          float n2 = pNoise(pu * vec2(2.3, 0.9) + 17.0);
+          float n3 = pNoise(pu * 7.0 + 51.0);
+          float m = n1 * 0.55 + n2 * 0.3 + n3 * 0.15;
+          float k = ${amount.toFixed(2)};
+          diffuseColor.rgb *= 1.0 + (m - 0.5) * 0.3 * k;
+          diffuseColor.rgb += (n1 - 0.5) * vec3(0.018, 0.004, -0.022) * k;
+        }`,
+      )
+      .replace(
+        "#include <opaque_fragment>",
+        `{
+          float up = pFn.y * 0.5 + 0.5;
+          outgoingLight += diffuseColor.rgb * mix(vec3(0.075, 0.05, 0.03), vec3(0.03, 0.05, 0.085), up);
+        }
+        #include <opaque_fragment>`,
+      );
+  };
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ""}|paint${amount}`;
+  return mat;
+}
+
 export type Cullable = { cull: (x: number, z: number, d?: number) => void; maxDist: number };
 
 /**

@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { clamp, distToPolyline, fbm, lerp, smoothstep } from "./noise";
 import { detailTex } from "./textures";
+import { painted } from "./kit";
 import {
   BOUNDS, CASTLE_DOOR, CLEARINGS, CREEK, DUN_X, GATE, HILL, PATH_CAMP, PATH_EAST, PATH_MAIN, PATH_SHRINE, RIVER, VILLAGE,
 } from "../world/layout";
@@ -181,7 +182,7 @@ export function buildTerrain(): Terrain {
   geo.setIndex(idx);
   geo.computeVertexNormals();
   const tex = detailTex();
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: tex });
+  const mat = painted(new THREE.MeshLambertMaterial({ vertexColors: true, map: tex }), 0.85);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.receiveShadow = true;
   mesh.name = "terrain";
@@ -266,7 +267,7 @@ export function buildFieldTerrain(o: { ox: number; bounds: { minX: number; maxX:
   geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
   geo.setIndex(idx);
   geo.computeVertexNormals();
-  const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true, map: detailTex() }));
+  const mesh = new THREE.Mesh(geo, painted(new THREE.MeshLambertMaterial({ vertexColors: true, map: detailTex() }), 0.85));
   mesh.receiveShadow = true;
   mesh.name = "terrain";
   const grid = (arr: Float32Array, wx: number, z: number) => {

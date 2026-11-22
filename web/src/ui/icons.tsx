@@ -1,12 +1,58 @@
 import { ITEMS } from "../game/data/items";
 /** Hand-drawn item icons in the art bible's palette. */
 
-const S = { fill: "none", stroke: "#1c1916", strokeWidth: 2, strokeLinejoin: "round" as const, strokeLinecap: "round" as const };
+const S = { fill: "none", stroke: "#17110c", strokeWidth: 1.8, strokeLinejoin: "round" as const, strokeLinecap: "round" as const };
+
+const GLOW: Record<string, string> = { uncommon: "#7fae5a", rare: "#5a8fd0", epic: "#a56ad8", legendary: "#e2a53c", unique: "#e2a53c" };
+
+/**
+ * Mounted once at the app root. Every item icon is drawn flat and then lit by this filter:
+ * a soft bevel from the upper left, a warm bounce from below, and a contact shadow, so the
+ * whole set reads as painted objects under one light.
+ */
+export function IconDefs() {
+  return (
+    <svg width="0" height="0" style={{ position: "absolute" }} aria-hidden>
+      <defs>
+        <filter id="vm-paint" x="-20%" y="-20%" width="140%" height="140%" colorInterpolationFilters="sRGB">
+          <feGaussianBlur in="SourceAlpha" stdDeviation="1.6" result="bump" />
+          <feSpecularLighting in="bump" surfaceScale="3.2" specularConstant="0.75" specularExponent="14" lightingColor="#fff1d0" result="spec">
+            <feDistantLight azimuth="225" elevation="48" />
+          </feSpecularLighting>
+          <feComposite in="spec" in2="SourceAlpha" operator="in" result="specIn" />
+          <feDiffuseLighting in="bump" surfaceScale="2.6" diffuseConstant="1.05" lightingColor="#ffffff" result="diff">
+            <feDistantLight azimuth="225" elevation="58" />
+          </feDiffuseLighting>
+          <feComposite in="SourceGraphic" in2="diff" operator="arithmetic" k1="0.82" k2="0.3" k3="0" k4="0" result="lit" />
+          <feComposite in="lit" in2="SourceAlpha" operator="in" result="litIn" />
+          <feComposite in="specIn" in2="litIn" operator="arithmetic" k1="0" k2="0.55" k3="1" k4="0" result="shaded" />
+          <feComposite in="shaded" in2="SourceAlpha" operator="in" result="obj" />
+          <feGaussianBlur in="SourceAlpha" stdDeviation="1.4" result="sh" />
+          <feOffset in="sh" dx="1" dy="2" result="shOff" />
+          <feComponentTransfer in="shOff" result="shadow">
+            <feFuncA type="linear" slope="0.6" />
+          </feComponentTransfer>
+          <feMerge>
+            <feMergeNode in="shadow" />
+            <feMergeNode in="obj" />
+          </feMerge>
+        </filter>
+        <radialGradient id="vm-glow-uncommon"><stop offset="0" stopColor={GLOW.uncommon} stopOpacity="0.5" /><stop offset="1" stopColor={GLOW.uncommon} stopOpacity="0" /></radialGradient>
+        <radialGradient id="vm-glow-rare"><stop offset="0" stopColor={GLOW.rare} stopOpacity="0.55" /><stop offset="1" stopColor={GLOW.rare} stopOpacity="0" /></radialGradient>
+        <radialGradient id="vm-glow-epic"><stop offset="0" stopColor={GLOW.epic} stopOpacity="0.6" /><stop offset="1" stopColor={GLOW.epic} stopOpacity="0" /></radialGradient>
+        <radialGradient id="vm-glow-legendary"><stop offset="0" stopColor={GLOW.legendary} stopOpacity="0.65" /><stop offset="1" stopColor={GLOW.legendary} stopOpacity="0" /></radialGradient>
+        <radialGradient id="vm-glow-unique"><stop offset="0" stopColor={GLOW.unique} stopOpacity="0.7" /><stop offset="1" stopColor={GLOW.unique} stopOpacity="0" /></radialGradient>
+      </defs>
+    </svg>
+  );
+}
 
 export function ItemIcon({ id, size = 44 }: { id: string; size?: number }) {
+  const rar = ITEMS[id]?.rarity;
   return (
     <svg viewBox="0 0 48 48" width={size} height={size} aria-hidden>
-      {art(id)}
+      {rar && rar !== "common" && <circle cx="24" cy="24" r="23" fill={`url(#vm-glow-${rar})`} />}
+      <g filter="url(#vm-paint)">{art(id)}</g>
     </svg>
   );
 }
@@ -169,12 +215,156 @@ function art(id: string) {
           <path d="M18 24 h6 M21 21 v6" stroke="#8e2f2f" strokeWidth={2.5} />
         </g>
       );
+    case "mat_coal":
+      return (
+        <g {...S}>
+          <path d="M8 34 L12 22 L22 16 L30 20 L40 18 L42 30 L34 38 L16 38 Z" fill="#2b2927" />
+          <path d="M12 22 L20 28 L30 20 M20 28 L16 38 M20 28 L34 30 L42 30 M34 30 L34 38" stroke="#55504a" />
+          <path d="M24 20 l4 2" stroke="#8a847c" />
+        </g>
+      );
+    case "mat_wheat":
+      return (
+        <g {...S}>
+          <path d="M24 44 V22 M17 44 C17 34 14 28 12 22 M31 44 C31 34 34 28 36 22" stroke="#a8842e" strokeWidth={2.4} />
+          {[0, 1, 2].map((i) => (
+            <g key={i}>
+              <ellipse cx="21" cy={20 - i * 5} rx="3" ry="4" fill="#e2bd58" transform={`rotate(-28 21 ${20 - i * 5})`} />
+              <ellipse cx="27" cy={20 - i * 5} rx="3" ry="4" fill="#e2bd58" transform={`rotate(28 27 ${20 - i * 5})`} />
+            </g>
+          ))}
+          <ellipse cx="24" cy="5" rx="2.6" ry="4" fill="#efd27a" />
+          <ellipse cx="11" cy="18" rx="2.6" ry="4.5" fill="#d8b04c" transform="rotate(-20 11 18)" />
+          <ellipse cx="37" cy="18" rx="2.6" ry="4.5" fill="#d8b04c" transform="rotate(20 37 18)" />
+          <path d="M14 36 h20" stroke="#8e2f2f" strokeWidth={3} />
+        </g>
+      );
+    case "mat_meat":
+      return (
+        <g {...S}>
+          <path d="M10 26 C8 14 22 6 32 12 C42 18 40 32 30 36 C20 40 12 36 10 26 Z" fill="#a8443a" />
+          <path d="M16 24 C16 17 24 13 30 17 C35 21 33 28 27 30 C21 32 16 30 16 24 Z" fill="#d07a66" stroke="#7a2e28" />
+          <circle cx="25" cy="23" r="3.4" fill="#efe6d2" />
+          <path d="M33 34 L40 41" stroke="#17110c" strokeWidth={6} />
+          <path d="M33 34 L40 41" stroke="#efe6d2" strokeWidth={3.4} />
+          <circle cx="41" cy="42" r="2.6" fill="#efe6d2" />
+        </g>
+      );
+    case "mat_hound_hide":
+      return (
+        <g {...S}>
+          <path d="M12 8 C18 12 30 12 36 8 C37 15 43 19 41 28 C37 32 38 41 31 41 C27 36 21 36 17 41 C10 41 11 32 7 28 C5 19 11 15 12 8 Z" fill="#2e2a26" />
+          <path d="M15 17 l3 4 M22 14 l1 5 M30 16 l-2 5 M14 27 l4 2 M33 26 l-4 3 M23 26 l2 5" stroke="#5a524a" />
+          <path d="M12 8 C18 12 30 12 36 8" stroke="#6a5a48" />
+        </g>
+      );
+    case "mat_boe_fang":
+      return (
+        <g {...S}>
+          <path d="M14 8 C22 6 32 8 36 12 C34 26 28 38 20 44 C22 32 18 20 14 8 Z" fill="#efe8d8" />
+          <path d="M14 8 C22 6 32 8 36 12 C30 14 20 13 14 8 Z" fill="#b89a8a" />
+          <path d="M24 18 C26 26 25 33 22 39" stroke="#b8ac96" />
+        </g>
+      );
+    case "mat_ember_shard":
+      return (
+        <g {...S}>
+          <path d="M24 4 L34 20 L28 44 L16 30 Z" fill="#ff8a30" />
+          <path d="M24 4 L24 24 L28 44 M16 30 L24 24 L34 20" stroke="#ffd58a" />
+          <path d="M24 4 L16 30 L24 24 Z" fill="#c8481c" stroke="none" opacity={0.75} />
+          <circle cx="38" cy="10" r="1.4" fill="#ffd58a" stroke="none" />
+          <circle cx="10" cy="18" r="1.1" fill="#ffb060" stroke="none" />
+        </g>
+      );
+    case "mat_grave_iron":
+      return (
+        <g {...S}>
+          <path d="M6 30 L14 20 H40 L34 30 Z" fill="#59626a" />
+          <path d="M6 30 V37 H34 V30 M34 37 L40 28 V20" fill="#353c44" />
+          <path d="M16 23 h10 M20 26 h8" stroke="#9bd0c0" />
+          <path d="M12 33 l3 2 l2 -3 M26 32 l2 3" stroke="#17110c" strokeWidth={1.2} />
+        </g>
+      );
+    case "mat_grave_dust":
+      return (
+        <g {...S}>
+          <path d="M12 40 C8 30 14 20 18 16 H30 C34 20 40 30 36 40 C30 44 18 44 12 40 Z" fill="#7a6e60" />
+          <path d="M17 16 C20 12 28 12 31 16" fill="#5a4e42" />
+          <path d="M18 14 H30" stroke="#b5893a" strokeWidth={2.6} />
+          <path d="M20 9 C22 5 26 5 28 9 C26 11 22 11 20 9 Z" fill="#cfc8ba" />
+          <path d="M18 28 c4 3 8 3 12 0" stroke="#a89c8a" />
+        </g>
+      );
+    case "mat_tallow":
+      return (
+        <g {...S}>
+          <path d="M16 40 V20 C16 17 32 17 32 20 V40 C32 43 16 43 16 40 Z" fill="#e8dcb8" />
+          <path d="M16 22 C20 25 28 25 32 22" stroke="#b8a878" />
+          <path d="M20 22 V30 C20 32 23 32 23 30" stroke="#b8a878" />
+          <path d="M24 19 V14" stroke="#17110c" />
+          <path d="M24 4 C28 8 28 12 24 14 C20 12 20 8 24 4 Z" fill="#ffb648" stroke="#c8641c" />
+        </g>
+      );
+    case "mat_ruined_banner":
+      return (
+        <g {...S}>
+          <path d="M10 6 V44" stroke="#5a4634" strokeWidth={3} />
+          <path d="M10 8 H38 V30 L33 26 L29 34 L24 27 L19 36 L15 28 L10 32 Z" fill="#7a2a2a" />
+          <path d="M24 12 l3 5 h5 l-4 4 l2 5 l-6 -3 l-6 3 l2 -5 l-4 -4 h5 z" fill="#c9a44e" stroke="#5a2020" />
+          <circle cx="10" cy="6" r="2.6" fill="#b5893a" />
+        </g>
+      );
+    case "key_crown_shard":
+      return (
+        <g {...S}>
+          <path d="M8 36 L10 16 L18 26 L24 10 L30 24 L36 20 L34 30 L28 36 Z" fill="#c9a44e" />
+          <path d="M8 36 H28" stroke="#7a5a1e" strokeWidth={3} />
+          <path d="M34 30 L40 34 L36 38" stroke="#7a5a1e" />
+          <circle cx="24" cy="29" r="3" fill="#5ad0b8" />
+          <circle cx="14" cy="30" r="2" fill="#8e2f2f" />
+        </g>
+      );
+    case "key_red_collar":
+      return (
+        <g {...S}>
+          <ellipse cx="24" cy="22" rx="16" ry="11" fill="none" stroke="#17110c" strokeWidth={8} />
+          <ellipse cx="24" cy="22" rx="16" ry="11" fill="none" stroke="#a83232" strokeWidth={5} />
+          <rect x="19" y="29" width="10" height="8" rx="1.5" fill="#c9a44e" />
+          <circle cx="24" cy="41" r="3.4" fill="#d7b458" />
+          <path d="M10 20 l2 1 M36 20 l2 1 M17 13 l1 2 M30 13 l-1 2" stroke="#d7b458" />
+        </g>
+      );
+    case "trk_hound_bell":
+      return (
+        <g {...S}>
+          <path d="M24 6 V12" stroke="#8e2f2f" strokeWidth={3} />
+          <path d="M12 34 C12 18 16 12 24 12 C32 12 36 18 36 34 Z" fill="#c9a44e" />
+          <path d="M9 34 H39" stroke="#8a6a26" strokeWidth={3.4} />
+          <circle cx="24" cy="39" r="3.2" fill="#6a4e34" />
+          <path d="M18 20 C19 17 21 16 23 16" stroke="#f4e2a8" />
+        </g>
+      );
+    case "cons_last_rites":
+      return (
+        <g {...S}>
+          <path d="M20 6 H28 V15 C35 18 38 24 38 31 C38 39 31 43 24 43 C17 43 10 39 10 31 C10 24 13 18 20 15 Z" fill="#cfd8d4" />
+          <path d="M12 30 C12 39 19 41 24 41 C30 41 36 38 36 30 Z" fill="#5ad0b8" />
+          <path d="M19 6 H29" stroke="#6a4e34" strokeWidth={3.4} />
+          <path d="M24 22 V36 M19 27 H29" stroke="#f2fbf6" strokeWidth={2.4} />
+        </g>
+      );
     default:
       return generic(id);
   }
 }
 
 const TIER_METAL = ["#a39888", "#8a7a68", "#8a847a", "#c07a42", "#9aa0a6", "#d4d8de", "#3a3c42"];
+
+function shade(hex: string, k: number) {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v * k)));
+  return `rgb(${c(n >> 16)},${c((n >> 8) & 255)},${c(n & 255)})`;
+}
 
 /** Icons for items without a drawn one, from what they are: a family, a slot, a tier. */
 function generic(id: string) {
@@ -241,44 +431,76 @@ function generic(id: string) {
     }
   }
   if (d.kind === "armour") {
+    const dark = shade(metal, 0.62);
+    const lite = shade(metal, 1.25);
+    const soft = d.set === "leather" || d.tier <= 1;
     switch (d.slot) {
       case "head":
-        return (
+        return soft ? (
           <g {...S}>
-            <path d="M12 30 C12 16 36 16 36 30 V36 H12 Z" fill={metal} />
-            <path d="M18 28 h12" stroke={trim} strokeWidth={3} />
+            <path d="M10 32 C8 14 40 14 38 32 C36 36 34 40 32 40 C30 34 18 34 16 40 C14 40 12 36 10 32 Z" fill={metal} />
+            <path d="M12 26 C18 22 30 22 36 26" stroke={dark} strokeWidth={2.6} />
+            <path d="M24 13 V24" stroke={dark} />
+          </g>
+        ) : (
+          <g {...S}>
+            <path d="M10 30 C10 10 38 10 38 30 V40 H30 V32 H18 V40 H10 Z" fill={metal} />
+            <path d="M24 9 V32" stroke={dark} strokeWidth={2.6} />
+            <path d="M12 26 H36" stroke={trim} strokeWidth={2.6} />
+            <path d="M17 29 H22 M26 29 H31" stroke="#17110c" strokeWidth={2.6} />
+            <path d="M24 9 C28 3 34 4 36 8" stroke={trim} strokeWidth={2.6} />
+            <path d="M15 18 c2 -3 4 -4 6 -5" stroke={lite} />
           </g>
         );
       case "chest":
         return (
           <g {...S}>
-            <path d="M14 10 L20 12 C22 16 26 16 28 12 L34 10 L40 18 L36 22 V40 H12 V22 L8 18 Z" fill={metal} />
-            <path d="M24 18 V38" stroke={trim} />
+            <path d="M15 12 C19 16 29 16 33 12 L38 16 V40 C30 43 18 43 10 40 V16 Z" fill={metal} />
+            <path d="M4 20 C4 12 10 9 16 11 L15 22 C11 24 6 23 4 20 Z M44 20 C44 12 38 9 32 11 L33 22 C37 24 42 23 44 20 Z" fill={lite} />
+            <path d="M24 16 V41" stroke={dark} />
+            <path d="M11 30 C19 33 29 33 37 30 M11 36 C19 39 29 39 37 36" stroke={dark} />
+            <path d="M15 12 C19 16 29 16 33 12" stroke={trim} strokeWidth={2.6} />
           </g>
         );
       case "hands":
         return (
           <g {...S}>
-            <path d="M16 40 V22 c0 -3 4 -3 4 0 v-6 c0 -3 4 -3 4 0 v-2 c0 -3 4 -3 4 0 v4 c0 -3 4 -3 4 0 v14 c0 6 -4 10 -10 10 Z" fill={metal} />
+            <path d="M14 26 V14 c0 -3 5 -3 5 0 V11 c0 -3 5 -3 5 0 V13 c0 -3 5 -3 5 0 V17 c0 -3 5 -3 5 0 V28 Z" fill={metal} />
+            <path d="M14 22 C10 20 8 24 12 28" fill={metal} />
+            <path d="M11 27 H36 L38 42 H10 Z" fill={lite} />
+            <path d="M11 32 H37 M10.5 37 H37.5" stroke={dark} />
+            <path d="M19 14 V24 M24 13 V24 M29 16 V24" stroke={dark} />
+            <path d="M11 27 H36" stroke={trim} strokeWidth={2.6} />
           </g>
         );
       case "legs":
         return (
           <g {...S}>
-            <path d="M14 8 H34 L32 40 H26 L24 20 L22 40 H16 Z" fill={metal} />
+            <path d="M12 6 H36 L37 18 L34 42 H26 L24 22 L22 42 H14 L11 18 Z" fill={metal} />
+            <path d="M12 6 H36 V11 H12 Z" fill={dark} />
+            <ellipse cx="17.5" cy="26" rx="4.5" ry="4" fill={lite} />
+            <ellipse cx="30.5" cy="26" rx="4.5" ry="4" fill={lite} />
+            <path d="M22 9 H26" stroke={trim} strokeWidth={3} />
+            <path d="M15 34 H21 M27 34 H33" stroke={dark} />
           </g>
         );
       case "feet":
         return (
           <g {...S}>
-            <path d="M14 10 H24 V30 H36 C40 30 40 38 36 38 H14 Z" fill={metal} />
+            <path d="M14 6 H26 V26 C32 26 40 28 42 34 V38 H14 Z" fill={metal} />
+            <path d="M12 38 H43 V42 H12 Z" fill={dark} />
+            <path d="M12 6 H28 V12 H12 Z" fill={lite} />
+            <path d="M26 26 C22 26 18 28 15 31 M30 28 l-2 5 M35 30 l-2 5" stroke={dark} />
+            <path d="M12 12 H28" stroke={trim} strokeWidth={2.2} />
           </g>
         );
       case "off":
         return (
           <g {...S}>
-            <path d="M10 10 H38 V22 C38 32 30 38 24 42 C18 38 10 32 10 22 Z" fill={metal} />
-            <path d="M24 12 V38 M12 20 H36" stroke={trim} />
+            <path d="M8 8 C18 12 30 12 40 8 V22 C40 33 31 39 24 44 C17 39 8 33 8 22 Z" fill={metal} />
+            <path d="M24 11 V43 M9 22 H39" stroke={trim} strokeWidth={2.6} />
+            <circle cx="24" cy="22" r="4.5" fill={lite} />
+            <path d="M12 13 C12 22 13 28 18 33" stroke={lite} />
           </g>
         );
     }
@@ -314,14 +536,31 @@ function generic(id: string) {
       </g>
     );
   }
-  if (id.startsWith("herb_"))
+  if (id.startsWith("herb_")) {
+    const petal = id === "herb_marigold" ? "#e88a2a" : id === "herb_rotcap" ? "#8a7460" : "#d6dcea";
+    const core = id === "herb_marigold" ? "#8a4a12" : id === "herb_rotcap" ? "#4a3a30" : "#7a6aa8";
     return (
       <g {...S}>
-        <path d="M24 42 V20" stroke="#5e6b45" strokeWidth={3} />
-        <circle cx="24" cy="16" r="8" fill={id === "herb_marigold" ? "#e88a2a" : id === "herb_rotcap" ? "#7a6a5a" : "#cfd8c8"} />
-        <path d="M24 30 C16 28 14 24 14 22 M24 34 C32 32 34 28 34 26" stroke="#5e6b45" />
+        <path d="M24 44 C24 34 23 28 24 20" stroke="#4e5c36" strokeWidth={2.6} />
+        <path d="M24 34 C16 34 11 30 10 24 C17 24 22 28 24 34 Z M24 30 C31 30 36 27 38 21 C31 21 26 24 24 30 Z" fill="#6f8748" />
+        {id === "herb_rotcap" ? (
+          <>
+            <path d="M10 20 C10 8 38 8 38 20 C30 23 18 23 10 20 Z" fill={petal} />
+            <circle cx="18" cy="15" r="2" fill="#c8b8a0" stroke="none" />
+            <circle cx="28" cy="13" r="1.6" fill="#c8b8a0" stroke="none" />
+            <circle cx="31" cy="18" r="1.3" fill="#c8b8a0" stroke="none" />
+          </>
+        ) : (
+          <>
+            {[0, 60, 120, 180, 240, 300].map((r) => (
+              <ellipse key={r} cx="24" cy="8" rx="4" ry="6" fill={petal} transform={`rotate(${r} 24 15)`} />
+            ))}
+            <circle cx="24" cy="15" r="3.6" fill={core} />
+          </>
+        )}
       </g>
     );
+  }
   // materials: a lump in its colour
   const col: Record<string, string> = { mat_coal: "#2a2826", mat_steel: "#c8ccd2", mat_black_iron: "#34363c", mat_wheat: "#d8b860", mat_meat: "#b05a4a", mat_hound_hide: "#2c2824", mat_boe_fang: "#efe8d8", mat_ember_shard: "#ff8a30" };
   if (id === "mat_steel" || id === "mat_black_iron")

@@ -3,7 +3,7 @@ import { STATION_NAMES } from "./game/data/zones";
 import { RARITY_COLOR, SET_BONUS, type Rarity } from "./game/data/items";
 import type { GameApi, Hud, Look, Quality } from "./game/Game";
 import { Controls } from "./ui/Controls";
-import { Glyph, ItemIcon } from "./ui/icons";
+import { Glyph, IconDefs, ItemIcon } from "./ui/icons";
 import { Online, PlayerKey, copyText, hasJoinLink } from "./ui/Online";
 import { Realm } from "./net/realm";
 
@@ -74,6 +74,7 @@ export default function App() {
       <canvas ref={canvas} className="vm-canvas" />
       <div ref={overlay} className="vm-overlay" />
       {error && <div className="vm-error">This device could not start WebGL: {error}</div>}
+      <IconDefs />
       {hud?.mode === "title" && <div className="vm-keyart drift back" />}
       {api && hud && <Screens api={api} hud={hud} />}
       {(!hud || hud.mode === "loading") && !error && <Loading progress={hud?.loading ?? 0} />}

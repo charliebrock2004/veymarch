@@ -166,7 +166,9 @@ export type HumanLook = {
   ears?: "goblin";
   headScale?: number;
   hat?: "bearskin" | "redcap" | "straw";
-  face?: "toy";
+  face?: "toy" | "skull" | "dead";
+  /** eye colour for the dead and the uncanny; reads as a glow */
+  eyeGlow?: number;
   /** worn armour, drawn as part of the body */
   armour?: ArmourLook;
 };
@@ -218,11 +220,34 @@ export function buildHuman(look: HumanLook): Rig {
   const H = 0.118 * hs;
   b.part("head", ell(H, H * 1.12, H * 1.05, 0, 0.11 * hs, 0.005), look.skin);
   b.part("head", ell(H * 0.75, H * 0.45, H * 0.7, 0, 0.03 * hs, 0.03), look.skin);
-  if (!toy) b.part("head", at(rot(cone(0.022 * hs, 0.06 * hs, 0, 0, 0, 5), Math.PI / 2, 0, 0), 0, 0.095 * hs, 0.125 * hs), look.skin);
+  if (!toy && look.face !== "skull") b.part("head", at(rot(cone(0.022 * hs, 0.06 * hs, 0, 0, 0, 5), Math.PI / 2, 0, 0), 0, 0.095 * hs, 0.125 * hs), look.skin);
   const eye = toy ? 0x1c1916 : 0x231d18;
   if (toy) {
     b.part("head", ell(0.017 * hs, 0.019 * hs, 0.01, 0.042 * hs, 0.125 * hs, 0.112 * hs, 6), eye);
     b.part("head", ell(0.017 * hs, 0.019 * hs, 0.01, -0.042 * hs, 0.125 * hs, 0.112 * hs, 6), eye);
+  } else if (look.face === "skull" || look.face === "dead") {
+    const skull = look.face === "skull";
+    const pit = skull ? 0x0c0a09 : new THREE.Color(look.skin).multiplyScalar(0.3).getHex();
+    const glow = look.eyeGlow ?? (skull ? 0x7dffd0 : 0xd8e8c0);
+    for (const sx of [1, -1]) {
+      // a deep socket with a small light far back in it
+      b.part("head", ell(0.027 * hs, 0.024 * hs, 0.01, sx * 0.045 * hs, 0.128 * hs, 0.106 * hs, 8), pit);
+      b.part("head", ell(0.0085 * hs, 0.0085 * hs, 0.006, sx * 0.044 * hs, 0.126 * hs, 0.114 * hs, 8), glow);
+      // heavy brow ridge
+      b.part("head", rot(box(0.052 * hs, 0.012 * hs, 0.02, 0, 0, 0), 0, 0, sx * 0.2).translate(sx * 0.046 * hs, 0.157 * hs, 0.108 * hs), look.skin);
+      // hollow cheek
+      b.part("head", ell(0.016 * hs, 0.028 * hs, 0.006, sx * 0.072 * hs, 0.07 * hs, 0.082 * hs, 8), new THREE.Color(look.skin).multiplyScalar(0.55).getHex());
+    }
+    if (skull) {
+      // nose cavity and a row of teeth
+      b.part("head", ell(0.011 * hs, 0.017 * hs, 0.02, 0, 0.09 * hs, 0.12 * hs, 6), 0x0c0a09);
+      b.part("head", box(0.062 * hs, 0.02 * hs, 0.012, 0, 0.045 * hs, 0.106 * hs), 0xf2ecd8);
+      for (let i = -2; i <= 2; i++) b.part("head", box(0.003 * hs, 0.022 * hs, 0.014, i * 0.012 * hs, 0.045 * hs, 0.107 * hs), 0x2a241c);
+      b.part("head", box(0.066 * hs, 0.004 * hs, 0.014, 0, 0.045 * hs, 0.107 * hs), 0x2a241c);
+    } else {
+      b.part("head", ell(0.03 * hs, 0.011 * hs, 0.008, 0, 0.05 * hs, 0.106 * hs, 8), 0x1a1210);
+    }
+    b.part("head", ell(0.05 * hs, 0.03 * hs, 0.04, 0, 0.02 * hs, 0.07 * hs, 8), look.skin);
   } else {
     const shade = new THREE.Color(look.skin).multiplyScalar(0.72).getHex();
     const lip = new THREE.Color(look.skin).lerp(new THREE.Color(0x8a3a34), 0.45).getHex();

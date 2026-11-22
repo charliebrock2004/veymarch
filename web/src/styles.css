@@ -2038,3 +2038,94 @@ input {
 }
 .vm-keyart.back { z-index: 15; }
 .vm-keyart.back + .vm-panel-screen { background: rgba(10, 8, 7, 0.3); backdrop-filter: none; -webkit-backdrop-filter: none; }
+
+/* ------------------------------------------------ art pass 2: HUD, minimap, bag */
+.vm-vitals {
+  border-radius: 3px;
+  padding: 9px 12px 8px;
+  background:
+    linear-gradient(180deg, rgba(44, 36, 28, 0.86), rgba(18, 15, 12, 0.8)),
+    url(/art/panel.webp) 0 0 / 192px 192px;
+  border: 1px solid rgba(215, 164, 65, 0.42);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), inset 0 0 0 2px rgba(12, 10, 8, 0.8), inset 0 0 0 3px rgba(215, 164, 65, 0.14);
+}
+.vm-vbar {
+  height: 10px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #0b0908, #1d1814);
+  box-shadow: inset 0 0 0 1px rgba(215, 164, 65, 0.28), inset 0 2px 3px rgba(0, 0, 0, 0.8);
+}
+.vm-vbar i {
+  position: relative;
+  border-radius: 1px;
+}
+.vm-vbar i::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 255, 255, 0) 45%, rgba(0, 0, 0, 0.28));
+}
+.vm-vbar.hp i {
+  background: linear-gradient(90deg, #7a2420, #c9483a 70%, #e0705a);
+  box-shadow: 0 0 8px rgba(201, 72, 58, 0.5);
+}
+.vm-vbar.stam, .vm-vbar.mana {
+  height: 6px;
+}
+.vm-vbar.stam i {
+  background: linear-gradient(90deg, #8a6a22, #e2bd58);
+}
+.vm-vbar.mana i {
+  background: linear-gradient(90deg, #b04a18, #ff9a50);
+  box-shadow: 0 0 8px rgba(255, 140, 60, 0.55);
+}
+.vm-compass {
+  border-radius: 2px;
+  background: linear-gradient(180deg, rgba(44, 36, 28, 0.8), rgba(18, 15, 12, 0.7));
+  box-shadow: inset 0 1px 0 rgba(215, 164, 65, 0.45), inset 0 -1px 0 rgba(215, 164, 65, 0.45);
+}
+.vm-minimap {
+  box-shadow:
+    0 0 0 2px #17120e,
+    0 0 0 4px #b5893a,
+    0 0 0 5px #5a4216,
+    0 0 0 7px #17120e,
+    0 8px 20px rgba(0, 0, 0, 0.55),
+    inset 0 0 18px rgba(0, 0, 0, 0.6);
+  filter: none;
+}
+.vm-gslot, .vm-item {
+  border-radius: 3px;
+  border-color: rgba(215, 164, 65, 0.26);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(231, 220, 200, 0.13), rgba(0, 0, 0, 0.25) 78%),
+    linear-gradient(180deg, #2c241c, #17130f);
+  box-shadow: inset 0 0 0 1px rgba(12, 10, 8, 0.9), inset 0 2px 6px rgba(0, 0, 0, 0.55);
+  transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s;
+}
+.vm-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(215, 164, 65, 0.7);
+}
+.vm-item.on, .vm-gslot.on {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 1px rgba(215, 164, 65, 0.5), 0 0 14px rgba(215, 164, 65, 0.35), inset 0 2px 6px rgba(0, 0, 0, 0.55);
+}
+.vm-item.eq {
+  background:
+    radial-gradient(circle at 50% 38%, rgba(215, 164, 65, 0.3), rgba(0, 0, 0, 0.2) 78%),
+    linear-gradient(180deg, #33281a, #1a140d);
+}
+.vm-empty {
+  border-radius: 3px;
+  border: 1px dashed rgba(215, 164, 65, 0.22);
+}
+.vm-detail > svg:first-child {
+  align-self: center;
+  padding: 10px;
+  box-sizing: content-box;
+  border: 1px solid rgba(215, 164, 65, 0.4);
+  border-radius: 3px;
+  background: radial-gradient(circle at 50% 40%, rgba(231, 220, 200, 0.16), rgba(0, 0, 0, 0.3) 80%), #1c1712;
+  box-shadow: inset 0 0 0 2px rgba(12, 10, 8, 0.85);
+}

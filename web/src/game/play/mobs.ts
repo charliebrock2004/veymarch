@@ -410,6 +410,7 @@ function buildNew(kind: MobKind): Rig {
       return buildHuman({
         skin: shade(0x6f7f68, v), hair: 0x26301f, hairStyle: "long", shirt: 0x4a5442, coat: 0x34402f, coatLong: true,
         trousers: 0x2e3628, boots: 0x222820, belt: 0x1e2418, height: 1.8, frame: 0.95,
+        face: "dead", eyeGlow: 0xa8e8d8,
       });
     case "croc": {
       const r = buildQuad({ kind: "wolf", fur: 0x4a5640, belly: 0x8a8a68, size: 1 });
@@ -439,28 +440,33 @@ function buildNew(kind: MobKind): Rig {
         belt: 0x2a241c, cape: kind === "skeleton" ? undefined : 0x3a3a46,
         armour: kind === "skeleton" ? { head: "iron" } : { head: "bk", chest: "bk", hands: "bk", legs: "bk", feet: "bk" },
         height: kind === "standard_bearer" ? 2.45 : kind === "undead_knight" ? 2.15 : 1.8, frame: kind === "skeleton" ? 0.72 : 1.1,
+        face: "skull", eyeGlow: kind === "skeleton" ? 0x7dffd0 : 0xff7a50,
       });
     case "zombie":
       return buildHuman({
         skin: shade(0x8a9478, v), hair: 0x2a2a22, hairStyle: pick(["long", "bald", "short"]), shirt: 0x5a5444, coat: 0x3e3a30,
         trousers: 0x3a362c, boots: 0x262420, belt: 0x22201a, height: 1.75 + Math.random() * 0.12, frame: 1.0,
+        face: "dead", eyeGlow: 0xd8f0a0,
       });
     case "ghost":
       return buildHuman({
         skin: 0xc8f0e8, hair: 0xd0f0e8, hairStyle: "long", shirt: 0xa8d8d0, coat: 0x88c0b8, coatLong: true,
         trousers: 0x88c0b8, boots: 0x88c0b8, belt: 0x6aa8a0, height: 1.9, frame: 0.85,
+        face: "dead", eyeGlow: 0xffffff,
       });
     case "necromancer":
     case "grave_confessor":
       return buildHuman({
         skin: 0xd8d0c4, hair: 0x101010, hairStyle: "hood", shirt: 0x1e2a22, coat: kind === "necromancer" ? 0x18221c : 0xd8d4c8, coatLong: true,
         trousers: 0x141a16, boots: 0x101210, belt: 0x6aff9a, height: kind === "grave_confessor" ? 2.3 : 1.85, frame: kind === "grave_confessor" ? 1.15 : 0.88,
+        face: "dead", eyeGlow: 0x6aff9a,
       });
     default:
       // crypt_dead
       return buildHuman({
         skin: shade(0xd8d2bc, v), hair: 0x3a3530, hairStyle: "bald", shirt: 0x5a5444, coat: 0x4a443a, trousers: 0x46403a, boots: 0xc8c0a8,
         belt: 0x2a241c, height: 1.8, frame: 0.78,
+        face: "skull", eyeGlow: 0x9adfff,
       });
   }
 }
