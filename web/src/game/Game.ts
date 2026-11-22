@@ -4775,6 +4775,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     loadZone: (z: ZoneId) => ensureZone(z),
     finds: () => FINDS.map((f) => ({ id: f.id, zone: f.zone, kind: f.kind, got: found(f.id), at: findMeshes.get(f.id) ? { x: findMeshes.get(f.id)!.x, z: findMeshes.get(f.id)!.z } : null })),
     setLevel: (n: number) => applyProgress({ xp: LEVEL_XP[n - 1] ?? 0, level: n }),
+    /** single player only: write experience into the device's own world, so it survives a reload */
+    soloXp: async (n: number) => {
+      const be = online?.realm.backend as { exec?: (sql: string, params?: unknown[]) => Promise<unknown[]> } | undefined;
+      if (!online?.realm.solo || !be?.exec) return false;
+      await be.exec("update vm_characters set xp = $2 where id = $1::uuid", [online.charId, LEVEL_XP[n - 1] ?? 0]);
+      applyProgress({ xp: LEVEL_XP[n - 1] ?? 0, level: n });
+      return true;
+    },
     talents: () => ({ ...talents, free: talentFree(level, talents), maxHp: P.maxHp, maxStam: P.maxStam }),
     bounties: () => bountyBook(),
     noteKill: (k: string) => noteKill(k),

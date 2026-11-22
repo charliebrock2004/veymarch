@@ -70,7 +70,7 @@ try {
   const p1 = await V("state");
   R.dodge = { moved: Math.hypot(p1.x - p0.x, p1.z - p0.z).toFixed(2), action: p1.action };
   // talents and a bounty carried through to a claim
-  await V("setLevel", 6);
+  R.soloXp = await V("soloXp", 6);
   const b0 = await V("bounties");
   const d = defs[b0.ids[0]];
   for (let i = 0; i < d.n; i++) await V("noteKill", d.kind);
@@ -107,7 +107,7 @@ try {
   R.savedTal = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("veyrmarch.codex.")).map((k) => JSON.parse(localStorage.getItem(k)).tal));
   R.reBounties = await V("bounties");
   const s2 = await V("state");
-  R.reState = { level: s2.level, x: s2.x, z: s2.z };
+  R.reState = { hp: s2.hp, x: s2.x, z: s2.z };
   await page.screenshot({ path: join(out, `${tag}-reloaded.png`), timeout: 180000 });
   console.log(JSON.stringify(R, null, 1));
 } catch (e) { errors.push("harness: " + e.message); }
