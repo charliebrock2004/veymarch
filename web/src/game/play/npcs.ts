@@ -1,6 +1,7 @@
 import type * as THREE from "three";
 import { Poser, buildHuman, poseHuman, type HumanAction, type HumanLook, type Rig } from "../engine/rig";
 import { weaponModel } from "./weapons";
+import { ADV, ADV_HEAD, ADV_HEIGHT, ModelActor, loadAdventurer, poseAdventurer } from "../engine/models";
 import type { ZoneId } from "../data/zones";
 
 /**
@@ -143,6 +144,7 @@ export class Npc {
   faceYaw: number | null = null;
   indoors = false;
   act: HumanAction = "none";
+  private actor: ModelActor | null = null;
   private stuck = 0;
   private lastD = 0;
 
@@ -153,7 +155,25 @@ export class Npc {
   constructor(public def: NpcDef, parent: THREE.Object3D) {
     this.rig = buildHuman(def.look);
     this.poser = new Poser(this.rig);
-    if (def.hold) this.rig.sockets.gripR.add(weaponModel(def.hold));
+    const held = def.hold ? weaponModel(def.hold) : null;
+    if (held) this.rig.sockets.gripR.add(held);
+    // a modelled body takes over from the code-built one once it has loaded
+    const L = def.look;
+    let h = 0;
+    for (const c of def.id) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    const url = L.armour?.chest ? ADV.knight : L.hairStyle === "hood" ? ADV.hooded : L.coatLong ? ADV.mage : [ADV.rogue, ADV.barbarian, ADV.hooded, ADV.rogue][h % 4];
+    loadAdventurer(url).then(([body, anim]) => {
+      for (const c of this.rig.group.children) c.visible = false;
+      const tall = (L.height ?? 1.75) / ADV_HEIGHT;
+      const tint = ((0x80 + ((L.coat >> 16) & 255) / 2) << 16) | ((0x80 + ((L.coat >> 8) & 255) / 2) << 8) | (0x80 + (L.coat & 255) / 2);
+      const a = new ModelActor(body, tall, ADV_HEAD, tint, anim).emptyHands();
+      if (held && a.handR) {
+        held.scale.multiplyScalar(1 / tall);
+        a.handR.add(held);
+      }
+      this.rig.group.add(a.root);
+      this.actor = a;
+    }, () => {});
     const s = def.stops[0];
     this.x = s.x;
     this.z = s.z;
@@ -233,6 +253,8 @@ export class Npc {
     this.y = groundAt(this.x, this.z);
     this.rig.group.position.set(this.x, this.y, this.z);
     this.rig.group.rotation.y = this.yaw;
-    poseHuman(this.poser, { t: t + this.x, move: this.speed / 1.35, phase: this.phase, action: act, at: 0, block: false, armed: !!def.hold && act === "none" }, dt);
+    const hp = { t: t + this.x, move: this.speed / 1.35, phase: this.phase, action: act, at: 0, block: false, armed: !!def.hold && act === "none" };
+    if (this.actor) poseAdventurer(this.actor, act === "hammer" || act === "gather" ? { ...hp, at: (t * 0.4) % 1 } : hp, dt);
+    else poseHuman(this.poser, hp, dt);
   }
 }

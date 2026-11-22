@@ -3,7 +3,7 @@ import type { Decal, Shape } from "../engine/fx";
 import {
   Poser, buildHuman, buildQuad, buildRockingHorse, characterMaterial, poseHorse, poseHuman, poseQuad, type HumanAction, type QuadAction, type Rig,
 } from "../engine/rig";
-import { ModelActor, loadModel, modelReady, type ModelTemplate } from "../engine/models";
+import { ADV, ADV_ANIMS, ModelActor, loadModel, modelReady, type ModelTemplate } from "../engine/models";
 import { MOB_LOOT } from "../content";
 import { SILENT, type Env, type PlayerState } from "./env";
 import type { ZoneId } from "../data/zones";
@@ -696,17 +696,41 @@ export const MOB_KINDS: MobKind[] = [
 /** ax, az: where an aimed attack (a witch's hex) lands; sent only while one is told or struck. */
 export type MobSnap = [key: string, x: number, z: number, yaw: number, st: number, hp: number, atk: number, t: number, kind: number, ax?: number, az?: number];
 
-/** Foes drawn from a modelled, clip-animated glTF instead of the procedural rig. */
-const MODELS: Partial<Record<MobKind, string[]>> = {
-  skeleton: ["/models/skeleton_minion.glb", "/models/skeleton_warrior.glb", "/models/skeleton_rogue.glb"],
-  necromancer: ["/models/skeleton_mage.glb"],
-  undead_knight: ["/models/skeleton_warrior.glb"],
+/** Foes drawn from a modelled, clip-animated glTF instead of the procedural rig. `adv`: an adventurer body on the shared rig. */
+type Worn = { urls: string[]; tint?: number; adv?: boolean; fade?: number; ears?: number; eyes?: number; head?: number; quad?: boolean };
+const SK = { minion: "/models/skeleton_minion.glb", warrior: "/models/skeleton_warrior.glb", rogue: "/models/skeleton_rogue.glb", mage: "/models/skeleton_mage.glb" };
+const MODELS: Partial<Record<MobKind, Worn>> = {
+  wolf: { urls: ["/models/animal_wolf.glb"], quad: true, tint: 0xffffff },
+  blackwolf: { urls: ["/models/animal_wolf.glb"], quad: true, tint: 0x6a6878, eyes: 0xff4030 },
+  hound: { urls: ["/models/animal_husky.glb"], quad: true, tint: 0xb89878 },
+  kennel_hound: { urls: ["/models/animal_husky.glb"], quad: true, tint: 0x5a5058, eyes: 0xff7030 },
+  deer: { urls: ["/models/animal_stag.glb", "/models/animal_deer.glb"], quad: true, tint: 0xffffff },
+  horse: { urls: ["/models/animal_horse.glb"], quad: true, tint: 0xffffff },
+  skeleton: { urls: [SK.minion, SK.warrior, SK.rogue] },
+  necromancer: { urls: [SK.mage] },
+  undead_knight: { urls: [SK.warrior] },
+  standard_bearer: { urls: [SK.warrior], tint: 0xc8b890 },
+  grave_confessor: { urls: [SK.mage], tint: 0xc0a0a0 },
+  crypt_dead: { urls: [SK.minion, SK.rogue], tint: 0x9aa090 },
+  ghost: { urls: [SK.mage, SK.rogue], tint: 0x9fd0e8, fade: 0.5 },
+  zombie: { urls: [ADV.rogue, ADV.barbarian], adv: true, tint: 0x6f8c6a, eyes: 0xd8ff70 },
+  drowned: { urls: [ADV.rogue, ADV.hooded], adv: true, tint: 0x5a9a9c, eyes: 0xa0fff0 },
+  goblin: { urls: [ADV.rogue], adv: true, tint: 0x6cc04a, ears: 0x4f8a34, eyes: 0xffe040, head: 0.8 },
+  redcap: { urls: [ADV.barbarian], adv: true, tint: 0x8fb050, ears: 0x5f7a34, eyes: 0xff5030, head: 0.8 },
+  soldier: { urls: [ADV.knight], adv: true, tint: 0xc8c0b8 },
+  bandit: { urls: [ADV.hooded, ADV.rogue], adv: true, tint: 0xa89888 },
+  deserter: { urls: [ADV.knight], adv: true, tint: 0xa88868 },
+  kennelmaster: { urls: [ADV.barbarian], adv: true, tint: 0xa08070 },
+  witch: { urls: [ADV.mage], adv: true, tint: 0x8a70a0 },
+  black_guard: { urls: [ADV.knight], adv: true, tint: 0x5a5a66 },
+  keep_knight: { urls: [ADV.knight], adv: true, tint: 0x8a8a98 },
 };
 // height of the stock model once its head is shrunk to the game's proportions
 const MODEL_HEIGHT = 1.72;
 
 export class Mob {
   actor: ModelActor | null = null;
+  private beast = false;
   private swing = "1H_Melee_Attack_Chop";
   id = nextId++;
   cfg: Cfg;
@@ -782,25 +806,31 @@ export class Mob {
     env.parent(zone).add(this.rig.group);
     this.y = env.groundAt(this.x, this.z);
     this.rig.group.position.set(this.x, this.y, this.z);
-    const urls = MODELS[kind];
-    if (urls) {
-      const url = urls[this.id % urls.length];
-      const tpl = modelReady(url);
-      if (tpl) this.wear(tpl);
-      else loadModel(url).then((t) => this.wear(t), () => {});
+    const worn = MODELS[kind];
+    if (worn) {
+      const url = worn.urls[this.id % worn.urls.length];
+      const anim = worn.adv ? ADV_ANIMS : url;
+      const body = modelReady(url);
+      const clips = modelReady(anim);
+      if (body && clips) this.wear(worn, body, clips);
+      else Promise.all([loadModel(url), loadModel(anim)]).then(([b, c]) => this.wear(worn, b, c), () => {});
     }
   }
 
   /** Swap the procedural body for the loaded model; the foe's weapon moves to the model's hand. */
-  private wear(tpl: ModelTemplate) {
+  private wear(worn: Worn, tpl: ModelTemplate, clips: ModelTemplate) {
     const g = this.rig.group;
     const held = this.rig.sockets.gripR?.children[0];
     for (const c of g.children) c.visible = false;
-    const actor = new ModelActor(tpl, this.cfg.height / MODEL_HEIGHT, 0.58, 0xb8b0a0);
-    const hand = actor.node("handslotr") ?? actor.node("handslot.r");
-    if (held && hand) {
+    const actor = new ModelActor(tpl, this.cfg.height / MODEL_HEIGHT, worn.quad ? 1 : (worn.head ?? 0.58), worn.tint ?? 0xb8b0a0, clips);
+    if (worn.quad) actor.fit(this.cfg.height);
+    this.beast = !!worn.quad;
+    if (worn.adv) actor.emptyHands();
+    if (worn.ears !== undefined || worn.eyes !== undefined) actor.monster(worn.ears, worn.eyes);
+    if (worn.fade) actor.fade(worn.fade);
+    if (held && actor.handR) {
       held.scale.multiplyScalar(MODEL_HEIGHT / this.cfg.height);
-      hand.add(held);
+      actor.handR.add(held);
     }
     g.add(actor.root);
     this.actor = actor;
@@ -808,17 +838,28 @@ export class Mob {
 
   private animateModel(a: ModelActor, dt: number, k: number) {
     a.flash(this.flash > 0);
+    if (this.beast) {
+      const bite = a.has("Attack") ? "Attack" : "Attack_Headbutt";
+      if (this.state === "dead") a.pose("Death", dt, Math.min(1, this.deadT / a.duration("Death")), 1, 20);
+      else if (this.state === "stagger") a.pose("Idle_HitReact_Left", dt, Math.min(1, 1 - this.t / 0.7), 1, 20);
+      else if (this.state === "tell") a.pose(bite, dt, k * 0.35, 1, 14);
+      else if (this.state === "active") a.pose(bite, dt, 0.35 + k * 0.45, 1, 30);
+      else if (this.speed > this.cfg.run * 0.75) a.pose("Gallop", dt, undefined, Math.max(0.6, this.speed / 5.5));
+      else if (this.speed > 0.2) a.pose("Walk", dt, undefined, Math.max(0.6, this.speed / 1.4));
+      else a.pose(this.aggro || this.id % 3 ? "Idle" : "Eating", dt, undefined, 1, 5);
+      return;
+    }
     if (this.state === "dead") a.pose("Death_A", dt, Math.min(1, this.deadT / a.duration("Death_A")), 1, 20);
     else if (this.state === "stagger") a.pose("Hit_A", dt, Math.min(1, 1 - this.t / 0.7), 1, 20);
-    else if (this.state === "tell" && this.atk?.tellPose === "cast") a.pose("Spellcast_Raise", dt, k * 0.9, 1, 14);
+    else if (this.state === "tell" && this.atk?.tellPose === "cast") a.pose(a.has("Spellcast_Raise") ? "Spellcast_Raise" : "Spellcast_Shoot", dt, k * (a.has("Spellcast_Raise") ? 0.9 : 0.15), 1, 14);
     else if (this.state === "active" && this.atk?.tellPose === "cast") a.pose("Spellcast_Shoot", dt, 0.15 + k * 0.5, 1, 30);
     else if (this.state === "tell") a.pose(this.swing, dt, k * 0.42, 1, 14);
     else if (this.state === "active") a.pose(this.swing, dt, 0.42 + k * 0.38, 1, 30);
     else {
-      if (this.state === "recover") this.swing = this.kind === "undead_knight" ? "2H_Melee_Attack_Chop" : this.id % 2 ? "1H_Melee_Attack_Slice_Diagonal" : Math.random() < 0.5 ? "1H_Melee_Attack_Chop" : "1H_Melee_Attack_Stab";
+      if (this.state === "recover") this.swing = this.cfg.unarmed && a.has("Unarmed_Melee_Attack_Punch_A") ? (Math.random() < 0.5 ? "Unarmed_Melee_Attack_Punch_A" : "Unarmed_Melee_Attack_Punch_B") : this.kind === "undead_knight" || this.kind === "kennelmaster" ? "2H_Melee_Attack_Chop" : this.id % 2 ? "1H_Melee_Attack_Slice_Diagonal" : Math.random() < 0.5 ? "1H_Melee_Attack_Chop" : "1H_Melee_Attack_Stab";
       if (this.speed > this.cfg.run * 0.75) a.pose("Running_A", dt, undefined, this.speed / 4.2);
-      else if (this.speed > 0.25) a.pose("Walking_D_Skeletons", dt, undefined, this.speed / 1.5);
-      else a.pose(this.aggro ? "Idle_Combat" : "Idle", dt, undefined, 1, 5);
+      else if (this.speed > 0.25) a.pose(a.has("Walking_D_Skeletons") ? "Walking_D_Skeletons" : "Walking_A", dt, undefined, this.speed / 1.5);
+      else a.pose(this.aggro && a.has("Idle_Combat") ? "Idle_Combat" : "Idle", dt, undefined, 1, 5);
     }
   }
 

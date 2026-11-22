@@ -12,6 +12,7 @@ import { Audio } from "./engine/audio";
 import type { ThemeId } from "./engine/music";
 import { armourCode, armourLook } from "./play/gear";
 import { Beam, DecalPool, Flashes, Trail } from "./engine/fx";
+import { ADV, ADV_HEAD, ADV_HEIGHT, ModelActor, loadAdventurer, poseAdventurer } from "./engine/models";
 import { WATER, installHeightFog, shared } from "./engine/kit";
 import { makeMaterials } from "./engine/materials";
 import { Particles, buildGlows } from "./engine/particles";
@@ -39,6 +40,7 @@ import { Room, type Bundle, type Ev } from "../net/room";
 import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
 import { BOUNTIES, FINDS, dayStamp, pickBounties, type Find } from "./data/explore";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
+import { MARKS, RANK_NAMES, markBonuses, markBoon, markRank, markVs, marksView, type MarkView } from "./data/marks.ts";
 
 // ------------------------------------------------------------------ public types
 
@@ -135,7 +137,7 @@ export type Hud = {
   /** minimap: [right, ahead, kind] in metres around the player, turned with the camera */
   radar: { r: number; pts: [number, number, string][] } | null;
   /** bestiary and deeds, filled while the journal is open */
-  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; bounties: { id: string; name: string; text: string; n: number; of: number; paid: boolean; reward: string }[]; finds: { caches: number; stones: number }; talents: { free: number; trees: { id: string; name: string; sub: string; list: { id: string; name: string; rank: number; max: number; text: string; next: string }[] }[] } } | null;
+  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; bounties: { id: string; name: string; text: string; n: number; of: number; paid: boolean; reward: string }[]; finds: { caches: number; stones: number }; talents: { free: number; trees: { id: string; name: string; sub: string; list: { id: string; name: string; rank: number; max: number; text: string; next: string }[] }[] } ; marks: MarkView[] } | null;
   /** unspent talent points */
   talentFree: number;
   /** a one-time hint */
@@ -478,6 +480,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let banner: Hud["banner"] = null;
   let codex: Codex = freshCodex();
   let codexId = "local";
+  let marks = markBonuses({ c: codex, deaths: 0 });
+  let dodgedAt = 0;
   let tip: Hud["tip"] = null;
   let tipT = 0;
   let padX = 0;
@@ -584,6 +588,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   };
   let playerRig: Rig | null = null;
   let playerPoser: Poser | null = null;
+  let playerActor: ModelActor | null = null;
   let heldMain: THREE.Object3D | null = null;
   // blade base and tip in the grip socket's space, for the swing trail
   const bladeBase = new THREE.Vector3(), bladeTip = new THREE.Vector3();
@@ -602,7 +607,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const _tb = new THREE.Vector3(), _tt = new THREE.Vector3();
   function updateTrail(dt: number) {
     const cutting = heldMain && (P.action.startsWith("light") || P.action === "heavy") && P.at > P.dur * P.hitAt * 0.45 && P.at < P.dur * Math.min(0.95, P.hitAt + 0.3);
-    const grip = playerRig?.sockets.gripR;
+    const grip = playerActor?.handR ?? playerRig?.sockets.gripR;
     if (!cutting || !grip) return swingTrail.update(dt);
     grip.updateWorldMatrix(true, false);
     const heavy = P.action === "heavy";
@@ -788,7 +793,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (w.id !== "wpn_fists") {
       heldMain = weaponModel(w.id);
       measureBlade(heldMain);
-      playerRig.sockets.gripR.add(heldMain);
+      if (playerActor?.handR) {
+        const k = 1 / playerActor.root.scale.x;
+        heldMain.scale.multiplyScalar(k);
+        bladeBase.multiplyScalar(k);
+        bladeTip.multiplyScalar(k);
+        playerActor.handR.add(heldMain);
+      } else playerRig.sockets.gripR.add(heldMain);
     }
     const shield = items.find((s) => s.equipped && ITEMS[s.def]?.moveset === "shield");
     const sh = !!shield;
@@ -799,7 +810,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       heldOff = weaponModel(shield.def === "arm_stump_shield" ? "shield" : shield.def);
       heldOff.rotation.set(0, Math.PI / 2, 0);
       heldOff.position.set(0.06, 0.05, -0.1);
-      playerRig.bones.foreL.add(heldOff);
+      if (playerActor?.handL) {
+        heldOff.scale.multiplyScalar(1 / playerActor.root.scale.x);
+        heldOff.position.set(0, 0, 0);
+        playerActor.handL.add(heldOff);
+      } else playerRig.bones.foreL.add(heldOff);
     }
   }
 
@@ -817,7 +832,22 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     playerPoser = new Poser(playerRig);
     zoneRoot(P.zone).add(playerRig.group);
     heldMain = heldOff = null;
+    playerActor = null;
     syncGear();
+    // the modelled body replaces the code-built one once it has loaded
+    const rig = playerRig;
+    const chest = armourLook(equippedDefs()).chest;
+    const url = chest === "leather" ? ADV.hooded : chest === "hound" ? ADV.barbarian : chest ? ADV.knight : [ADV.rogue, ADV.hooded, ADV.barbarian][look.body];
+    loadAdventurer(url).then(([body, anim]) => {
+      if (playerRig !== rig) return;
+      for (const c of rig.group.children) c.visible = false;
+      playerActor = new ModelActor(body, 1.78 / ADV_HEIGHT, ADV_HEAD, chest === "bk" ? 0x6a6470 : 0xd8d0c4, anim).emptyHands();
+      rig.group.add(playerActor.root);
+      heldMain?.parent?.remove(heldMain);
+      heldOff?.parent?.remove(heldOff);
+      heldMain = heldOff = null;
+      syncGear();
+    }, () => {});
   }
 
   function hasEdge() {
@@ -2006,6 +2036,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     audio.swing(heavy);
   }
 
+  /** A strike, made harder by the marks this character has earned against that kind of foe. */
+  const marked = (d: number, kind: string, heavy: boolean) => Math.max(1, Math.round(d * (1 + markVs(marks, kind) + (heavy ? marks.heavy : 0))));
+
   function resolveSwing() {
     const w = mainWeapon();
     const heavy = P.action === "heavy";
@@ -2061,11 +2094,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (behind && (m.state === "idle" || m.state === "tell" || m.state === "active" || m.state === "recover")) return ((openWord = "Backstab"), true);
       return false;
     };
-    for (const m of mobs) if (m.alive && m.zone === P.zone) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy), opening(m));
+    for (const m of mobs) if (m.alive && m.zone === P.zone) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, marked(d, m.kind, heavy), heavy), opening(m));
     const zb = zoneBoss();
     if (zb) {
-      if (zb.fighting) tryHit(zb.x, zb.z, 1.1, (d) => bossHit(zb, d, heavy, false));
-      for (const m of zb.adds) if (m.alive) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy), opening(m));
+      if (zb.fighting) tryHit(zb.x, zb.z, 1.1, (d) => bossHit(zb, marked(d, "boss_" + zb.def.id, heavy), heavy, false));
+      for (const m of zb.adds) if (m.alive) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, marked(d, m.kind, heavy), heavy), opening(m));
     }
     flashes.arc(ax, P.y + 1.15, az, P.yaw, reach * 0.8, P.action === "light3" || heavy, w.id === "wpn_cookie_blade" ? 0xffb0a0 : 0xffe6b8, P.action === "light2");
     if (hits) {
@@ -2220,14 +2253,22 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const exposed = mode === "play" || (online && (mode === "bag" || mode === "talk" || mode === "pause"));
     if (P.dead || !exposed) return false;
     if (P.iframe > 0) {
-      if (P.action === "dodge") floater("Dodged", P.x, P.y + 2.0, P.z, "info");
+      if (P.action === "dodge") {
+        floater("Dodged", P.x, P.y + 2.0, P.z, "info");
+        // one roll counts once, however many blades it passes through
+        if (performance.now() - dodgedAt > 600) {
+          dodgedAt = performance.now();
+          codex.dodges++;
+          checkDeeds();
+        }
+      }
       return false;
     }
     let d = dmg;
     const ang = Math.atan2(sx - P.x, sz - P.z);
     const facing = Math.abs(Math.atan2(Math.sin(ang - P.yaw), Math.cos(ang - P.yaw))) < 1.75;
     if (P.blocking && facing && !o.unblockable) {
-      if (P.blockT < 0.22 && o.parryable && o.source) {
+      if (P.blockT < 0.22 + marks.parry && o.parryable && o.source) {
         o.source.stagger(1.3);
         if (mainWeapon().id === "wpn_finlay_longsword" || tm.riposte > 0) riposte = 3;
         audio.parry();
@@ -2252,7 +2293,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }
     }
     // armour takes its share of whatever got through
-    if (d > 0) d = Math.max(1, Math.round(d * (1 - armourCut(gearDefence()))));
+    if (d > 0) d = Math.max(1, Math.round(d * (1 - armourCut(gearDefence())) * (1 - marks.guard)));
     P.hp -= d;
     hurtAt = performance.now();
     combatT = 4;
@@ -2281,6 +2322,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     P.dead = true;
     P.deadT = 0;
     deaths++;
+    codex.falls++;
+    checkDeeds();
     startAction("dead", 99, 99);
     mode = "dead";
     talk = null;
@@ -2447,8 +2490,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (!next) return;
       items = next;
       if (online) rpc<{ items: StackJson[] }>("vm_use", { p_uid: id }, false).then((r) => setItems(r.items)).catch(netError);
-      P.hp = Math.min(P.maxHp, P.hp + d.heal);
-      floater("+" + d.heal, P.x, P.y + 2, P.z, "heal");
+      const heal = Math.round(d.heal * (1 + marks.draught));
+      P.hp = Math.min(P.maxHp, P.hp + heal);
+      floater("+" + heal, P.x, P.y + 2, P.z, "heal");
       audio.pickup();
       say("Bandaged. +" + d.heal);
     } else if (d.slot !== "none") {
@@ -2849,7 +2893,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (wet > 0.3) target *= 0.7;
     }
     if (P.sprint && inCombat && target > 0) {
-      P.stam = Math.max(0, P.stam - 11 * dt);
+      P.stam = Math.max(0, P.stam - 11 * (1 - marks.sprint) * dt);
       P.stamT = 0.4;
     }
     const k = 1 - Math.exp(-dt * (target > 0 ? 10 : 14));
@@ -2915,10 +2959,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     g.rotation.y = P.yaw;
     const armed = mainWeapon().id !== "wpn_fists";
     const isPick = mainWeapon().moveset.includes("pick");
-    poseHuman(playerPoser, {
+    const hp = {
       t, move: sp / SPEEDS.walk * (P.sprint ? 1.45 : 1), phase: P.phase,
       action: P.action, at: P.action === "dead" ? P.at : P.at / P.dur, block: P.blocking && P.action === "none", armed: armed || isPick,
-    }, dt);
+    };
+    if (playerActor) poseAdventurer(playerActor, hp, dt);
+    else poseHuman(playerPoser, hp, dt);
   }
 
   function worldUpdate(dt: number, rdt: number) {
@@ -3450,7 +3496,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           say("Out of breath");
           return;
         }
-        P.stam = Math.max(0, P.stam - 20 * tm.rollCost);
+        P.stam = Math.max(0, P.stam - 20 * tm.rollCost * (1 - marks.roll));
         P.stamT = 0.6;
         P.holding = false;
         let dx = P.vx;
@@ -4016,6 +4062,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const ELITES = new Set(["kennelmaster", "horse", "standard_bearer", "grave_confessor", "witch"]);
   let deedQueue: string[] = [];
   let deedT = 0;
+  let markQueue: [string, string][] = [];
   function checkDeeds() {
     const ctx = { c: codex, level, shrines: discovered.size, deaths, kills };
     for (const d of DEEDS) {
@@ -4023,7 +4070,19 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       codex.d.push(d.id);
       deedQueue.push(d.name);
     }
+    checkMarks(ctx.deaths);
     saveCodex(codexId, codex);
+  }
+  /** Re-reads what the character has earned; a newly reached rank is announced once. */
+  function checkMarks(fallen: number, quiet = false) {
+    const x = { c: codex, deaths: fallen };
+    marks = markBonuses(x);
+    for (const m of MARKS) {
+      const r = markRank(m, m.count(x));
+      if (r <= (codex.m[m.id] ?? 0)) continue;
+      codex.m[m.id] = r;
+      if (!quiet) markQueue.push([`${m.name} ${RANK_NAMES[r]}`, markBoon(m, r)]);
+    }
   }
   function noteKill(kind: string) {
     if (!BEASTS[kind]) return noteBounty(kind);
@@ -4052,6 +4111,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       showBanner("DEED DONE", deedQueue.shift()!);
       audio.quest();
       deedT = 4.5;
+    } else if (markQueue.length && deedT <= 0 && (!banner || performance.now() - banner.at > 4000)) {
+      const [name, boon] = markQueue.shift()!;
+      showBanner("THE MARCH MARKS YOU", `${name} · ${boon}`);
+      audio.quest();
+      deedT = 5.5;
     }
     tipT -= dt;
     if (tipT > 0) return;
@@ -4101,6 +4165,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           list: TALENTS.filter((d) => d.tree === t).map((d) => ({ id: d.id, name: d.name, rank: talents[d.id] ?? 0, max: d.max, text: d.text(Math.max(1, talents[d.id] ?? 0)), next: (talents[d.id] ?? 0) > 0 && (talents[d.id] ?? 0) < d.max ? d.text((talents[d.id] ?? 0) + 1) : "" })),
         })),
       },
+      marks: marksView({ c: codex, deaths }),
     };
   }
   const RADAR_R = 46;
@@ -4571,6 +4636,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.hp = c.hp > 0 ? Math.min(c.hp, P.maxHp) : P.maxHp;
       P.mana = P.maxMana;
       deedQueue = [];
+      markQueue = [];
+      // marks already earned by an older save are granted without a parade of banners
+      checkMarks(deaths, !("m" in (JSON.parse(localStorage.getItem("veyrmarch.codex." + codexId) ?? "{}") as object)));
       tip = null;
       quests = {};
       questWait.clear();

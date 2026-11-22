@@ -44,12 +44,14 @@ export class ModelActor {
   private mats: THREE.MeshStandardMaterial[] = [];
 
   private head: THREE.Object3D | undefined;
+  handR: THREE.Object3D | undefined;
+  handL: THREE.Object3D | undefined;
 
   /** `headScale` shrinks a stock model's oversized head toward the game's own proportions; `tint` mutes its colours. */
-  constructor(private tpl: ModelTemplate, scale: number, private headScale = 1, tint = 0xffffff) {
+  constructor(private tpl: ModelTemplate, scale: number, private headScale = 1, tint = 0xffffff, anim?: ModelTemplate) {
+    if (anim) this.tpl = { scene: tpl.scene, clips: anim.clips };
     this.root = cloneSkinned(tpl.scene);
-    // stock figures are stocky: draw them a little leaner so they stand with the game's own cast
-    this.root.scale.set(scale * 0.8, scale * 0.94, scale * 0.8);
+    this.root.scale.setScalar(scale);
     this.mixer = new THREE.AnimationMixer(this.root);
     const own = new Map<THREE.Material, THREE.MeshStandardMaterial>();
     this.root.traverse((o) => {
@@ -67,6 +69,82 @@ export class ModelActor {
       m.material = mine;
     });
     this.head = this.root.getObjectByName("head");
+    this.handR = this.root.getObjectByName("handslotr");
+    this.handL = this.root.getObjectByName("handslotl");
+  }
+
+  /** Hide the stock weapons and shields parented to the hands, so the game's own can go there. */
+  emptyHands() {
+    for (const h of [this.handR, this.handL]) for (const c of h?.children ?? []) c.visible = false;
+    return this;
+  }
+
+  /** See-through, for spirits. */
+  fade(opacity: number) {
+    this.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (!m) return;
+      m.transparent = true;
+      m.opacity = opacity;
+      m.depthWrite = false;
+      (o as THREE.Mesh).castShadow = false;
+    });
+    return this;
+  }
+
+  /** Monster features fixed to the head: pointed `ears` and/or glowing `eyes` of the given colours. */
+  monster(ears?: number, eyes?: number) {
+    let skull: THREE.Object3D | undefined;
+    this.root.traverse((o) => {
+      if (/_Head$/.test(o.name)) skull = o;
+    });
+    if (!skull || !this.head) return this;
+    this.root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(skull);
+    const c = box.getCenter(new THREE.Vector3());
+    const d = box.getSize(new THREE.Vector3());
+    const fix = (m: THREE.Mesh) => {
+      this.root.add(m);
+      m.updateMatrixWorld(true);
+      this.head!.attach(m);
+    };
+    for (const side of [-1, 1]) {
+      if (ears !== undefined) {
+        const ear = new THREE.Mesh(new THREE.ConeGeometry(d.x * 0.11, d.y * 0.6, 5), new THREE.MeshStandardMaterial({ color: ears, roughness: 0.9 }));
+        ear.position.set(c.x + side * d.x * 0.52, c.y + d.y * 0.02, c.z);
+        ear.rotation.z = -side * 1.15;
+        ear.scale.z = 0.45;
+        ear.castShadow = true;
+        fix(ear);
+      }
+      if (eyes !== undefined) {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(d.x * 0.07, 8, 6), new THREE.MeshBasicMaterial({ color: eyes }));
+        eye.position.set(c.x + side * d.x * 0.2, c.y - d.y * 0.02, c.z + d.z * 0.47);
+        fix(eye);
+      }
+    }
+    return this;
+  }
+
+  /** Fit the model's bind-pose height to `h` metres. */
+  fit(h: number) {
+    this.root.scale.setScalar(1);
+    this.root.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    this.root.traverse((o) => {
+      const m = o as THREE.SkinnedMesh;
+      if (!m.isSkinnedMesh) return;
+      m.skeleton.update();
+      m.computeBoundingBox();
+      box.union(m.boundingBox!.clone().applyMatrix4(m.matrixWorld));
+    });
+    const y = box.max.y - Math.min(0, box.min.y);
+    if (y > 0 && Number.isFinite(y)) this.root.scale.setScalar(h / y);
+    return this;
+  }
+
+  has(name: string) {
+    return this.tpl.clips.has(name);
   }
 
   node(name: string) {
@@ -118,4 +196,50 @@ export class ModelActor {
       m.emissiveIntensity = on ? 0.9 : 0;
     }
   }
+}
+
+/** The adventurer bodies share one rig; the knight file carries the clips for all of them. */
+export const ADV_ANIMS = "/models/adv_knight.glb";
+export const ADV = {
+  knight: "/models/adv_knight.glb",
+  rogue: "/models/adv_rogue.glb",
+  hooded: "/models/adv_rogue_hooded.glb",
+  barbarian: "/models/adv_barbarian.glb",
+  mage: "/models/adv_mage.glb",
+};
+export const ADV_HEIGHT = 1.72;
+export const ADV_HEAD = 0.58;
+
+/** Resolves once both the body and the shared clips are in; `make` is skipped if `alive` says the owner has moved on. */
+export function loadAdventurer(url: string): Promise<[ModelTemplate, ModelTemplate]> {
+  return Promise.all([loadModel(url), loadModel(ADV_ANIMS)]);
+}
+
+type HumanLike = { move: number; action: string; at: number; block: boolean; armed: boolean };
+
+/** Drives a modelled adventurer from the same pose inputs the code-built human takes. */
+export function poseAdventurer(a: ModelActor, p: HumanLike, dt: number) {
+  const at = Math.min(1, Math.max(0, p.at));
+  switch (p.action) {
+    case "light1": return a.pose(p.armed ? "1H_Melee_Attack_Slice_Diagonal" : "Unarmed_Melee_Attack_Punch_A", dt, 0.12 + at * 0.6, 1, 26);
+    case "light2": return a.pose(p.armed ? "1H_Melee_Attack_Slice_Horizontal" : "Unarmed_Melee_Attack_Punch_B", dt, 0.12 + at * 0.6, 1, 26);
+    case "light3":
+    case "thrust": return a.pose(p.armed ? "1H_Melee_Attack_Stab" : "Unarmed_Melee_Attack_Punch_A", dt, 0.1 + at * 0.65, 1, 26);
+    case "charge":
+    case "windup": return a.pose("2H_Melee_Attack_Chop", dt, Math.min(0.3, at * 0.3), 1, 14);
+    case "heavy": return a.pose("2H_Melee_Attack_Chop", dt, 0.2 + at * 0.6, 1, 26);
+    case "hammer":
+    case "gather": return a.pose("1H_Melee_Attack_Chop", dt, 0.15 + ((at * 3) % 1) * 0.55, 1, 16);
+    case "cast": return a.pose("Spellcast_Shoot", dt, at * 0.8, 1, 16);
+    case "hurt": return a.pose("Hit_A", dt, at * 0.8, 1, 24);
+    case "dodge": return a.pose("Dodge_Forward", dt, at * 0.9, 1, 26);
+    case "dead": return a.pose("Death_A", dt, Math.min(1, p.at / a.duration("Death_A")), 1, 20);
+    case "talk": return a.pose("Interact", dt, undefined, 0.6, 6);
+    case "cheer": return a.pose("Cheer", dt, undefined, 1, 8);
+    case "sit": return a.pose("Sit_Floor_Idle", dt, undefined, 1, 6);
+  }
+  if (p.block) return a.pose("Blocking", dt, undefined, 1, 14);
+  if (p.move > 1.15) return a.pose("Running_A", dt, undefined, p.move / 1.45);
+  if (p.move > 0.08) return a.pose("Walking_A", dt, undefined, Math.max(0.5, p.move * 1.25));
+  a.pose("Idle", dt, undefined, 1, 6);
 }

@@ -906,10 +906,11 @@ function TravelMap({ api, hud }: { api: GameApi; hud: Hud }) {
 function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
   const live = hud.journal.filter((j) => !j.done);
   const done = hud.journal.filter((j) => j.done);
-  const [tab, setTab] = useState<"quests" | "beasts" | "deeds" | "talents" | "bounties">("quests");
+  const [tab, setTab] = useState<"quests" | "marks" | "beasts" | "deeds" | "talents" | "bounties">("quests");
   const bounties = hud.codex?.bounties ?? [];
   const finds = hud.codex?.finds;
   const tal = hud.codex?.talents;
+  const marks = hud.codex?.marks ?? [];
   const beasts = hud.codex?.beasts ?? [];
   const deeds = hud.codex?.deeds ?? [];
   return (
@@ -924,6 +925,9 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
         <div className="vm-tabs">
           <button className={tab === "quests" ? "on" : ""} onClick={() => setTab("quests")}>
             Quests <em>{live.length}</em>
+          </button>
+          <button className={tab === "marks" ? "on" : ""} onClick={() => setTab("marks")}>
+            Marks <em>{marks.reduce((n, m) => n + m.rank, 0)}/{marks.length * 3}</em>
           </button>
           <button className={tab === "beasts" ? "on" : ""} onClick={() => setTab("beasts")}>
             Bestiary <em>{beasts.filter((b) => b.kills > 0).length}/{beasts.length}</em>
@@ -984,6 +988,32 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+        {tab === "marks" && (
+          <div className="vm-journal vm-scroll">
+            <p className="vm-sub">The March has no classes. What you do, often enough, leaves a mark.</p>
+            {marks.map((m) => (
+              <div key={m.id} className={`vm-quest vm-mark ${m.rank > 0 ? "main" : ""}`}>
+                <b>
+                  {m.name}
+                  <em>{m.rank > 0 ? "Rank " + ["", "I", "II", "III"][m.rank] : "Unmarked"}</em>
+                </b>
+                <span>{m.rank > 0 ? m.boon : m.how}</span>
+                {m.rank < 3 ? (
+                  <>
+                    <div className="vm-mark-bar">
+                      <i style={{ width: `${Math.min(100, (m.have / m.need) * 100)}%` }} />
+                    </div>
+                    <small>
+                      {m.have}/{m.need} · {m.rank > 0 ? m.how + " " : ""}Next: {m.next}
+                    </small>
+                  </>
+                ) : (
+                  <small>Fully marked.</small>
+                )}
+              </div>
+            ))}
           </div>
         )}
         {tab === "beasts" && (

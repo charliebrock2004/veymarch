@@ -48,6 +48,12 @@ export type Codex = {
   z: string[];
   crafts: number;
   parries: number;
+  /** attacks rolled through */
+  dodges: number;
+  /** times fallen */
+  falls: number;
+  /** highest rank already announced for each mark */
+  m: Record<string, number>;
   /** deeds done */
   d: string[];
   /** hints already shown */
@@ -60,7 +66,7 @@ export type Codex = {
   b?: { day: string; ids: string[]; n: number[]; paid: boolean[] };
 };
 
-export const freshCodex = (): Codex => ({ k: {}, s: [], z: [], crafts: 0, parries: 0, d: [], t: [] });
+export const freshCodex = (): Codex => ({ k: {}, s: [], z: [], crafts: 0, parries: 0, dodges: 0, falls: 0, m: {}, d: [], t: [] });
 
 export type DeedCtx = { c: Codex; level: number; shrines: number; deaths: number; kills: number };
 export type Deed = { id: string; name: string; text: string; ok: (x: DeedCtx) => boolean };
