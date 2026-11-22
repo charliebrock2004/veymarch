@@ -18,5 +18,6 @@ export function createGraveKing(env: BossEnv, parent: THREE.Object3D): Boss {
   );
   crown.position.set(0, 0.25, 0);
   b.helm.add(crown);
+  b.wear("/models/skeleton_warrior.glb", "/models/skeleton_warrior.glb", 2.35, 0xb8c8a8, (a) => a.crown(0xe0b84a, 0x6a4a10));
   return b;
 }

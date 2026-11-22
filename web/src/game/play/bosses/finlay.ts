@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { ModelActor, loadModel } from "../../engine/models";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Decal } from "../../engine/fx";
 import { Poser, buildHuman, characterMaterial, rimmed, poseHuman, type HumanAction, type HumanLook, type Rig } from "../../engine/rig";
@@ -210,6 +211,7 @@ export class Finlay implements Boss {
   helm: THREE.Mesh;
   helmOn = true;
   holder = new THREE.Group();
+  actor: ModelActor | null = null;
   x: number;
   z: number;
   y = 0;
@@ -487,6 +489,45 @@ export class Finlay implements Boss {
   private ground(x: number, z: number) {
     const g = this.env.groundAt(x, z);
     return Number.isFinite(g) ? g : 0;
+  }
+
+  /** Swap the code-built body for a modelled one once it has loaded; the rig stays as the fallback. */
+  wear(url: string, anim: string, height: number, tint: number, dress?: (a: ModelActor) => void) {
+    Promise.all([loadModel(url), loadModel(anim)]).then(([tpl, clips]) => {
+      const g = this.rig.group;
+      for (const c of g.children) c.visible = false;
+      const a = new ModelActor(tpl, height / 1.72, 0.62, tint, clips).emptyHands();
+      dress?.(a);
+      if (a.handR) {
+        this.holder.scale.multiplyScalar(1.72 / height);
+        a.handR.add(this.holder);
+      }
+      g.add(a.root);
+      this.actor = a;
+    }, () => {});
+  }
+
+  private poseModel(a: ModelActor, dt: number, action: HumanAction, at: number, over: Over) {
+    const k = Math.min(1, Math.max(0, at));
+    const pick = (...n: string[]) => n.find((x) => a.has(x)) ?? "Idle";
+    if (over === "rite" || over === "helm" || over === "throw") return a.pose(pick("Spellcast_Raise", "Spellcast_Shoot"), dt, over === "rite" ? 0.5 + Math.sin(this.env.time * 3) * 0.2 : over === "helm" ? 0.3 : 0.8, 1, 10);
+    if (over === "guard") return a.pose(pick("Blocking"), dt, undefined, 1, 12);
+    switch (action) {
+      case "light1": return a.pose(pick("1H_Melee_Attack_Slice_Diagonal"), dt, 0.12 + k * 0.6, 1, 26);
+      case "light2":
+      case "sweep": return a.pose(pick("1H_Melee_Attack_Slice_Horizontal", "1H_Melee_Attack_Slice_Diagonal"), dt, 0.12 + k * 0.6, 1, 26);
+      case "light3":
+      case "thrust": return a.pose(pick("1H_Melee_Attack_Stab"), dt, 0.1 + k * 0.65, 1, 26);
+      case "charge":
+      case "windup": return a.pose(pick("2H_Melee_Attack_Chop"), dt, k * 0.3, 1, 14);
+      case "heavy": return a.pose(pick("2H_Melee_Attack_Chop"), dt, 0.1 + k * 0.7, 1, 26);
+      case "cast": return a.pose(pick("Spellcast_Shoot"), dt, k * 0.8, 1, 16);
+      case "hurt": return a.pose(pick("Hit_A"), dt, k * 0.8, 1, 24);
+      case "dodge": return a.pose(pick("Dodge_Forward", "Running_A"), dt, a.has("Dodge_Forward") ? k * 0.9 : undefined, 1, 26);
+    }
+    if (this.mv > 2.2) return a.pose(pick("Running_A"), dt, undefined, this.mv / 3.6);
+    if (this.mv > 0.2) return a.pose(pick("Walking_D_Skeletons", "Walking_A"), dt, undefined, Math.max(0.5, this.mv / 1.5));
+    a.pose(this.fighting && this.st !== "dormant" ? pick("Idle_Combat", "Idle") : "Idle", dt, undefined, 1, 6);
   }
 
   private place() {
@@ -1144,6 +1185,11 @@ export class Finlay implements Boss {
     const env = this.env;
     const p = this.poser;
     const fighting = this.fighting && this.st !== "intro";
+    if (this.actor) {
+      const hold = this.st === "dormant" || (this.st === "intro" && over === "low") ? 1.15 : 0;
+      this.holder.rotation.x += (hold - this.holder.rotation.x) * Math.min(1, dt * 6);
+      return this.poseModel(this.actor, dt, action, at, over);
+    }
     poseHuman(p, { t: env.time, move: this.mv / 2.6, phase: this.gait, action, at, block: false, armed: true }, dt);
     // the blade: point down before the fight, level in it
     const hold = this.st === "dormant" || (this.st === "intro" && over === "low") ? 1.15 : 0;
@@ -1186,6 +1232,7 @@ export class Finlay implements Boss {
 
   /** One knee down, sword planted, head bowed. `k` 0..1 how far down. */
   private poseKneel(dt: number, k: number) {
+    if (this.actor) return void this.actor.pose("Death_A", dt, Math.min(1, k) * 0.95, 1, 10);
     const p = this.poser.begin(dt, 5);
     const e = ease(Math.min(1, k));
     p.set("root", 0, 0, 0).offset("root", 0, 0, 0);
