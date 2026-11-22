@@ -38,7 +38,7 @@ import { weaponModel } from "./play/weapons";
 import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Realm, StackJson } from "../net/realm";
 import { Room, type Bundle, type Ev } from "../net/room";
 import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
-import { BOUNTIES, FINDS, dayStamp, pickBounties, type Find } from "./data/explore";
+import { BOUNTIES, FINDS, pickBounties, type Find } from "./data/explore";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
 import { RUMOURS, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
 import type { PlaceView } from "./data/renown.ts";
@@ -1363,8 +1363,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   // ------------------------------------------------------------------------------ bounties
   function bountyBook() {
-    const day = dayStamp();
-    if (!codex.b || codex.b.day !== day) {
+    // a standing board: it waits as long as you like, and a new one goes up when all three are paid
+    if (!codex.b || codex.b.paid.every(Boolean)) {
+      const day = "board-" + ((codex.bn ?? 0) + 1);
+      codex.bn = (codex.bn ?? 0) + 1;
       const ids = pickBounties(day, level);
       codex.b = { day, ids, n: ids.map(() => 0), paid: ids.map(() => false) };
       saveCodex(codexId, codex);

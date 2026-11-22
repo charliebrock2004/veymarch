@@ -66,8 +66,10 @@ export type Codex = {
   tal?: Record<string, number>;
   /** hidden caches opened and lore stones read */
   fd?: string[];
-  /** bounties: day stamp, the three picked, progress and which are paid */
+  /** bounties: board stamp, the three picked, progress and which are paid */
   b?: { day: string; ids: string[]; n: number[]; paid: boolean[] };
+  /** bounty boards posted so far */
+  bn?: number;
 };
 
 export const freshCodex = (): Codex => ({ k: {}, s: [], z: [], crafts: 0, parries: 0, dodges: 0, falls: 0, m: {}, r: [], f: [], d: [], t: [] });

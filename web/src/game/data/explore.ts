@@ -1,6 +1,6 @@
 /**
  * Things worth leaving the road for: hidden caches, rune stones that tell the land's story,
- * and a board of bounties that changes each day. Single-player worlds only; progress is kept
+ * and a standing board of bounties, replaced when all three are paid. Single-player worlds only; progress is kept
  * with the codex on this device.
  */
 import type { ZoneId } from "./zones.ts";
@@ -59,9 +59,8 @@ export const BOUNTIES: Bounty[] = [
   { id: "b_knight", name: "Dead Men's Honour", kinds: ["undead_knight"], n: 4, level: 20, crowns: 280, item: ["cons_greater_draught", 2], text: "The Citadel's knights still hold their posts. Relieve 4." },
 ];
 
-export const dayStamp = (d = new Date()) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 
-/** Three bounties for the day: the same for everyone at a level band, nothing far above the player. */
+/** Three bounties for a board (seeded by its stamp): the same for everyone at a level band, nothing far above the player. */
 export function pickBounties(day: string, level: number): string[] {
   const pool = BOUNTIES.filter((b) => b.level <= level + 2);
   // prefer the ones nearest the player's level

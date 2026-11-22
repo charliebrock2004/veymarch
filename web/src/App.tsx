@@ -950,7 +950,7 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
         </div>
         {tab === "bounties" && (
           <div className="vm-journal vm-scroll">
-            <p className="vm-sub">Three bounties are posted each day. Kill what is asked, then claim the pay here.</p>
+            <p className="vm-sub">Three bounties stand on the board. Kill what is asked, then claim the pay here. A new board goes up when all three are paid.</p>
             {bounties.map((b) => (
               <div key={b.id} className={`vm-quest ${b.paid ? "done" : "main"}`}>
                 <b>
