@@ -377,23 +377,42 @@ export function grassGeo(seed: number, blades = 7, height = 0.55) {
   const r = rng(seed);
   const pos: number[] = [];
   const col: number[] = [];
-  const base = new THREE.Color(0x56683a);
-  const tip = new THREE.Color(0xb8be6c);
-  const tipB = new THREE.Color(0x98a856);
+  // roots match the turf so tufts grow out of the ground instead of sitting on it
+  const base = new THREE.Color(0x5f7a3c);
+  const mid = new THREE.Color(0x86a04c);
+  const tip = new THREE.Color(0xd2d684);
+  const tipB = new THREE.Color(0xa9bf62);
   const tc = new THREE.Color();
-  for (let i = 0; i < blades; i++) {
+  const mc = new THREE.Color();
+  const n = Math.round(blades * 1.5);
+  for (let i = 0; i < n; i++) {
     const a = r() * Math.PI * 2;
-    const d = r() * 0.32;
+    const d = Math.sqrt(r()) * 0.5;
     const x = Math.cos(a) * d;
     const z = Math.sin(a) * d;
-    const w = 0.022 + r() * 0.022;
-    const h = height * (0.55 + r() * 0.7);
-    const lean = (r() - 0.5) * 0.35;
-    const ox = Math.cos(a + 1.57) * w;
-    const oz = Math.sin(a + 1.57) * w;
-    pos.push(x - ox, 0, z - oz, x + ox, 0, z + oz, x + Math.cos(a) * lean, h, z + Math.sin(a) * lean);
+    const w = 0.028 + r() * 0.026;
+    const h = height * (0.5 + r() * 0.75);
+    const lean = (r() - 0.5) * 0.5 * h;
+    const fa = r() * Math.PI * 2;
+    const ox = Math.cos(fa) * w;
+    const oz = Math.sin(fa) * w;
+    const lx = Math.cos(a) * lean;
+    const lz = Math.sin(a) * lean;
+    // a bent blade: wide foot, narrower waist, drooping tip
+    const P0 = [x - ox, 0, z - oz], P1 = [x + ox, 0, z + oz];
+    const P2 = [x - ox * 0.6 + lx * 0.35, h * 0.55, z - oz * 0.6 + lz * 0.35], P3 = [x + ox * 0.6 + lx * 0.35, h * 0.55, z + oz * 0.6 + lz * 0.35];
+    const P4 = [x + lx, h, z + lz];
     tc.copy(tip).lerp(tipB, r());
-    col.push(base.r, base.g, base.b, base.r, base.g, base.b, tc.r, tc.g, tc.b);
+    mc.copy(mid).lerp(tc, 0.25);
+    const B = [base.r, base.g, base.b], Mi = [mc.r, mc.g, mc.b], T = [tc.r, tc.g, tc.b];
+    const tri = (a1: number[], c1: number[], a2: number[], c2: number[], a3: number[], c3: number[]) => {
+      // both windings, so neither face is ever shaded as a back face
+      pos.push(...a1, ...a2, ...a3, ...a1, ...a3, ...a2);
+      col.push(...c1, ...c2, ...c3, ...c1, ...c3, ...c2);
+    };
+    tri(P0, B, P1, B, P3, Mi);
+    tri(P0, B, P3, Mi, P2, Mi);
+    tri(P2, Mi, P3, Mi, P4, T);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));

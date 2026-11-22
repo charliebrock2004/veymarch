@@ -26,7 +26,7 @@ export function makeMaterials() {
     ember: new THREE.MeshBasicMaterial({ color: 0xff7a2a }),
     bark: L({ map: barkTex(false) }),
     fern: windy(L({ map: fernTex(), alphaTest: 0.4, side: THREE.DoubleSide }), 0.08, 0.1, 1),
-    grass: windy(L({ side: THREE.DoubleSide }), 0.12, 0.05, 0.6),
+    grass: windy(L({}), 0.12, 0.05, 0.6),
     wheat: windy(L({ map: wheatTex(), alphaTest: 0.4, side: THREE.DoubleSide }), 0.16, 0.2, 1.2),
     foliage: windyBaked(L({ map: foliageTex(), alphaTest: 0.45, side: THREE.DoubleSide }), 0.35),
     clutter: L({}),

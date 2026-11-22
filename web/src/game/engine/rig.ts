@@ -113,7 +113,24 @@ const rot = (g: THREE.BufferGeometry, rx: number, ry: number, rz: number) => {
 };
 const at = (g: THREE.BufferGeometry, x: number, y: number, z: number) => g.translate(x, y, z);
 
+/** Sky-coloured rim light for anything alive, so figures lift off the ground behind them. */
+export const rim = { color: { value: new THREE.Color(0xbfd4ee) }, power: { value: 0.55 } };
 const charMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+charMat.onBeforeCompile = (sh) => {
+  sh.uniforms.uRim = rim.color;
+  sh.uniforms.uRimK = rim.power;
+  sh.fragmentShader = sh.fragmentShader
+    .replace("#include <common>", "#include <common>\nuniform vec3 uRim; uniform float uRimK;")
+    .replace(
+      "#include <opaque_fragment>",
+      `float rimF = pow(1.0 - saturate(dot(normal, normalize(vViewPosition))), 2.6);
+       float rimUp = 0.35 + 0.65 * saturate(normal.y * 0.5 + 0.6);
+       outgoingLight += uRim * rimF * rimUp * uRimK * (0.35 + diffuseColor.rgb);
+       // soft cloth shading: a touch of colour back into the shade side
+       outgoingLight += diffuseColor.rgb * 0.06;
+       #include <opaque_fragment>`,
+    );
+};
 export const characterMaterial = charMat;
 
 // ------------------------------------------------------------ humanoids
@@ -189,6 +206,11 @@ export function buildHuman(look: HumanLook): Rig {
     b.part("chest", box(0.3 * f, 0.3, 0.03, 0, 0.0, 0.135), look.apron);
     b.part("hips", box(0.32 * f, 0.5, 0.03, 0, -0.18, 0.19 * f), look.apron);
   }
+  // collar, lapel line and hem trim give the coat a cut
+  const trim = new THREE.Color(coat).multiplyScalar(0.62).getHex();
+  b.part("chest", cyl(0.075, 0.095, 0.05, 0, 0.21, 0.005, 10, true), trim);
+  b.part("chest", rot(box(0.018, 0.3, 0.012, 0, 0, 0), 0, 0, 0).translate(0, 0.04, 0.132), trim);
+  b.part("hips", cyl((look.coatLong ? 0.305 : 0.255) * f, (look.coatLong ? 0.3 : 0.25) * f, 0.03, 0, look.coatLong ? -0.52 : -0.26, 0, 12, true), trim);
   if (look.pin) b.part("chest", ell(0.022, 0.022, 0.012, 0.09, 0.12, 0.13), 0xb87333);
   if (look.cape != null) b.part("chest", rot(box(0.42 * f, 0.9, 0.03, 0, -0.38, -0.15), 0.08, 0, 0), look.cape);
   // neck and head
@@ -198,12 +220,24 @@ export function buildHuman(look: HumanLook): Rig {
   b.part("head", ell(H * 0.75, H * 0.45, H * 0.7, 0, 0.03 * hs, 0.03), look.skin);
   if (!toy) b.part("head", at(rot(cone(0.022 * hs, 0.06 * hs, 0, 0, 0, 5), Math.PI / 2, 0, 0), 0, 0.095 * hs, 0.125 * hs), look.skin);
   const eye = toy ? 0x1c1916 : 0x231d18;
-  b.part("head", ell(0.017 * hs, 0.019 * hs, 0.01, 0.042 * hs, 0.125 * hs, 0.112 * hs, 6), eye);
-  b.part("head", ell(0.017 * hs, 0.019 * hs, 0.01, -0.042 * hs, 0.125 * hs, 0.112 * hs, 6), eye);
-  if (!toy) {
-    b.part("head", box(0.04 * hs, 0.009, 0.01, 0.043 * hs, 0.152 * hs, 0.112 * hs), look.hair);
-    b.part("head", box(0.04 * hs, 0.009, 0.01, -0.043 * hs, 0.152 * hs, 0.112 * hs), look.hair);
+  if (toy) {
+    b.part("head", ell(0.017 * hs, 0.019 * hs, 0.01, 0.042 * hs, 0.125 * hs, 0.112 * hs, 6), eye);
+    b.part("head", ell(0.017 * hs, 0.019 * hs, 0.01, -0.042 * hs, 0.125 * hs, 0.112 * hs, 6), eye);
   } else {
+    const shade = new THREE.Color(look.skin).multiplyScalar(0.72).getHex();
+    const lip = new THREE.Color(look.skin).lerp(new THREE.Color(0x8a3a34), 0.45).getHex();
+    for (const sx of [1, -1]) {
+      // socket, white, iris, lid and brow
+      b.part("head", ell(0.022 * hs, 0.014 * hs, 0.006, sx * 0.043 * hs, 0.128 * hs, 0.109 * hs, 8), shade);
+      b.part("head", ell(0.019 * hs, 0.012 * hs, 0.008, sx * 0.043 * hs, 0.126 * hs, 0.112 * hs, 8), 0xe9e2d4);
+      b.part("head", ell(0.0095 * hs, 0.0105 * hs, 0.006, sx * 0.041 * hs, 0.126 * hs, 0.117 * hs, 8), eye);
+      b.part("head", rot(box(0.044 * hs, 0.008 * hs, 0.012, 0, 0, 0), 0, 0, sx * -0.12).translate(sx * 0.044 * hs, 0.15 * hs, 0.113 * hs), look.hair);
+      b.part("head", ell(0.022 * hs, 0.016 * hs, 0.006, sx * 0.064 * hs, 0.085 * hs, 0.094 * hs, 8), new THREE.Color(look.skin).lerp(new THREE.Color(0xc0604a), 0.14).getHex());
+    }
+    b.part("head", ell(0.027 * hs, 0.0065 * hs, 0.008, 0, 0.055 * hs, 0.108 * hs, 8), lip);
+    b.part("head", ell(0.05 * hs, 0.03 * hs, 0.04, 0, 0.02 * hs, 0.07 * hs, 8), look.skin);
+  }
+  if (toy) {
     b.part("head", ell(0.025, 0.018, 0.01, 0.06, 0.085, 0.105, 6), 0xb05a50);
     b.part("head", ell(0.025, 0.018, 0.01, -0.06, 0.085, 0.105, 6), 0xb05a50);
   }
@@ -247,7 +281,11 @@ export function buildHuman(look: HumanLook): Rig {
     b.part("arm" + s, cap(0.058 * f, 0.2, 0, -0.14, 0), coat);
     b.part("fore" + s, cap(0.047 * f, 0.18, 0, -0.13, 0), toy ? coat : look.shirt);
     b.part("fore" + s, cyl(0.056 * f, 0.056 * f, 0.05, 0, -0.03, 0, 8), coat);
-    b.part("hand" + s, ell(0.045, 0.06, 0.035, 0, -0.045, 0.01, 8), toy ? 0xe4d7c3 : look.skin);
+    b.part("hand" + s, ell(0.042, 0.05, 0.03, 0, -0.04, 0.01, 8), toy ? 0xe4d7c3 : look.skin);
+    b.part("hand" + s, ell(0.036, 0.034, 0.026, 0, -0.085, 0.014, 8), toy ? 0xe4d7c3 : look.skin);
+    b.part("hand" + s, rot(cap(0.013, 0.04, 0, 0, 0, 5), 0, 0, s === "L" ? -0.7 : 0.7).translate(s === "L" ? -0.04 : 0.04, -0.045, 0.02), toy ? 0xe4d7c3 : look.skin);
+    b.part("shin" + s, cyl(0.074 * f, 0.07 * f, 0.035, 0, -0.185, 0, 10), new THREE.Color(look.boots).multiplyScalar(1.35).getHex());
+    b.part("foot" + s, box(0.1, 0.022, 0.23, 0, -0.04, 0.05), new THREE.Color(look.boots).multiplyScalar(0.55).getHex());
     b.part("thigh" + s, cap(0.078 * f, 0.3, 0, -0.22, 0), look.trousers);
     b.part("shin" + s, cap(0.06 * f, 0.18, 0, -0.14, 0), look.trousers);
     b.part("shin" + s, cyl(0.065 * f, 0.07 * f, 0.24, 0, -0.3, 0, 10), look.boots);

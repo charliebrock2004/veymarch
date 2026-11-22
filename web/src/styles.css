@@ -1895,3 +1895,146 @@ input {
 .vm-vol { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 13px; text-transform: none; letter-spacing: 0; }
 .vm-vol span { width: 62px; opacity: 0.8; }
 .vm-vol input { flex: 1; accent-color: #d9b46a; height: 28px; }
+
+/* ================================================ art direction: "The Sealed Continent"
+   Painted key art, leather-and-brass panels, one gold line weight. */
+.vm-keyart {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: #120f0d url(/art/keyart-sm.webp) 62% 50% / cover no-repeat;
+  background-image: linear-gradient(90deg, rgba(10, 8, 7, 0.88) 0%, rgba(10, 8, 7, 0.5) 34%, rgba(10, 8, 7, 0) 62%),
+    linear-gradient(0deg, rgba(10, 8, 7, 0.6), rgba(10, 8, 7, 0) 30%), url(/art/keyart.webp), url(/art/keyart-sm.webp);
+  background-size: cover;
+  background-position: 62% 50%;
+}
+.vm-keyart.drift {
+  inset: -3%;
+  animation: vm-drift 40s ease-in-out infinite alternate;
+}
+@keyframes vm-drift {
+  from { transform: scale(1) translate3d(0, 0, 0); }
+  to { transform: scale(1.06) translate3d(-1.2%, -0.8%, 0); }
+}
+.vm-title, .vm-loading { isolation: isolate; overflow: hidden; }
+.vm-title { background: none; }
+.vm-loading { align-items: flex-start; justify-content: flex-end; padding: 0 calc(32px + var(--sar)) calc(34px + var(--sab)) calc(32px + var(--sal)); }
+.vm-loading .vm-progress { width: min(420px, 70vw); height: 4px; border-radius: 2px; overflow: hidden; background: rgba(231, 220, 200, 0.18); }
+.vm-loading .vm-progress i { background: linear-gradient(90deg, #8a5a22, #f2cf7a); box-shadow: 0 0 12px rgba(242, 207, 122, 0.8); }
+.vm-embers { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.vm-embers i {
+  position: absolute; bottom: -10px; width: 3px; height: 3px; border-radius: 50%;
+  background: #ffd58a; box-shadow: 0 0 8px 2px rgba(255, 170, 70, 0.7);
+  animation: vm-ember linear infinite; opacity: 0;
+}
+@keyframes vm-ember {
+  0% { transform: translate3d(0, 0, 0) scale(1); opacity: 0; }
+  12% { opacity: 0.9; }
+  100% { transform: translate3d(9vw, -105vh, 0) scale(0.3); opacity: 0; }
+}
+.vm-wordmark {
+  background: linear-gradient(180deg, #fff6dc 0%, #f0d596 38%, #b9812f 72%, #6e4718 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 22px rgba(215, 164, 65, 0.28));
+}
+.vm-tagline::before, .vm-tagline::after { content: "◆"; font-size: 0.6em; margin: 0 0.9em; opacity: 0.7; vertical-align: middle; }
+.vm-title-head, .vm-menu, .vm-title-foot { animation: vm-rise 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+.vm-menu { animation-delay: 0.12s; }
+.vm-title-foot { animation-delay: 0.24s; }
+@keyframes vm-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+/* buttons: struck brass and dark leather */
+.vm-mbtn {
+  position: relative;
+  border-radius: 3px;
+  border: 1px solid rgba(215, 164, 65, 0.45);
+  background: linear-gradient(180deg, rgba(52, 43, 34, 0.92), rgba(24, 20, 16, 0.94));
+  box-shadow: inset 0 1px 0 rgba(255, 236, 196, 0.1), inset 0 0 0 2px rgba(0, 0, 0, 0.35), 0 4px 14px rgba(0, 0, 0, 0.45);
+  transition: transform 0.08s, filter 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.vm-mbtn::before, .vm-mbtn::after {
+  content: ""; position: absolute; top: 50%; width: 5px; height: 5px; transform: translateY(-50%) rotate(45deg);
+  background: var(--gold); opacity: 0.55; pointer-events: none;
+}
+.vm-mbtn::before { left: -3px; }
+.vm-mbtn::after { right: -3px; }
+.vm-mbtn.small::before, .vm-mbtn.small::after { display: none; }
+@media (hover: hover) {
+  .vm-mbtn:not(:disabled):hover { border-color: #f0cf80; filter: brightness(1.14); box-shadow: inset 0 1px 0 rgba(255, 236, 196, 0.16), inset 0 0 0 2px rgba(0, 0, 0, 0.35), 0 0 18px rgba(215, 164, 65, 0.28), 0 4px 14px rgba(0, 0, 0, 0.45); }
+  .vm-icon:hover { border-color: #f0cf80; filter: brightness(1.2); }
+}
+.vm-mbtn:focus-visible, .vm-icon:focus-visible, .vm-btn:focus-visible { outline: 2px solid #f0cf80; outline-offset: 2px; }
+.vm-mbtn.primary {
+  background: linear-gradient(180deg, #f0cb78 0%, #c8913a 45%, #8a5a22 100%);
+  border-color: #ffe2a0;
+  box-shadow: inset 0 1px 0 rgba(255, 250, 225, 0.55), inset 0 -2px 0 rgba(70, 40, 10, 0.35), 0 4px 16px rgba(0, 0, 0, 0.5), 0 0 22px rgba(215, 164, 65, 0.22);
+  text-shadow: 0 1px 0 rgba(255, 240, 200, 0.45);
+}
+.vm-mbtn.primary::before, .vm-mbtn.primary::after { background: #fff0c4; opacity: 0.9; }
+
+/* panels: tooled leather with a double gold rule and corner studs */
+.vm-panel-screen { background: radial-gradient(ellipse at 50% 45%, rgba(10, 8, 7, 0.45), rgba(6, 5, 4, 0.82)); animation: vm-fadein 0.22s ease both; }
+.vm-panel {
+  position: relative;
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(48, 39, 30, 0.9), rgba(20, 16, 13, 0.95)), url(/art/panel.webp) 0 0 / 192px 192px, #1c1814;
+  border: 1px solid rgba(215, 164, 65, 0.55);
+  outline: 1px solid rgba(0, 0, 0, 0.7);
+  outline-offset: 0;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.7), inset 0 0 0 3px rgba(12, 10, 8, 0.85), inset 0 0 0 4px rgba(215, 164, 65, 0.22), inset 0 0 60px rgba(0, 0, 0, 0.45);
+  animation: vm-panel-in 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.vm-panel::before {
+  content: ""; position: absolute; inset: 7px; pointer-events: none; z-index: 2;
+  background:
+    radial-gradient(circle at 0 0, var(--gold) 0 3px, transparent 3.5px) 0 0 / 12px 12px no-repeat,
+    radial-gradient(circle at 100% 0, var(--gold) 0 3px, transparent 3.5px) 100% 0 / 12px 12px no-repeat,
+    radial-gradient(circle at 0 100%, var(--gold) 0 3px, transparent 3.5px) 0 100% / 12px 12px no-repeat,
+    radial-gradient(circle at 100% 100%, var(--gold) 0 3px, transparent 3.5px) 100% 100% / 12px 12px no-repeat;
+  opacity: 0.8;
+}
+@keyframes vm-panel-in { from { opacity: 0; transform: translateY(10px) scale(0.985); } to { opacity: 1; transform: none; } }
+@keyframes vm-fadein { from { opacity: 0; } to { opacity: 1; } }
+.vm-panel-head { position: relative; padding-bottom: 8px; }
+.vm-panel-head::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1px;
+  background: linear-gradient(90deg, rgba(215, 164, 65, 0.75), rgba(215, 164, 65, 0.25) 55%, transparent);
+}
+.vm-panel-head h2, .vm-creator h2 { color: #f3dca0; text-shadow: 0 1px 0 #000, 0 0 14px rgba(215, 164, 65, 0.25); }
+.vm-panel-art {
+  position: absolute; left: 0; right: 0; top: 0; height: 92px; z-index: 0; pointer-events: none;
+  background-size: cover; background-position: 50% 40%; opacity: 0.55;
+  -webkit-mask-image: linear-gradient(180deg, #000 20%, transparent); mask-image: linear-gradient(180deg, #000 20%, transparent);
+}
+.vm-panel-art ~ * { position: relative; z-index: 1; }
+.vm-icon {
+  background: radial-gradient(circle at 50% 30%, rgba(70, 58, 44, 0.95), rgba(20, 17, 14, 0.92));
+  border-color: rgba(215, 164, 65, 0.5);
+  box-shadow: inset 0 1px 0 rgba(255, 236, 196, 0.14), inset 0 0 0 2px rgba(0, 0, 0, 0.4), 0 3px 10px rgba(0, 0, 0, 0.5);
+  transition: filter 0.15s, border-color 0.15s, transform 0.08s;
+}
+.vm-icon:active { transform: scale(0.94); }
+.vm-slot { border-radius: 3px; background: linear-gradient(180deg, rgba(231, 220, 200, 0.07), rgba(231, 220, 200, 0.02)); border-color: rgba(215, 164, 65, 0.22); box-shadow: inset 0 1px 0 rgba(255, 236, 196, 0.05); }
+
+/* region title: a painted strip of the place you just walked into */
+.vm-region { top: 16%; padding: 26px 0 22px; isolation: isolate; }
+.vm-region-art {
+  position: absolute; left: 50%; top: 0; bottom: 0; width: min(760px, 92vw); transform: translateX(-50%); z-index: -1;
+  background-size: cover; background-position: 50% 45%;
+  -webkit-mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 35%, transparent 100%); mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 35%, transparent 100%);
+  filter: brightness(0.72) saturate(1.05);
+}
+.vm-region div { color: #fff1cc; text-shadow: 0 2px 4px #000, 0 0 26px rgba(0, 0, 0, 0.9); }
+.vm-region small { text-shadow: 0 1px 3px #000, 0 0 10px #000; }
+.vm-zone-head {
+  margin: 10px 0 6px; padding: 16px 14px; border: 1px solid rgba(215, 164, 65, 0.3); border-radius: 3px;
+  background-size: cover; background-position: 50% 40%;
+  font-family: var(--display); letter-spacing: 0.1em; color: #f3dca0; text-shadow: 0 1px 3px #000;
+}
+.vm-banner div { background: linear-gradient(90deg, transparent, rgba(20, 17, 14, 0.8) 20%, rgba(20, 17, 14, 0.8) 80%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .vm-keyart.drift, .vm-embers i, .vm-panel, .vm-panel-screen, .vm-title-head, .vm-menu, .vm-title-foot { animation: none; }
+}
+.vm-keyart.back { z-index: 15; }
+.vm-keyart.back + .vm-panel-screen { background: rgba(10, 8, 7, 0.3); backdrop-filter: none; -webkit-backdrop-filter: none; }

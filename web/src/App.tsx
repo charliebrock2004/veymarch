@@ -74,6 +74,7 @@ export default function App() {
       <canvas ref={canvas} className="vm-canvas" />
       <div ref={overlay} className="vm-overlay" />
       {error && <div className="vm-error">This device could not start WebGL: {error}</div>}
+      {hud?.mode === "title" && <div className="vm-keyart drift back" />}
       {api && hud && <Screens api={api} hud={hud} />}
       {(!hud || hud.mode === "loading") && !error && <Loading progress={hud?.loading ?? 0} />}
       <div className="vm-fade" style={{ opacity: hud?.fade ?? 0 }} />
@@ -85,7 +86,8 @@ export default function App() {
 function Loading({ progress }: { progress: number }) {
   return (
     <div className="vm-loading">
-      <div className="vm-wordmark">VEYRMARCH</div>
+      <div className="vm-keyart" />
+      <div className="vm-wordmark big">VEYRMARCH</div>
       <div className="vm-tagline">The Sealed Continent</div>
       <div className="vm-progress">
         <i style={{ width: `${Math.round(progress * 100)}%` }} />
@@ -159,6 +161,11 @@ function Main({ toOnline, toSingle, toSettings }: { toOnline: () => void; toSing
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
   return (
     <div className="vm-title">
+      <div className="vm-embers" aria-hidden="true">
+        {Array.from({ length: 14 }, (_, i) => (
+          <i key={i} style={{ left: `${(i * 37) % 100}%`, animationDelay: `${-i * 1.3}s`, animationDuration: `${9 + (i % 5) * 2.2}s` }} />
+        ))}
+      </div>
       <div className="vm-title-head">
         <div className="vm-wordmark big">VEYRMARCH</div>
         <div className="vm-tagline">The Sealed Continent</div>
@@ -540,6 +547,7 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
       )}
       {title && (
         <div className="vm-region" key={title.at}>
+          <span className="vm-region-art" style={{ backgroundImage: `url(/art/zone-${hud.zone}.webp)` }} />
           <div>{title.a}</div>
           <small>{title.b}</small>
         </div>
@@ -593,6 +601,7 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
       {hud.mode === "pause" && (
         <div className="vm-panel-screen">
           <div className="vm-panel">
+            <div className="vm-panel-art" style={{ backgroundImage: `url(/art/zone-${hud.zone}.webp)` }} />
             <div className="vm-panel-head">
               <h2>Paused</h2>
               <button className="vm-icon" onClick={() => api.press("resume")} aria-label="Resume">
@@ -866,7 +875,9 @@ function TravelMap({ api, hud }: { api: GameApi; hud: Hud }) {
         <div className="vm-journal vm-scroll">
           {zones.map((zn) => (
             <div key={zn}>
-              <h3>{zn}</h3>
+              <h3 className="vm-zone-head" style={{ backgroundImage: `linear-gradient(90deg, rgba(20,17,14,.92) 0%, rgba(20,17,14,.35) 60%, rgba(20,17,14,.1)), url(/art/zone-${m.shrines.find((x) => x.zoneName === zn)!.zone}.webp)` }}>
+                {zn}
+              </h3>
               {m.shrines
                 .filter((s) => s.zoneName === zn)
                 .map((s) => (

@@ -8,7 +8,7 @@ import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPa
 /** How a region's light is graded after tone mapping. */
 export type Grade = { tint: number; sat: number; contrast: number; vignette: number; bloom: number; lift: number };
 
-export const DEFAULT_GRADE: Grade = { tint: 0xffffff, sat: 1.08, contrast: 1.06, vignette: 0.32, bloom: 0.28, lift: 0 };
+export const DEFAULT_GRADE: Grade = { tint: 0xffffff, sat: 1.08, contrast: 1.06, vignette: 0.2, bloom: 0.3, lift: 0 };
 
 const GradeShader = {
   uniforms: {
@@ -41,7 +41,7 @@ const GradeShader = {
       vec2 d = vUv - 0.5;
       // lens: the faintest colour fringe toward the corners
       float edge = dot(d, d);
-      vec2 ca = d * edge * 0.006;
+      vec2 ca = d * edge * 0.0022;
       c.r = texture2D(tDiffuse, vUv - ca).r;
       c.b = texture2D(tDiffuse, vUv + ca).b;
       // unsharp mask: put back the crispness bloom and resampling take away
@@ -64,6 +64,9 @@ const GradeShader = {
       vec3 col = c.rgb * uTint;
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
       col = mix(vec3(l), col, uSat);
+      // painterly shadows: open the toe so shade reads as cool colour, never as black
+      float sh = 1.0 - smoothstep(0.0, 0.42, l);
+      col += vec3(0.050, 0.058, 0.085) * sh * sh + col * sh * 0.55;
       col = (col - 0.5) * uContrast + 0.5 + uLift;
       // split tone: cool the shadows a touch, warm the highlights
       float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
@@ -141,13 +144,13 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
 
 /** Each region's look: warm Hearthfen, gilded Kingdom, cold green Mire, iron-grey Keep, ash-white Wasteland. */
 export const ZONE_GRADES: Record<string, Grade> = {
-  over: { tint: 0xfff4e4, sat: 1.12, contrast: 1.06, vignette: 0.3, bloom: 0.3, lift: 0 },
-  castle: { tint: 0xffe8d0, sat: 1.1, contrast: 1.1, vignette: 0.42, bloom: 0.45, lift: 0 },
-  kingdom: { tint: 0xfff0d8, sat: 1.1, contrast: 1.05, vignette: 0.28, bloom: 0.32, lift: 0.005 },
-  hunt: { tint: 0xeef4e0, sat: 1.0, contrast: 1.08, vignette: 0.38, bloom: 0.25, lift: 0 },
-  kennel: { tint: 0xffe6d0, sat: 1.02, contrast: 1.1, vignette: 0.44, bloom: 0.4, lift: 0 },
-  mire: { tint: 0xdff0dc, sat: 0.86, contrast: 1.1, vignette: 0.46, bloom: 0.35, lift: 0.01 },
-  keep: { tint: 0xe4e8f0, sat: 0.82, contrast: 1.14, vignette: 0.48, bloom: 0.3, lift: 0 },
-  waste: { tint: 0xece8e4, sat: 0.62, contrast: 1.12, vignette: 0.45, bloom: 0.42, lift: 0.015 },
-  citadel: { tint: 0xd8e0f4, sat: 0.7, contrast: 1.18, vignette: 0.55, bloom: 0.55, lift: 0 },
+  over: { tint: 0xfff4e4, sat: 1.12, contrast: 1.06, vignette: 0.18, bloom: 0.3, lift: 0 },
+  castle: { tint: 0xffe8d0, sat: 1.1, contrast: 1.1, vignette: 0.25, bloom: 0.45, lift: 0 },
+  kingdom: { tint: 0xfff0d8, sat: 1.1, contrast: 1.05, vignette: 0.17, bloom: 0.32, lift: 0.005 },
+  hunt: { tint: 0xeef4e0, sat: 1.0, contrast: 1.08, vignette: 0.23, bloom: 0.25, lift: 0 },
+  kennel: { tint: 0xffe6d0, sat: 1.02, contrast: 1.1, vignette: 0.26, bloom: 0.4, lift: 0 },
+  mire: { tint: 0xdff0dc, sat: 0.86, contrast: 1.1, vignette: 0.28, bloom: 0.35, lift: 0.01 },
+  keep: { tint: 0xe4e8f0, sat: 0.82, contrast: 1.14, vignette: 0.29, bloom: 0.3, lift: 0 },
+  waste: { tint: 0xece8e4, sat: 0.62, contrast: 1.12, vignette: 0.27, bloom: 0.42, lift: 0.015 },
+  citadel: { tint: 0xd8e0f4, sat: 0.7, contrast: 1.18, vignette: 0.33, bloom: 0.55, lift: 0 },
 };
