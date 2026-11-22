@@ -692,9 +692,15 @@ export const MOB_KINDS: MobKind[] = [
 export type MobSnap = [key: string, x: number, z: number, yaw: number, st: number, hp: number, atk: number, t: number, kind: number, ax?: number, az?: number];
 
 /** Foes drawn from a modelled, clip-animated glTF instead of the procedural rig. `adv`: an adventurer body on the shared rig. */
-type Worn = { urls: string[]; tint?: number; adv?: boolean; fade?: number; ears?: number; eyes?: number; head?: number };
+type Worn = { urls: string[]; tint?: number; adv?: boolean; fade?: number; ears?: number; eyes?: number; head?: number; quad?: boolean };
 const SK = { minion: "/models/skeleton_minion.glb", warrior: "/models/skeleton_warrior.glb", rogue: "/models/skeleton_rogue.glb", mage: "/models/skeleton_mage.glb" };
 const MODELS: Partial<Record<MobKind, Worn>> = {
+  wolf: { urls: ["/models/animal_wolf.glb"], quad: true, tint: 0xffffff },
+  blackwolf: { urls: ["/models/animal_wolf.glb"], quad: true, tint: 0x6a6878, eyes: 0xff4030 },
+  hound: { urls: ["/models/animal_husky.glb"], quad: true, tint: 0xb89878 },
+  kennel_hound: { urls: ["/models/animal_husky.glb"], quad: true, tint: 0x5a5058, eyes: 0xff7030 },
+  deer: { urls: ["/models/animal_stag.glb", "/models/animal_deer.glb"], quad: true, tint: 0xffffff },
+  horse: { urls: ["/models/animal_horse.glb"], quad: true, tint: 0xffffff },
   skeleton: { urls: [SK.minion, SK.warrior, SK.rogue] },
   necromancer: { urls: [SK.mage] },
   undead_knight: { urls: [SK.warrior] },
@@ -719,6 +725,7 @@ const MODEL_HEIGHT = 1.72;
 
 export class Mob {
   actor: ModelActor | null = null;
+  private beast = false;
   private swing = "1H_Melee_Attack_Chop";
   id = nextId++;
   cfg: Cfg;
@@ -805,7 +812,9 @@ export class Mob {
     const g = this.rig.group;
     const held = this.rig.sockets.gripR?.children[0];
     for (const c of g.children) c.visible = false;
-    const actor = new ModelActor(tpl, this.cfg.height / MODEL_HEIGHT, worn.head ?? 0.58, worn.tint ?? 0xb8b0a0, clips);
+    const actor = new ModelActor(tpl, this.cfg.height / MODEL_HEIGHT, worn.quad ? 1 : (worn.head ?? 0.58), worn.tint ?? 0xb8b0a0, clips);
+    if (worn.quad) actor.fit(this.cfg.height);
+    this.beast = !!worn.quad;
     if (worn.adv) actor.emptyHands();
     if (worn.ears !== undefined || worn.eyes !== undefined) actor.monster(worn.ears, worn.eyes);
     if (worn.fade) actor.fade(worn.fade);
@@ -819,6 +828,17 @@ export class Mob {
 
   private animateModel(a: ModelActor, dt: number, k: number) {
     a.flash(this.flash > 0);
+    if (this.beast) {
+      const bite = a.has("Attack") ? "Attack" : "Attack_Headbutt";
+      if (this.state === "dead") a.pose("Death", dt, Math.min(1, this.deadT / a.duration("Death")), 1, 20);
+      else if (this.state === "stagger") a.pose("Idle_HitReact_Left", dt, Math.min(1, 1 - this.t / 0.7), 1, 20);
+      else if (this.state === "tell") a.pose(bite, dt, k * 0.35, 1, 14);
+      else if (this.state === "active") a.pose(bite, dt, 0.35 + k * 0.45, 1, 30);
+      else if (this.speed > this.cfg.run * 0.75) a.pose("Gallop", dt, undefined, Math.max(0.6, this.speed / 5.5));
+      else if (this.speed > 0.2) a.pose("Walk", dt, undefined, Math.max(0.6, this.speed / 1.4));
+      else a.pose(this.aggro || this.id % 3 ? "Idle" : "Eating", dt, undefined, 1, 5);
+      return;
+    }
     if (this.state === "dead") a.pose("Death_A", dt, Math.min(1, this.deadT / a.duration("Death_A")), 1, 20);
     else if (this.state === "stagger") a.pose("Hit_A", dt, Math.min(1, 1 - this.t / 0.7), 1, 20);
     else if (this.state === "tell" && this.atk?.tellPose === "cast") a.pose(a.has("Spellcast_Raise") ? "Spellcast_Raise" : "Spellcast_Shoot", dt, k * (a.has("Spellcast_Raise") ? 0.9 : 0.15), 1, 14);

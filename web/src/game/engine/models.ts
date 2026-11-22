@@ -126,6 +126,23 @@ export class ModelActor {
     return this;
   }
 
+  /** Fit the model's bind-pose height to `h` metres. */
+  fit(h: number) {
+    this.root.scale.setScalar(1);
+    this.root.updateMatrixWorld(true);
+    const box = new THREE.Box3();
+    this.root.traverse((o) => {
+      const m = o as THREE.SkinnedMesh;
+      if (!m.isSkinnedMesh) return;
+      m.skeleton.update();
+      m.computeBoundingBox();
+      box.union(m.boundingBox!.clone().applyMatrix4(m.matrixWorld));
+    });
+    const y = box.max.y - Math.min(0, box.min.y);
+    if (y > 0 && Number.isFinite(y)) this.root.scale.setScalar(h / y);
+    return this;
+  }
+
   has(name: string) {
     return this.tpl.clips.has(name);
   }
