@@ -2228,3 +2228,47 @@ input {
   height: 100%;
   background: linear-gradient(90deg, #a8772e, #f0cf7a);
 }
+
+.vm-card {
+  margin: 4px 0 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(240, 207, 122, 0.45);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(60, 40, 18, 0.75), rgba(20, 14, 8, 0.75));
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.vm-card > b {
+  display: block;
+  font-size: 1.25rem;
+  letter-spacing: 0.04em;
+}
+.vm-journal .vm-card > em {
+  display: block;
+  float: none;
+  position: static;
+  text-align: center;
+  margin: 2px 0 10px;
+  color: #f0cf7a;
+  font-style: italic;
+}
+.vm-card-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 10px;
+}
+.vm-card-grid span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-weight: 700;
+}
+.vm-card-grid small {
+  font-weight: 400;
+  opacity: 0.7;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}

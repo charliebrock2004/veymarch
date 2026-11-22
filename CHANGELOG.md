@@ -8,6 +8,7 @@
 - Villagers remark on your strongest mark the first time they see it (30 lines, one per mark and rank), ahead of their usual line. Quest talk is left alone.
 - A roll that passes through a blow slows the world for under half a second.
 - Bestiary ranks: Known at one kill, Studied at 10 (health, fire weakness, spoils), Mastered at 50 (every blow and its warning time). A beaten boss is fully known.
+- Character card at the top of the Marks tab: your name, the title your strongest mark has earned you (30 titles, "the Unmarked" until then), and your record: level, mark ranks, foes and great ones felled, times buried, blows turned and slipped, lands walked, hidden places found.
 - Cold open: a brand-new single-player character starts on the Kingsroad at night facing an undead knight that cannot be beaten. Struck down, run off, or after 45 seconds, they wake in their bed in Hearthfen. It is not counted as a death and does not repeat. Existing characters and shared worlds are untouched.
 - Rumours and hidden places: villagers pass on one rumour each per visit, pointing at one of the 11 hidden caches (this land's first). A new Places tab in the Journal keeps what you have heard and found, and finding one raises a banner.
 - Game direction review, 40 ideas, priorities and staged plan: Docs/programme/GAME_DIRECTION.md.

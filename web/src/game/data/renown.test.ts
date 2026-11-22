@@ -52,3 +52,18 @@ test("every cache has a rumour and rumours are told once, this land first", asyn
   assert.equal(v.find((p) => p.id === "hollow")?.heard, true);
   assert.equal(v.find((p) => p.id === "mill_loft")?.found, true);
 });
+
+test("the March names you after your strongest mark", async () => {
+  const { TITLE_IDS, UNMARKED, cardView, epithet } = await import("./renown.ts");
+  assert.deepEqual([...TITLE_IDS].sort(), MARKS.map((m) => m.id).sort());
+  const c = freshCodex();
+  assert.equal(epithet(marksView({ c, deaths: 0 })), UNMARKED);
+  c.k.wolf = 80;
+  c.parries = 8;
+  const v = marksView({ c, deaths: 0 });
+  assert.equal(epithet(v), "Beast-Blooded");
+  const card = cardView(v, { level: 4, kills: 80, deaths: 0, bosses: 0, lands: 1, places: 2, placesOf: 11, dodges: 0, parries: 8 });
+  assert.equal(card.title, "Beast-Blooded");
+  assert.deepEqual(card.lines[1], ["Mark ranks", "3/30"]);
+  assert.deepEqual(card.lines[8], ["Hidden places", "2/11"]);
+});

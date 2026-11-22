@@ -80,3 +80,45 @@ export type PlaceView = { id: string; name: string; line: string; heard: boolean
 export function placesView(heard: string[], found: (id: string) => boolean): PlaceView[] {
   return Object.entries(RUMOURS).map(([id, r]) => ({ id, name: r.name, line: r.line, heard: heard.includes(id), found: found(id) }));
 }
+
+/** What the March calls you: a name earned from your strongest mark. Ties go to the order the marks are listed in. */
+const TITLES: Record<string, [string, string, string]> = {
+  beast: ["Wolf-Reeker", "Beast-Blooded", "Terror of the Tree Line"],
+  grave: ["Grave-Dirty", "Gravewise", "The Sexton's Rest"],
+  men: ["Hand-Watcher", "Manhunter", "The Price on the South Road"],
+  toys: ["Sawdust-Sleeved", "Nursery-Wise", "Breaker of Tin"],
+  hand: ["Steady-Handed", "Still Hand", "Unstruck from the Front"],
+  step: ["Light-Footed", "Ghoststep", "The One Blades Pass Through"],
+  buried: ["Once-Buried", "Much-Buried", "The Turnip"],
+  warden: ["Giant-Feller", "Warden's Bane", "The One in the Song"],
+  maker: ["Callus-Handed", "Maker's Hands", "Master of the Lane"],
+  way: ["Strange-Mudded", "Wayfarer", "Walker of Every Road"],
+};
+export const UNMARKED = "the Unmarked";
+export const TITLE_IDS = Object.keys(TITLES);
+
+export function epithet(marks: MarkView[]): string {
+  let best: MarkView | null = null;
+  for (const m of marks) if (m.rank > 0 && TITLES[m.id] && (!best || m.rank > best.rank)) best = m;
+  return best ? TITLES[best.id][best.rank - 1] : UNMARKED;
+}
+
+export type Card = { title: string; lines: [string, string][] };
+/** The character card: your earned name and the record behind it. */
+export function cardView(marks: MarkView[], r: { level: number; kills: number; deaths: number; bosses: number; lands: number; places: number; placesOf: number; dodges: number; parries: number }): Card {
+  const ranks = marks.reduce((n, m) => n + m.rank, 0);
+  return {
+    title: epithet(marks),
+    lines: [
+      ["Level", String(r.level)],
+      ["Mark ranks", `${ranks}/${marks.length * 3}`],
+      ["Foes felled", String(r.kills)],
+      ["Great ones felled", String(r.bosses)],
+      ["Times buried", String(r.deaths)],
+      ["Blows turned", String(r.parries)],
+      ["Blows slipped", String(r.dodges)],
+      ["Lands walked", String(r.lands)],
+      ["Hidden places", `${r.places}/${r.placesOf}`],
+    ],
+  };
+}

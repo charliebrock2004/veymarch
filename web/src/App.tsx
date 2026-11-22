@@ -997,6 +997,20 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
         {tab === "marks" && (
           <div className="vm-journal vm-scroll">
             <p className="vm-sub">The March has no classes. What you do, often enough, leaves a mark.</p>
+            {hud.codex?.card && (
+              <div className="vm-card">
+                <b>{hud.name}</b>
+                <em>{hud.codex.card.title}</em>
+                <div className="vm-card-grid">
+                  {hud.codex.card.lines.map(([k, v]) => (
+                    <span key={k}>
+                      <small>{k}</small>
+                      {v}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             {marks.map((m) => (
               <div key={m.id} className={`vm-quest vm-mark ${m.rank > 0 ? "main" : ""}`}>
                 <b>

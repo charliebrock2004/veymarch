@@ -40,8 +40,8 @@ import { Room, type Bundle, type Ev } from "../net/room";
 import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
 import { BOUNTIES, FINDS, pickBounties, type Find } from "./data/explore";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
-import { RUMOURS, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
-import type { PlaceView } from "./data/renown.ts";
+import { RUMOURS, cardView, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
+import type { Card, PlaceView } from "./data/renown.ts";
 import { MARKS, RANK_NAMES, markBonuses, markBoon, markRank, markVs, marksView, type MarkView } from "./data/marks.ts";
 
 // ------------------------------------------------------------------ public types
@@ -139,7 +139,7 @@ export type Hud = {
   /** minimap: [right, ahead, kind] in metres around the player, turned with the camera */
   radar: { r: number; pts: [number, number, string][] } | null;
   /** bestiary and deeds, filled while the journal is open */
-  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean; rank: number; notes: string[]; next: string }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; bounties: { id: string; name: string; text: string; n: number; of: number; paid: boolean; reward: string }[]; finds: { caches: number; stones: number }; talents: { free: number; trees: { id: string; name: string; sub: string; list: { id: string; name: string; rank: number; max: number; text: string; next: string }[] }[] } ; marks: MarkView[]; places: PlaceView[] } | null;
+  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean; rank: number; notes: string[]; next: string }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; bounties: { id: string; name: string; text: string; n: number; of: number; paid: boolean; reward: string }[]; finds: { caches: number; stones: number }; talents: { free: number; trees: { id: string; name: string; sub: string; list: { id: string; name: string; rank: number; max: number; text: string; next: string }[] }[] } ; marks: MarkView[]; places: PlaceView[]; card: Card } | null;
   /** unspent talent points */
   talentFree: number;
   /** a one-time hint */
@@ -4249,6 +4249,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (playTime > 45) showTip("radar");
   }
   function codexView(): NonNullable<Hud["codex"]> {
+    const mv = marksView({ c: codex, deaths });
+    const places = placesView(codex.r, placeFound);
     return {
       beasts: Object.entries(BEASTS).map(([id, b]) => {
         const kills = codex.k[id] ?? 0;
@@ -4274,8 +4276,19 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           list: TALENTS.filter((d) => d.tree === t).map((d) => ({ id: d.id, name: d.name, rank: talents[d.id] ?? 0, max: d.max, text: d.text(Math.max(1, talents[d.id] ?? 0)), next: (talents[d.id] ?? 0) > 0 && (talents[d.id] ?? 0) < d.max ? d.text((talents[d.id] ?? 0) + 1) : "" })),
         })),
       },
-      marks: marksView({ c: codex, deaths }),
-      places: placesView(codex.r, placeFound),
+      marks: mv,
+      places,
+      card: cardView(mv, {
+        level,
+        kills: Object.values(codex.k).reduce((n, v) => n + v, 0),
+        deaths: Math.max(deaths, codex.falls),
+        bosses: Object.keys(codex.k).filter((k) => k.startsWith("boss_")).length,
+        lands: codex.z.length,
+        places: places.filter((p) => p.found).length,
+        placesOf: places.length,
+        dodges: codex.dodges,
+        parries: codex.parries,
+      }),
     };
   }
   const RADAR_R = 46;
