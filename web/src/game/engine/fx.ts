@@ -177,3 +177,59 @@ export class Beam {
     this.mesh.visible = false;
   }
 }
+
+/** A fading ribbon swept out by a blade: sampled base and tip positions joined into a strip. */
+export class Trail {
+  mesh: THREE.Mesh;
+  private pos: Float32Array;
+  private alpha: Float32Array;
+  private pts: { b: THREE.Vector3; t: THREE.Vector3; age: number }[] = [];
+  private mat: THREE.ShaderMaterial;
+  constructor(parent: THREE.Object3D, private n = 16, private life = 0.2) {
+    this.pos = new Float32Array(n * 6);
+    this.alpha = new Float32Array(n * 2);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(this.pos, 3));
+    g.setAttribute("aA", new THREE.BufferAttribute(this.alpha, 1));
+    const idx: number[] = [];
+    for (let i = 0; i < n - 1; i++) idx.push(i * 2, i * 2 + 1, i * 2 + 2, i * 2 + 1, i * 2 + 3, i * 2 + 2);
+    g.setIndex(idx);
+    this.mat = new THREE.ShaderMaterial({
+      uniforms: { uC: { value: new THREE.Color(0xfff0d0) } },
+      vertexShader: /* glsl */ `attribute float aA; varying float vA; void main() { vA = aA; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */ `uniform vec3 uC; varying float vA; void main() { gl_FragColor = vec4(uC * vA, vA); }`,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    this.mesh = new THREE.Mesh(g, this.mat);
+    this.mesh.frustumCulled = false;
+    this.mesh.renderOrder = 9;
+    this.mesh.visible = false;
+    parent.add(this.mesh);
+  }
+  /** Call every frame; pass the blade's base and tip while it is cutting, nothing otherwise. */
+  update(dt: number, base?: THREE.Vector3, tip?: THREE.Vector3, color = 0xfff0d0, strength = 0.5) {
+    for (const p of this.pts) p.age += dt;
+    while (this.pts.length && this.pts[this.pts.length - 1].age > this.life) this.pts.pop();
+    if (base && tip) {
+      this.pts.unshift({ b: base.clone(), t: tip.clone(), age: 0 });
+      if (this.pts.length > this.n) this.pts.pop();
+      this.mat.uniforms.uC.value.setHex(color).multiplyScalar(strength);
+    }
+    const m = this.pts.length;
+    this.mesh.visible = m > 1;
+    if (m < 2) return;
+    for (let i = 0; i < this.n; i++) {
+      const p = this.pts[Math.min(i, m - 1)];
+      const a = i < m ? 1 - p.age / this.life : 0;
+      this.pos.set([p.b.x, p.b.y, p.b.z, p.t.x, p.t.y, p.t.z], i * 6);
+      this.alpha[i * 2] = 0;
+      this.alpha[i * 2 + 1] = a * a;
+    }
+    const g = this.mesh.geometry;
+    g.attributes.position.needsUpdate = true;
+    g.attributes.aA.needsUpdate = true;
+  }
+}

@@ -11,7 +11,7 @@ import { addItem, canMine, consume, countOf, equip, equipped, gateOpen, grantUni
 import { Audio } from "./engine/audio";
 import type { ThemeId } from "./engine/music";
 import { armourCode, armourLook } from "./play/gear";
-import { Beam, DecalPool, Flashes } from "./engine/fx";
+import { Beam, DecalPool, Flashes, Trail } from "./engine/fx";
 import { installHeightFog, shared } from "./engine/kit";
 import { makeMaterials } from "./engine/materials";
 import { Particles, buildGlows } from "./engine/particles";
@@ -567,6 +567,29 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let playerRig: Rig | null = null;
   let playerPoser: Poser | null = null;
   let heldMain: THREE.Object3D | null = null;
+  // blade base and tip in the grip socket's space, for the swing trail
+  const bladeBase = new THREE.Vector3(), bladeTip = new THREE.Vector3();
+  const swingTrail = new Trail(scene);
+  function measureBlade(w: THREE.Object3D) {
+    w.updateMatrixWorld(true);
+    const bb = new THREE.Box3().setFromObject(w);
+    const size = bb.getSize(new THREE.Vector3());
+    const ax = size.x > size.y && size.x > size.z ? "x" : size.y > size.z ? "y" : "z";
+    const far = Math.abs(bb.max[ax]) > Math.abs(bb.min[ax]) ? bb.max[ax] : bb.min[ax];
+    bb.getCenter(bladeTip);
+    bladeBase.copy(bladeTip);
+    bladeTip[ax] = far;
+    bladeBase[ax] = far * 0.3;
+  }
+  const _tb = new THREE.Vector3(), _tt = new THREE.Vector3();
+  function updateTrail(dt: number) {
+    const cutting = heldMain && (P.action.startsWith("light") || P.action === "heavy") && P.at > P.dur * P.hitAt * 0.45 && P.at < P.dur * Math.min(0.95, P.hitAt + 0.3);
+    const grip = playerRig?.sockets.gripR;
+    if (!cutting || !grip) return swingTrail.update(dt);
+    grip.updateWorldMatrix(true, false);
+    const heavy = P.action === "heavy";
+    swingTrail.update(dt, grip.localToWorld(_tb.copy(bladeBase)), grip.localToWorld(_tt.copy(bladeTip)), heavy ? 0xffc890 : 0xfff0dc, heavy ? 0.7 : 0.45);
+  }
   let heldOff: THREE.Object3D | null = null;
 
   // camera
@@ -746,6 +769,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     heldMain = null;
     if (w.id !== "wpn_fists") {
       heldMain = weaponModel(w.id);
+      measureBlade(heldMain);
       playerRig.sockets.gripR.add(heldMain);
     }
     const shield = items.find((s) => s.equipped && ITEMS[s.def]?.moveset === "shield");
@@ -3029,6 +3053,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       nanCheck("world");
       dust.update(rdt);
       sparks.update(rdt);
+      updateTrail(rdt);
       flashes.update(dt);
       updateCamera(dt, rdt);
       nanCheck("camera");
@@ -4310,6 +4335,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     },
     give: (id: string, n: number) => {
       items = addItem(items, id, n, uid);
+      push();
+    },
+    wield: (def: string) => {
+      items = addItem(items, def, 1, uid);
+      const it = items.find((i) => i.def === def);
+      if (it) items = equip(items, it.uid);
+      syncGear();
       push();
     },
     /** build a zone now (as walking toward it would) */
