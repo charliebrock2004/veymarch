@@ -36,6 +36,8 @@ import { RemotePlayer, type NetPlayer } from "./play/remote";
 import { weaponModel } from "./play/weapons";
 import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Realm, StackJson } from "../net/realm";
 import { Room, type Bundle, type Ev } from "../net/room";
+import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
+import { BOUNTIES, FINDS, dayStamp, pickBounties, type Find } from "./data/explore";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
 
 // ------------------------------------------------------------------ public types
@@ -133,7 +135,9 @@ export type Hud = {
   /** minimap: [right, ahead, kind] in metres around the player, turned with the camera */
   radar: { r: number; pts: [number, number, string][] } | null;
   /** bestiary and deeds, filled while the journal is open */
-  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean }[]; deeds: { id: string; name: string; text: string; done: boolean }[] } | null;
+  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; bounties: { id: string; name: string; text: string; n: number; of: number; paid: boolean; reward: string }[]; finds: { caches: number; stones: number }; talents: { free: number; trees: { id: string; name: string; sub: string; list: { id: string; name: string; rank: number; max: number; text: string; next: string }[] }[] } } | null;
+  /** unspent talent points */
+  talentFree: number;
   /** a one-time hint */
   tip: { text: string; at: number } | null;
   /** a gamepad is driving */
@@ -163,6 +167,8 @@ export type GameApi = {
   buy: (item: string, n: number) => void;
   sell: (uid: string, n: number) => void;
   journal: () => void;
+  learn: (id: string) => void;
+  claimBounty: (id: string) => void;
   travel: (shrine: string) => void;
   setQuality: (q: Quality) => void;
   setMuted: (m: boolean) => void;
@@ -479,6 +485,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   /** consecutive connecting hits (Smacko's fourth hit lands twice) and a riposte after a parry (Finlay's Longsword) */
   let hitChain = 0;
   let riposte = 0;
+  let talents: TalentBook = {};
+  let tm = talentMods(talents);
+  let baseMaxHp = 0;
+  let baseMaxStam = 0;
+  let baseMana = 0;
   let toast = "";
   let toastId = 0;
   let placeName = "";
@@ -1016,7 +1027,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       hour, night: hour >= 20.5 || hour < 5.5,
       reward, fade, stats: { time: playTime, deaths, kills }, hurtAt, quality, muted: audio.muted, vol: audio.volume,
       combat: combatT > 0, charge: P.holding ? Math.min(1, P.holdT / 0.35) : 0,
-      inDungeon: ZONES[P.zone].indoor, zone: P.zone, fps: Math.round(fps),
+      inDungeon: ZONES[P.zone].indoor, zone: P.zone, fps: Math.round(fps), talentFree: talentFree(level, talents),
       online: online ? onlineHud() : null,
       radar: mode === "play" ? radar() : null,
       codex: mode === "journal" ? codexView() : null,
@@ -1179,9 +1190,176 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   // ------------------------------------------------------------ interactions
   const interacts: Interact[] = [];
+  // ---------------------------------------------------------- hidden caches and rune stones
+  /** A real shared world (not the private one single player runs on this device). */
+  const sharedNow = () => !!online && !online.realm.solo;
+  /** Hand the player items found in the world: straight into the device's own world database in single player. */
+  function grant(list: [string, number][]) {
+    const o = online;
+    const be = o?.realm.backend as { exec?: (sql: string, params?: unknown[]) => Promise<unknown[]> } | undefined;
+    if (!o || !be?.exec) return loot(list);
+    lootDrops(list.map(([item, n]) => ({ item, n })));
+    (async () => {
+      for (const [def, n] of list) await be.exec!("select vm_add_item($1::uuid, $2, $3)", [o.charId, def, n]);
+      const rows = (await be.exec!("select vm_char_json($1::uuid) as r", [o.charId])) as { r: { items: StackJson[] } }[];
+      if (rows[0]?.r?.items && online === o) setItems(rows[0].r.items);
+    })().catch(netError);
+  }
+  const findMeshes = new Map<string, { root: THREE.Group; glow: THREE.Mesh; lid?: THREE.Object3D; x: number; z: number }>();
+  const findMat = {
+    wood: new THREE.MeshStandardMaterial({ color: 0x5a3d24, roughness: 0.85 }),
+    brass: new THREE.MeshStandardMaterial({ color: 0xc9a24a, roughness: 0.35, metalness: 0.85 }),
+    stone: new THREE.MeshStandardMaterial({ color: 0x6e6a62, roughness: 0.95, flatShading: true }),
+  };
+  const found = (id: string) => !!codex.f?.includes(id);
+  /** Where a find really stands: its listed spot, nudged off walls, trees and water. */
+  function findSpot(f: Find) {
+    const w = toWorld(f.zone, f.x, f.z);
+    const zb = zones.get(f.zone);
+    const bad = (x: number, z: number) => env.col.hit(x, z, 1.1) || !!zb?.blocked?.(x, z);
+    for (let r = 0; r <= 14; r += 1.5)
+      for (let a = 0; a < 8; a++) {
+        const x = w.x + Math.cos(a * 0.785 + r) * r;
+        const z = w.z + Math.sin(a * 0.785 + r) * r;
+        if (!bad(x, z)) return { x, z };
+        if (r === 0) break;
+      }
+    return w;
+  }
+  function buildFind(f: Find) {
+    const zb = zones.get(f.zone);
+    if (!zb || findMeshes.has(f.id)) return findMeshes.get(f.id);
+    const { x, z } = findSpot(f);
+    const root = new THREE.Group();
+    root.position.set(x, zb.groundAt(x, z), z);
+    root.rotation.y = (x * 7.3 + z * 3.1) % 6.28;
+    let lid: THREE.Object3D | undefined;
+    let glow: THREE.Mesh;
+    if (f.kind === "cache") {
+      const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.5, 0.58), findMat.wood);
+      box.position.y = 0.25;
+      const pivot = new THREE.Group();
+      pivot.position.set(0, 0.5, -0.29);
+      const top = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.9, 10, 1, false, 0, Math.PI), findMat.wood);
+      top.rotation.z = Math.PI / 2;
+      top.rotation.y = Math.PI / 2;
+      top.position.set(0, 0, 0.29);
+      pivot.add(top);
+      for (const bx of [-0.3, 0.3]) {
+        const band = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.52, 0.6), findMat.brass);
+        band.position.set(bx, 0.25, 0);
+        root.add(band);
+      }
+      const lock = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.16, 0.05), findMat.brass);
+      lock.position.set(0, 0.4, 0.3);
+      root.add(box, pivot, lock);
+      lid = pivot;
+      glow = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffd98a, transparent: true, opacity: 0.9, depthWrite: false }));
+      glow.position.y = 1.0;
+    } else {
+      const slab = new THREE.Mesh(new THREE.DodecahedronGeometry(0.75, 0), findMat.stone);
+      slab.scale.set(0.75, 1.9, 0.42);
+      slab.position.y = 1.05;
+      const foot = new THREE.Mesh(new THREE.DodecahedronGeometry(0.6, 0), findMat.stone);
+      foot.scale.set(1.2, 0.4, 0.9);
+      foot.position.y = 0.12;
+      root.add(slab, foot);
+      glow = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.035, 6, 14), new THREE.MeshBasicMaterial({ color: 0x8fd8ff, transparent: true, opacity: 0.9, depthWrite: false }));
+      glow.position.set(0, 1.35, 0.3);
+    }
+    root.add(glow);
+    root.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh && o !== glow) o.castShadow = true;
+    });
+    zb.root.add(root);
+    const rec = { root, glow, lid, x, z };
+    findMeshes.set(f.id, rec);
+    if (f.kind === "stone") env.col.circle?.(x, z, 0.5);
+    return rec;
+  }
+  function takeFind(f: Find) {
+    if (found(f.id)) return;
+    (codex.f ??= []).push(f.id);
+    if (f.kind === "cache") {
+      if (f.loot) grant(f.loot);
+      audio.reward();
+      const m = findMeshes.get(f.id);
+      if (m) sparks.burst(26, m.x, P.y + 0.8, m.z, 3, 0xffd98a, 0.9, 0.2, { up: 3, grav: 1 });
+      showBanner("CACHE FOUND", `${FINDS.filter((x) => x.kind === "cache" && found(x.id)).length} of ${FINDS.filter((x) => x.kind === "cache").length}`);
+    } else {
+      audio.quest();
+      showBanner("RUNE STONE READ", `${FINDS.filter((x) => x.kind === "stone" && found(x.id)).length} of ${FINDS.filter((x) => x.kind === "stone").length}`);
+    }
+    say(f.text);
+    checkDeeds();
+    push();
+  }
+  let findT = 0;
+  function updateFinds(dt: number) {
+    findT += dt;
+    for (const f of FINDS) {
+      const m = findMeshes.get(f.id);
+      if (!m || f.zone !== P.zone) continue;
+      const got = found(f.id);
+      m.root.visible = !sharedNow();
+      m.glow.visible = !got;
+      if (!got) {
+        m.glow.position.y = (f.kind === "cache" ? 1.0 : 1.35) + Math.sin(findT * 2 + m.x) * 0.06;
+        (m.glow.material as THREE.MeshBasicMaterial).opacity = 0.55 + Math.sin(findT * 3 + m.z) * 0.35;
+        if (f.kind === "stone") m.glow.rotation.z = findT * 0.6;
+        // a glint to catch the eye from a little way off
+        if (Math.random() < dt * 2.5 && Math.hypot(m.x - P.x, m.z - P.z) < 30)
+          sparks.emit({ x: m.x + (Math.random() - 0.5) * 0.6, y: m.root.position.y + 0.6 + Math.random() * 0.8, z: m.z + (Math.random() - 0.5) * 0.6, vx: 0, vy: 0.6, vz: 0, life: 0.9, size: 0.14, color: f.kind === "cache" ? 0xffe2a0 : 0x9fdcff, grav: -0.3 });
+      }
+      if (m.lid) m.lid.rotation.x += ((got ? -1.9 : 0) - m.lid.rotation.x) * Math.min(1, dt * 6);
+    }
+  }
+
+  // ------------------------------------------------------------------------------ bounties
+  function bountyBook() {
+    const day = dayStamp();
+    if (!codex.b || codex.b.day !== day) {
+      const ids = pickBounties(day, level);
+      codex.b = { day, ids, n: ids.map(() => 0), paid: ids.map(() => false) };
+      saveCodex(codexId, codex);
+    }
+    return codex.b;
+  }
+  function noteBounty(kind: string) {
+    if (sharedNow()) return;
+    const b = bountyBook();
+    b.ids.forEach((id, i) => {
+      const d = BOUNTIES.find((x) => x.id === id);
+      if (!d || b.paid[i] || b.n[i] >= d.n || !d.kinds.includes(kind)) return;
+      b.n[i]++;
+      if (b.n[i] >= d.n) {
+        showBanner("BOUNTY READY", d.name + " · claim it in the journal");
+        audio.quest();
+      } else floater(`${d.name} ${b.n[i]}/${d.n}`, P.x, P.y + 2.6, P.z, "info");
+    });
+  }
+  function claimBounty(id: string) {
+    if (sharedNow()) return;
+    const b = bountyBook();
+    const i = b.ids.indexOf(id);
+    const d = BOUNTIES.find((x) => x.id === id);
+    if (i < 0 || !d || b.paid[i] || b.n[i] < d.n) return;
+    b.paid[i] = true;
+    grant([["coin_crown", d.crowns], ...(d.item ? [d.item] : [])]);
+    audio.reward();
+    saveCodex(codexId, codex);
+    push();
+  }
+
   function buildInteracts() {
     interacts.length = 0;
     if (!world || !dun) return;
+    if (!sharedNow())
+      for (const f of FINDS) {
+        const m = buildFind(f);
+        if (!m) continue;
+        interacts.push({ x: m.x, z: m.z, r: 2.2, zone: f.zone, label: () => (found(f.id) ? null : f.kind === "cache" ? "Open the cache" : "Read the rune stone"), act: () => takeFind(f) });
+      }
     const a = world.anchors;
     const d = dun.anchors;
     for (const [zid, zb] of zones)
@@ -1833,9 +2011,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     let hits = 0;
     const chain = P.action === "light3" ? 1.2 : 1;
     // level, the Black Knight's Oath and a Finlay riposte all add to the weapon's own number
-    const ripo = riposte > 0 ? 2 : 1;
-    const dmgBase = strikeDamage({ weapon: w, heavy, skillRank: 0, weakness: false, blocking: false, shield: false, defence: 0 }) * statsFor(level).power * (setWorn("bk") ? 1.15 : 1) * ripo * (1 + (MODIFIERS[mainMod()]?.dmg ?? 0));
-    const tryHit = (x: number, z: number, r: number, hit: (dmg: number) => number) => {
+    const ripo = riposte > 0 ? (w.id === "wpn_finlay_longsword" ? 2 : 1) + tm.riposte : 1;
+    const dmgBase = strikeDamage({ weapon: w, heavy, skillRank: 0, weakness: false, blocking: false, shield: false, defence: 0 }) * statsFor(level).power * (setWorn("bk") ? 1.15 : 1) * ripo * tm.dmg * (1 + (MODIFIERS[mainMod()]?.dmg ?? 0));
+    const tryHit = (x: number, z: number, r: number, hit: (dmg: number) => number, open = false) => {
       const dx = x - P.x;
       const dz = z - P.z;
       const d = Math.hypot(dx, dz);
@@ -1848,20 +2026,39 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         dmg *= 2;
         floater("Smack!", x, P.y + 2.6, z, "crit");
       }
+      // a critical blow by luck; an opening by craft (a reeling foe, or a blade in the back)
+      const crit = Math.random() < tm.crit;
+      if (crit) dmg = Math.round(dmg * CRIT_MUL);
+      if (open) dmg = Math.round(dmg * 1.25 * tm.opening);
       const dealt = hit(dmg);
       if (dealt <= 0) return;
+      if (crit || open) {
+        sparks.burst(crit ? 16 : 10, x, P.y + 1.3, z, 6, crit ? 0xfff2a0 : 0xffb070, 0.4, 0.2, { up: 2, grav: 5 });
+        if (crit) audio.crit();
+        shake = Math.max(shake, 0.18);
+      }
       if (hits === 0) hitChain++;
       hits++;
       const hx = P.x + (dx / (d || 1)) * Math.min(d, 1.2);
       const hz = P.z + (dz / (d || 1)) * Math.min(d, 1.2);
       sparks.burst(heavy ? 14 : 8, hx, P.y + 1.2, hz, heavy ? 6 : 4, 0xffe6b8, 0.35, 0.16, { up: 1, grav: 6 });
-      floater(String(dealt), x, P.y + 2.0, z, heavy || chain > 1 ? "crit" : "dmg");
+      floater(crit ? dealt + "!" : String(dealt), x, P.y + 2.0, z, heavy || chain > 1 || crit || open ? "crit" : "dmg");
+      if (open && !crit) floater(openWord, x, P.y + 2.6, z, "info");
     };
-    for (const m of mobs) if (m.alive && m.zone === P.zone) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy));
+    let openWord = "Opening";
+    const opening = (m: Mob) => {
+      if (m.state === "stagger") return ((openWord = "Reeling"), true);
+      // behind it, and it has not turned on you yet
+      const l = Math.hypot(P.x - m.x, P.z - m.z) || 1;
+      const behind = ((P.x - m.x) * Math.sin(m.yaw) + (P.z - m.z) * Math.cos(m.yaw)) / l < -0.45;
+      if (behind && (m.state === "idle" || m.state === "tell" || m.state === "active" || m.state === "recover")) return ((openWord = "Backstab"), true);
+      return false;
+    };
+    for (const m of mobs) if (m.alive && m.zone === P.zone) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy), opening(m));
     const zb = zoneBoss();
     if (zb) {
       if (zb.fighting) tryHit(zb.x, zb.z, 1.1, (d) => bossHit(zb, d, heavy, false));
-      for (const m of zb.adds) if (m.alive) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy));
+      for (const m of zb.adds) if (m.alive) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy), opening(m));
     }
     flashes.arc(ax, P.y + 1.15, az, P.yaw, reach * 0.8, P.action === "light3" || heavy, w.id === "wpn_cookie_blade" ? 0xffb0a0 : 0xffe6b8, P.action === "light2");
     if (hits) {
@@ -1895,6 +2092,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     if (!m.alive) {
       kills++;
+      killHeal();
       noteKill(m.kind);
       const key = mobKey.get(m);
       if (key && ZONES[m.zone].indoor) deadMobs.add(key);
@@ -1907,6 +2105,25 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }
     }
     return dealt;
+  }
+
+  function killHeal() {
+    if (tm.killHeal <= 0 || P.dead || P.hp >= P.maxHp) return;
+    P.hp = Math.min(P.maxHp, P.hp + tm.killHeal);
+    floater("+" + tm.killHeal, P.x, P.y + 2.3, P.z, "heal");
+  }
+
+  /** Recompute what talents add on top of level stats. */
+  function applyTalents() {
+    tm = talentMods(talents);
+    if (baseMaxHp > 0) {
+      const was = P.maxHp;
+      P.maxHp = baseMaxHp + (sharedNow() ? 0 : tm.hp);
+      if (P.maxHp > was && !P.dead) P.hp = Math.min(P.maxHp, P.hp + (P.maxHp - was));
+      P.hp = Math.min(P.hp, P.maxHp);
+    }
+    if (baseMaxStam > 0) P.maxStam = baseMaxStam + tm.stam;
+    if (P.maxMana > 0 && baseMana > 0) P.maxMana = baseMana + tm.mana;
   }
 
   function castEmber() {
@@ -1947,8 +2164,16 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         hit = true;
         sparks.burst(24, b.x, b.y, b.z, 5, 0xff8a30, 0.5, 0.3, { up: 1, grav: 2 });
         audio.burn();
+        // Wildfire: the burst scorches whoever stands close
+        if (tm.wildfire > 0) {
+          flashes.ring(b0.x, P.y + 0.1, b0.z, tm.wildfire, 0xff8a30, 0.45);
+          for (const o of mobs)
+            if (o.alive && o.zone === b.zone && Math.hypot(o.x - b0.x, o.z - b0.z) < tm.wildfire + o.cfg.radius) splash.push(o);
+        }
       };
-      const fireDmg = 14;
+      const splash: Mob[] = [];
+      const fireDmg = Math.round(14 * tm.ember);
+      const b0 = { x: b.x, z: b.z };
       for (const m of mobs)
         if (!hit && m.alive && m.zone === b.zone && Math.hypot(m.x - b.x, m.z - b.z) < m.cfg.radius + 0.5) {
           const d = onMobHit(m, fireDmg, false, true);
@@ -1970,6 +2195,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           }
       }
       if (!hit && env.col.hit(b.x, b.z, 0)) boom();
+      for (const o of splash) {
+        const d = onMobHit(o, Math.max(1, Math.round(fireDmg * 0.5)), false, true);
+        if (d) floater(d + " fire", o.x, o.y + 1.5, o.z, "fire");
+      }
       if (hit || b.life <= 0) bolts.splice(i, 1);
     }
     boltMeshes.forEach((m, i) => {
@@ -1993,7 +2222,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (P.blocking && facing && !o.unblockable) {
       if (P.blockT < 0.22 && o.parryable && o.source) {
         o.source.stagger(1.3);
-        if (mainWeapon().id === "wpn_finlay_longsword") riposte = 3;
+        if (mainWeapon().id === "wpn_finlay_longsword" || tm.riposte > 0) riposte = 3;
         audio.parry();
         codex.parries++;
         checkDeeds();
@@ -2004,7 +2233,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         return false;
       }
       d = Math.round(d * (P.shield ? 0.3 : 0.6));
-      P.stam -= dmg * (P.shield ? 0.9 : 1.3) * (setWorn("bk") ? 0.5 : 1);
+      P.stam -= dmg * (P.shield ? 0.9 : 1.3) * (setWorn("bk") ? 0.5 : 1) * tm.blockCost;
       P.stamT = 0.8;
       audio.block();
       sparks.burst(8, P.x + Math.sin(P.yaw) * 0.6, P.y + 1.2, P.z + Math.cos(P.yaw) * 0.6, 3, 0xffe0b0, 0.3, 0.15);
@@ -2632,7 +2861,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     // stamina, health, mana
     const regenMod = 1 + items.reduce((a, it) => a + (it.equipped && it.mod ? MODIFIERS[it.mod]?.regen ?? 0 : 0), 0);
-    if (P.stamT <= 0 && !(P.sprint && inCombat)) P.stam = Math.min(P.maxStam, P.stam + (P.blocking ? 10 : 32) * dt * (setWorn("hound") ? 1.25 : 1) * regenMod);
+    if (P.stamT <= 0 && !(P.sprint && inCombat)) P.stam = Math.min(P.maxStam, P.stam + (P.blocking ? 10 : 32) * dt * (setWorn("hound") ? 1.25 : 1) * regenMod * tm.stamRegen);
     if (P.maxMana > 0) P.mana = Math.min(P.maxMana, P.mana + (inCombat ? 1.2 : 3) * dt);
     if (!inCombat && P.regenT <= 0 && P.hp > 0 && P.hp < P.maxHp) P.hp = Math.min(P.maxHp, P.hp + 2 * dt);
     // footsteps
@@ -3081,6 +3310,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       camera.updateMatrixWorld();
       updateOverlay(rdt);
       codexTick(rdt);
+      updateFinds(rdt);
     }
     if (post.enabled) post.render(rdt);
     else renderer.render(scene, camera);
@@ -3183,7 +3413,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           say("Out of breath");
           return;
         }
-        P.stam -= 20;
+        P.stam = Math.max(0, P.stam - 20 * tm.rollCost);
         P.stamT = 0.6;
         P.holding = false;
         let dx = P.vx;
@@ -3318,7 +3548,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
 
   function lootDrops(drops: { item: string; n: number }[]) {
-    for (const d of drops) floater(`+${d.n} ${item(d.item).name}`, P.x, P.y + 2.1, P.z, "heal");
+    drops.forEach((d, i) => floater(`+${d.n} ${item(d.item).name}`, P.x, P.y + 2.1 + i * 0.32, P.z, "heal"));
   }
 
   function charFlag(f: string) {
@@ -3370,6 +3600,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   /** This client struck the killing blow: ask the server for the loot (once per foe per spawn). */
   function claimKill(key: string, m?: Mob) {
     kills++;
+    killHeal();
     if (m) noteKill(m.kind);
     else checkDeeds();
     if (m?.kind === "horse") {
@@ -3758,8 +3989,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     saveCodex(codexId, codex);
   }
   function noteKill(kind: string) {
-    if (!BEASTS[kind]) return;
+    if (!BEASTS[kind]) return noteBounty(kind);
     codex.k[kind] = (codex.k[kind] ?? 0) + 1;
+    noteBounty(kind);
     checkDeeds();
   }
   function noteZone(z: string) {
@@ -3805,12 +4037,33 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (stationNear !== "hand") showTip("station");
     for (const sh of SHRINES) if (sh.zone === P.zone && Math.hypot(toWorld(sh.zone, sh.x, sh.z).x - P.x, sh.z - P.z) < 7) showTip("shrine");
     if (level >= 2) showTip("level");
+    if (talentFree(level, talents) > 0 && codex.t.includes("level")) showTip("talent");
+    if (kills >= 3) showTip("back");
+    if (!sharedNow()) for (const f of FINDS) {
+      const m = findMeshes.get(f.id);
+      if (m && f.zone === P.zone && !found(f.id) && Math.hypot(m.x - P.x, m.z - P.z) < 16) showTip("find");
+    }
     if (playTime > 45) showTip("radar");
   }
   function codexView(): NonNullable<Hud["codex"]> {
     return {
       beasts: Object.entries(BEASTS).map(([id, b]) => ({ id, name: b.name, where: b.where, lore: b.lore, kills: codex.k[id] ?? 0, seen: !!codex.k[id] || codex.s.includes(id), boss: !!b.boss })),
       deeds: DEEDS.map((d) => ({ id: d.id, name: d.name, text: d.text, done: codex.d.includes(d.id) })),
+      bounties: sharedNow() ? [] : (() => {
+        const b = bountyBook();
+        return b.ids.map((id, i) => {
+          const d = BOUNTIES.find((x) => x.id === id)!;
+          return { id, name: d.name, text: d.text, n: Math.min(b.n[i], d.n), of: d.n, paid: b.paid[i], reward: `${d.crowns} crowns` + (d.item ? ` · ${d.item[1]} ${item(d.item[0]).name}` : "") };
+        }).filter((x) => x.name);
+      })(),
+      finds: { caches: FINDS.filter((f) => f.kind === "cache" && found(f.id)).length, stones: FINDS.filter((f) => f.kind === "stone" && found(f.id)).length },
+      talents: {
+        free: talentFree(level, talents),
+        trees: (Object.keys(TREES) as (keyof typeof TREES)[]).map((t) => ({
+          id: t, name: TREES[t].name, sub: TREES[t].sub,
+          list: TALENTS.filter((d) => d.tree === t).map((d) => ({ id: d.id, name: d.name, rank: talents[d.id] ?? 0, max: d.max, text: d.text(Math.max(1, talents[d.id] ?? 0)), next: (talents[d.id] ?? 0) > 0 && (talents[d.id] ?? 0) < d.max ? d.text((talents[d.id] ?? 0) + 1) : "" })),
+        })),
+      },
     };
   }
   const RADAR_R = 46;
@@ -3894,9 +4147,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     xpLo = p.xp_lo ?? LEVEL_XP[level - 1] ?? 0;
     xpHi = p.xp_hi ?? LEVEL_XP[level] ?? xpLo;
     const st = statsFor(level);
-    P.maxHp = p.max_hp ?? st.maxHp;
-    P.maxStam = st.maxStam;
+    baseMaxHp = p.max_hp ?? st.maxHp;
+    baseMaxStam = st.maxStam;
+    baseMana = st.mana;
+    P.maxHp = baseMaxHp;
+    P.maxStam = baseMaxStam;
     if (P.maxMana > 0) P.maxMana = st.mana;
+    applyTalents();
     if (p.quests) quests = p.quests;
     if (p.kill_counts) Object.assign(killCounts, p.kill_counts);
     if (announce && level > before) {
@@ -3904,7 +4161,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.stam = P.maxStam;
       sparks.burst(40, P.x, P.y + 1.2, P.z, 3, 0xffd86a, 1.2, 0.22, { up: 3, grav: -0.5 });
       audio.reward();
-      showBanner("Level " + level, `Health ${P.maxHp} · Stamina ${P.maxStam} · Strikes ${Math.round((statsFor(level).power - 1) * 100)}% harder`);
+      showBanner("Level " + level, `Health ${P.maxHp} · Stamina ${P.maxStam} · A talent point to spend in the journal`);
     }
     push();
   }
@@ -4170,6 +4427,17 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     buy,
     sell,
     travel: fastTravel,
+    claimBounty,
+    learn(id) {
+      const next = learnTalent(talents, id, level);
+      if (next === talents) return;
+      talents = next;
+      codex.tal = talents;
+      saveCodex(codexId, codex);
+      applyTalents();
+      audio.reward();
+      push();
+    },
     journal() {
       if (mode === "play" || mode === "pause") {
         mode = "journal";
@@ -4260,6 +4528,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       for (const k of Object.keys(killCounts)) delete killCounts[k];
       codexId = c.id;
       codex = loadCodex(codexId);
+      talents = cleanTalents(codex.tal, c.level);
+      baseMaxHp = c.max_hp;
+      applyTalents();
+      P.hp = c.hp > 0 ? Math.min(c.hp, P.maxHp) : P.maxHp;
+      P.mana = P.maxMana;
       deedQueue = [];
       tip = null;
       quests = {};
@@ -4346,6 +4619,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     },
     /** build a zone now (as walking toward it would) */
     loadZone: (z: ZoneId) => ensureZone(z),
+    finds: () => FINDS.map((f) => ({ id: f.id, zone: f.zone, kind: f.kind, got: found(f.id), at: findMeshes.get(f.id) ? { x: findMeshes.get(f.id)!.x, z: findMeshes.get(f.id)!.z } : null })),
+    setLevel: (n: number) => applyProgress({ xp: LEVEL_XP[n - 1] ?? 0, level: n }),
+    talents: () => ({ ...talents, free: talentFree(level, talents), maxHp: P.maxHp, maxStam: P.maxStam }),
+    bounties: () => bountyBook(),
+    noteKill: (k: string) => noteKill(k),
     /** a world flag as this client sees it; `set` asks the server like a lever would */
     setWorldFlag: (f: string) => worldFlag(f).then(() => !!worldFlags[f]).catch((e: Error) => "refused: " + (e?.message ?? e)),
     bossState: (id: string) => {

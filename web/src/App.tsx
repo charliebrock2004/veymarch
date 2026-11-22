@@ -906,7 +906,10 @@ function TravelMap({ api, hud }: { api: GameApi; hud: Hud }) {
 function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
   const live = hud.journal.filter((j) => !j.done);
   const done = hud.journal.filter((j) => j.done);
-  const [tab, setTab] = useState<"quests" | "beasts" | "deeds">("quests");
+  const [tab, setTab] = useState<"quests" | "beasts" | "deeds" | "talents" | "bounties">("quests");
+  const bounties = hud.codex?.bounties ?? [];
+  const finds = hud.codex?.finds;
+  const tal = hud.codex?.talents;
   const beasts = hud.codex?.beasts ?? [];
   const deeds = hud.codex?.deeds ?? [];
   return (
@@ -925,10 +928,64 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
           <button className={tab === "beasts" ? "on" : ""} onClick={() => setTab("beasts")}>
             Bestiary <em>{beasts.filter((b) => b.kills > 0).length}/{beasts.length}</em>
           </button>
+          {bounties.length > 0 && (
+            <button className={tab === "bounties" ? "on" : ""} onClick={() => setTab("bounties")}>
+              Bounties <em>{bounties.filter((b) => b.paid).length}/{bounties.length}</em>
+            </button>
+          )}
+          <button className={tab === "talents" ? "on" : ""} onClick={() => setTab("talents")}>
+            Talents {hud.talentFree > 0 && <em>{hud.talentFree}</em>}
+          </button>
           <button className={tab === "deeds" ? "on" : ""} onClick={() => setTab("deeds")}>
             Deeds <em>{deeds.filter((d) => d.done).length}/{deeds.length}</em>
           </button>
         </div>
+        {tab === "bounties" && (
+          <div className="vm-journal vm-scroll">
+            <p className="vm-sub">Three bounties are posted each day. Kill what is asked, then claim the pay here.</p>
+            {bounties.map((b) => (
+              <div key={b.id} className={`vm-quest ${b.paid ? "done" : "main"}`}>
+                <b>
+                  {b.name}
+                  <em>{b.paid ? "Paid" : `${b.n}/${b.of}`}</em>
+                </b>
+                <span>{b.text}</span>
+                <small>Pays {b.reward}</small>
+                {!b.paid && b.n >= b.of && (
+                  <button className="vm-btn primary vm-claim" onClick={() => api.claimBounty(b.id)}>
+                    Claim
+                  </button>
+                )}
+              </div>
+            ))}
+            {finds && <p className="vm-sub">Off the roads: {finds.caches} hidden caches opened, {finds.stones} rune stones read.</p>}
+          </div>
+        )}
+        {tab === "talents" && tal && (
+          <div className="vm-journal vm-scroll">
+            <p className="vm-sub">
+              {tal.free > 0 ? `${tal.free} point${tal.free > 1 ? "s" : ""} to spend. ` : "No points to spend. "}One point comes with each level. There are more ranks than points, so choose.
+            </p>
+            <div className="vm-talents">
+              {tal.trees.map((t) => (
+                <div key={t.id} className="vm-tree">
+                  <h3>{t.name}</h3>
+                  <small>{t.sub}</small>
+                  {t.list.map((d) => (
+                    <button key={d.id} className={`vm-talent ${d.rank > 0 ? "has" : ""}`} disabled={tal.free <= 0 || d.rank >= d.max} onClick={() => api.learn(d.id)}>
+                      <b>
+                        {d.name}
+                        <em>{d.rank}/{d.max}</em>
+                      </b>
+                      <span>{d.text}</span>
+                      {d.next && tal.free > 0 && <small>Next: {d.next}</small>}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {tab === "beasts" && (
           <div className="vm-journal vm-scroll">
             {beasts.map((b) => (

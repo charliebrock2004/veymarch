@@ -253,6 +253,11 @@ export class Audio {
     this.hiss(0.07, 2600, 0.4, { q: 0.8 });
     this.ring(540 + Math.random() * 80, 0.35, 0.07);
   }
+  crit() {
+    this.hiss(0.04, 5200, 0.3, { type: "highpass" });
+    this.ring(1560, 0.45, 0.08);
+    this.tone(70, 0.22, "sine", 0.5, { to: 38 });
+  }
   parry() {
     this.hiss(0.05, 6000, 0.4, { type: "highpass" });
     this.ring(1320, 0.9, 0.11);

@@ -681,6 +681,11 @@ function dress(kind: MobKind, rig: Rig, mat: THREE.Material) {
 let nextId = 1;
 
 /** Network order of Mob.state; snapshots send the index. */
+/** Every foe built, so a pack can rouse its own and take turns. */
+const PACK = new Set<Mob>();
+/** Kinds that lose their nerve once when badly hurt. */
+const COWARDS = new Set<string>(["goblin", "bandit", "wolf", "hound", "mouse"]);
+
 export const MOB_STATES = ["idle", "chase", "tell", "active", "recover", "stagger", "flee", "dead", "return"] as const;
 /** Network order of kinds: append only, never reorder (snapshots send the index). */
 export const MOB_KINDS: MobKind[] = [
@@ -729,6 +734,10 @@ export class Mob {
   deadT = 0;
   respawnT = 0;
   aggro = false;
+  /** circling while others take their turn */
+  private waitT = 0;
+  /** has already broken and run once this life */
+  private cowed = false;
   strafeDir = Math.random() < 0.5 ? 1 : -1;
   aimX = 0;
   aimZ = 0;
@@ -759,6 +768,7 @@ export class Mob {
   }
 
   constructor(public kind: MobKind, public homeX: number, public homeZ: number, public zone: ZoneId, private env: Env, public respawns = true) {
+    PACK.add(this);
     this.cfg = MOBS[kind];
     const made = makeRig(kind);
     this.rig = made.rig;
@@ -834,11 +844,33 @@ export class Mob {
     this.x = this.homeX;
     this.z = this.homeZ;
     this.aggro = false;
+    this.cowed = false;
     this.struck.clear();
     this.rig.group.visible = true;
     this.deadT = 0;
     this.env.decals.release(this.decal);
     this.decal = null;
+  }
+
+  /** Rouse idle packmates close by. */
+  private rally() {
+    for (const o of PACK) {
+      if (o === this || o.env !== this.env || !o.alive || o.zone !== this.zone || o.state !== "idle" || o.cfg.flees || o.puppet) continue;
+      if (Math.hypot(o.x - this.x, o.z - this.z) > 8) continue;
+      o.state = "chase";
+      o.aggro = true;
+      o.cd = 0.7 + Math.random() * 0.9;
+    }
+  }
+
+  /** How many other melee foes are mid-attack on this target. */
+  private busyOn(p: PlayerState) {
+    let n = 0;
+    for (const o of PACK) {
+      if (o === this || !o.alive || o.zone !== this.zone || o.cfg.keep || (o.state !== "tell" && o.state !== "active")) continue;
+      if (Math.hypot(o.x - p.x, o.z - p.z) < 7) n++;
+    }
+    return n;
   }
 
   stagger(t: number) {
@@ -895,6 +927,16 @@ export class Mob {
       this.state = "chase";
     }
     if (this.hp <= 0) this.die();
+    else {
+      if (!this.cowed && COWARDS.has(this.kind) && this.hp < this.max * 0.3 && this.state !== "tell" && this.state !== "active") {
+        // badly hurt: it breaks off for a breath, then comes back
+        this.cowed = true;
+        this.state = "flee";
+        this.t = 1.3;
+        env.floater("…", this.x, this.y + cfg.height + 0.6, this.z, "info");
+      }
+      this.rally();
+    }
     return d;
   }
 
@@ -1133,6 +1175,7 @@ export class Mob {
             else if (cfg.cry === "bell") this.sfx.bell(0.14, 196);
             else if (cfg.cry) this.sfx[cfg.cry]();
             env.floater("!", this.x, this.y + cfg.height + 0.6, this.z, "info");
+            this.rally();
           }
         }
         break;
@@ -1142,7 +1185,8 @@ export class Mob {
         wantX = this.x - p.x;
         wantZ = this.z - p.z;
         face(this.x + wantX, this.z + wantZ, 6);
-        if (this.t <= 0 && d > cfg.aggro) this.state = "idle";
+        if (this.t <= 0 && !cfg.flees) this.state = "chase";
+        else if (this.t <= 0 && d > cfg.aggro) this.state = "idle";
         break;
       }
       case "return": {
@@ -1170,6 +1214,13 @@ export class Mob {
           const ok = cfg.attacks.filter((a) => d <= a.range && d >= (a.min ?? 0));
           atk = ok.length ? ok[Math.floor(Math.random() * ok.length)] : null;
         } else atk = cfg.attacks.find((a) => d <= a.range && (this.kind !== "horse" || a.name !== "charge" || d > 4)) ?? null;
+        this.waitT -= dt;
+        // melee foes take turns: no more than two wind up on one target at a time
+        if (atk && this.cd <= 0 && !cfg.keep && this.busyOn(p) >= 2) {
+          atk = null;
+          this.cd = 0.35 + Math.random() * 0.5;
+          this.waitT = 1;
+        }
         if (atk && this.cd <= 0) {
           this.atk = atk;
           this.state = "tell";
@@ -1203,7 +1254,7 @@ export class Mob {
           break;
         }
         const close = cfg.attacks.length ? Math.min(...cfg.attacks.map((a) => a.range)) * 0.85 : 1;
-        if (cfg.strafe && d < 5.5 && this.cd > 0) {
+        if ((cfg.strafe || this.waitT > 0) && d < 5.5 && this.cd > 0) {
           want = cfg.speed * 1.3;
           const tx = -(p.z - this.z) * this.strafeDir;
           const tz = (p.x - this.x) * this.strafeDir;

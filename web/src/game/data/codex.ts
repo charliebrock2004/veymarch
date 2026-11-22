@@ -1,6 +1,8 @@
 // The bestiary and the deeds: what a character has met, killed and done.
 // Kept per character on this device (it is a record for the player, not a rule of the world).
 
+import { CACHES, STONES } from "./explore.ts";
+
 export type Beast = { name: string; where: string; lore: string; boss?: boolean };
 
 export const BEASTS: Record<string, Beast> = {
@@ -50,6 +52,12 @@ export type Codex = {
   d: string[];
   /** hints already shown */
   t: string[];
+  /** talent ranks */
+  tal?: Record<string, number>;
+  /** hidden caches opened and lore stones read */
+  f?: string[];
+  /** bounties: day stamp, the three picked, progress and which are paid */
+  b?: { day: string; ids: string[]; n: number[]; paid: boolean[] };
 };
 
 export const freshCodex = (): Codex => ({ k: {}, s: [], z: [], crafts: 0, parries: 0, d: [], t: [] });
@@ -82,6 +90,10 @@ export const DEEDS: Deed[] = [
   { id: "lvl10", name: "Seasoned", text: "Reach level 10.", ok: (x) => x.level >= 10 },
   { id: "lvl20", name: "Veteran", text: "Reach level 20.", ok: (x) => x.level >= 20 },
   { id: "lvl25", name: "Unmarked No Longer", text: "Reach level 25.", ok: (x) => x.level >= 25 },
+  { id: "seeker", name: "Seeker", text: "Open 5 hidden caches.", ok: (x) => (x.c.f ?? []).filter((f) => f.startsWith("c_")).length >= 5 },
+  { id: "hoarder", name: "Nothing Left Buried", text: "Open every hidden cache.", ok: (x) => (x.c.f ?? []).filter((f) => f.startsWith("c_")).length >= CACHES },
+  { id: "lorekeeper", name: "Lorekeeper", text: "Read every rune stone.", ok: (x) => (x.c.f ?? []).filter((f) => f.startsWith("s_")).length >= STONES },
+  { id: "bountyman", name: "Paid in Full", text: "Claim all three bounties in one day.", ok: (x) => !!x.c.b && x.c.b.paid.length >= 3 && x.c.b.paid.every(Boolean) },
   { id: "stubborn", name: "Stubborn", text: "Fall 10 times and get back up.", ok: (x) => x.deaths >= 10 },
 ];
 
@@ -94,6 +106,9 @@ export const TIPS: Record<string, string> = {
   shrine: "Shrines heal you, set where you wake, and let you travel between them.",
   station: "Benches, forges and pots craft gear from what you gather. Open the bag beside one.",
   level: "Each level raises health and stamina. The journal lists your quests, bestiary and deeds.",
+  find: "Something glints off the road. Caches hold supplies and coin; rune stones tell the land's story.",
+  talent: "You have a talent point. Open the journal and choose where your strength goes.",
+  back: "Blows to a foe's back, or to one that is reeling, cut deeper.",
   elite: "A named foe. They hit harder, drop better, and some gates wait on them.",
   radar: "The minimap shows foes in red, people in gold, shrines in blue and your goal as a diamond.",
 };
