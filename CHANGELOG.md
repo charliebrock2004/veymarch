@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Marks: no class, only evidence
+
+- Ten marks with three ranks each, earned by what a character actually does (kills by kind, parries, rolls through attacks, falls, bosses, crafting, lands walked). Each rank makes them better at the thing that earned it. Shown with progress in a new Marks tab of the Journal and announced by a banner. Existing characters are marked from the record they already have.
+- Game direction review, 40 ideas, priorities and staged plan: Docs/programme/GAME_DIRECTION.md.
+
 ### Phase 2: the RPG (web, in progress)
 
 - Zones on one coordinate line (Hearthfen, Cookie's Castle, the Medieval Kingdom, the King's Hunting Grounds, the Royal Kennels, the Dark Mire, the Black Keep), each its own download, built the first time someone goes there; one world runner per zone.

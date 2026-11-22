@@ -38,6 +38,7 @@ import { weaponModel } from "./play/weapons";
 import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Realm, StackJson } from "../net/realm";
 import { Room, type Bundle, type Ev } from "../net/room";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
+import { MARKS, RANK_NAMES, markBonuses, markBoon, markRank, markVs, marksView, type MarkView } from "./data/marks.ts";
 
 // ------------------------------------------------------------------ public types
 
@@ -134,7 +135,7 @@ export type Hud = {
   /** minimap: [right, ahead, kind] in metres around the player, turned with the camera */
   radar: { r: number; pts: [number, number, string][] } | null;
   /** bestiary and deeds, filled while the journal is open */
-  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean }[]; deeds: { id: string; name: string; text: string; done: boolean }[] } | null;
+  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; marks: MarkView[] } | null;
   /** a one-time hint */
   tip: { text: string; at: number } | null;
   /** a gamepad is driving */
@@ -470,6 +471,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let banner: Hud["banner"] = null;
   let codex: Codex = freshCodex();
   let codexId = "local";
+  let marks = markBonuses({ c: codex, deaths: 0 });
+  let dodgedAt = 0;
   let tip: Hud["tip"] = null;
   let tipT = 0;
   let padX = 0;
@@ -1848,6 +1851,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     audio.swing(heavy);
   }
 
+  /** A strike, made harder by the marks this character has earned against that kind of foe. */
+  const marked = (d: number, kind: string, heavy: boolean) => Math.max(1, Math.round(d * (1 + markVs(marks, kind) + (heavy ? marks.heavy : 0))));
+
   function resolveSwing() {
     const w = mainWeapon();
     const heavy = P.action === "heavy";
@@ -1884,11 +1890,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       sparks.burst(heavy ? 14 : 8, hx, P.y + 1.2, hz, heavy ? 6 : 4, 0xffe6b8, 0.35, 0.16, { up: 1, grav: 6 });
       floater(String(dealt), x, P.y + 2.0, z, heavy || chain > 1 ? "crit" : "dmg");
     };
-    for (const m of mobs) if (m.alive && m.zone === P.zone) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy));
+    for (const m of mobs) if (m.alive && m.zone === P.zone) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, marked(d, m.kind, heavy), heavy));
     const zb = zoneBoss();
     if (zb) {
-      if (zb.fighting) tryHit(zb.x, zb.z, 1.1, (d) => bossHit(zb, d, heavy, false));
-      for (const m of zb.adds) if (m.alive) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, d, heavy));
+      if (zb.fighting) tryHit(zb.x, zb.z, 1.1, (d) => bossHit(zb, marked(d, "boss_" + zb.def.id, heavy), heavy, false));
+      for (const m of zb.adds) if (m.alive) tryHit(m.x, m.z, m.cfg.radius, (d) => onMobHit(m, marked(d, m.kind, heavy), heavy));
     }
     flashes.arc(ax, P.y + 1.15, az, P.yaw, reach * 0.8, P.action === "light3" || heavy, w.id === "wpn_cookie_blade" ? 0xffb0a0 : 0xffe6b8, P.action === "light2");
     if (hits) {
@@ -2011,14 +2017,22 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const exposed = mode === "play" || (online && (mode === "bag" || mode === "talk" || mode === "pause"));
     if (P.dead || !exposed) return false;
     if (P.iframe > 0) {
-      if (P.action === "dodge") floater("Dodged", P.x, P.y + 2.0, P.z, "info");
+      if (P.action === "dodge") {
+        floater("Dodged", P.x, P.y + 2.0, P.z, "info");
+        // one roll counts once, however many blades it passes through
+        if (performance.now() - dodgedAt > 600) {
+          dodgedAt = performance.now();
+          codex.dodges++;
+          checkDeeds();
+        }
+      }
       return false;
     }
     let d = dmg;
     const ang = Math.atan2(sx - P.x, sz - P.z);
     const facing = Math.abs(Math.atan2(Math.sin(ang - P.yaw), Math.cos(ang - P.yaw))) < 1.75;
     if (P.blocking && facing && !o.unblockable) {
-      if (P.blockT < 0.22 && o.parryable && o.source) {
+      if (P.blockT < 0.22 + marks.parry && o.parryable && o.source) {
         o.source.stagger(1.3);
         if (mainWeapon().id === "wpn_finlay_longsword") riposte = 3;
         audio.parry();
@@ -2043,7 +2057,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }
     }
     // armour takes its share of whatever got through
-    if (d > 0) d = Math.max(1, Math.round(d * (1 - armourCut(gearDefence()))));
+    if (d > 0) d = Math.max(1, Math.round(d * (1 - armourCut(gearDefence())) * (1 - marks.guard)));
     P.hp -= d;
     hurtAt = performance.now();
     combatT = 4;
@@ -2072,6 +2086,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     P.dead = true;
     P.deadT = 0;
     deaths++;
+    codex.falls++;
+    checkDeeds();
     startAction("dead", 99, 99);
     mode = "dead";
     talk = null;
@@ -2238,8 +2254,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (!next) return;
       items = next;
       if (online) rpc<{ items: StackJson[] }>("vm_use", { p_uid: id }, false).then((r) => setItems(r.items)).catch(netError);
-      P.hp = Math.min(P.maxHp, P.hp + d.heal);
-      floater("+" + d.heal, P.x, P.y + 2, P.z, "heal");
+      const heal = Math.round(d.heal * (1 + marks.draught));
+      P.hp = Math.min(P.maxHp, P.hp + heal);
+      floater("+" + heal, P.x, P.y + 2, P.z, "heal");
       audio.pickup();
       say("Bandaged. +" + d.heal);
     } else if (d.slot !== "none") {
@@ -2610,7 +2627,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (wet > 0.3) target *= 0.7;
     }
     if (P.sprint && inCombat && target > 0) {
-      P.stam = Math.max(0, P.stam - 11 * dt);
+      P.stam = Math.max(0, P.stam - 11 * (1 - marks.sprint) * dt);
       P.stamT = 0.4;
     }
     const k = 1 - Math.exp(-dt * (target > 0 ? 10 : 14));
@@ -3212,7 +3229,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           say("Out of breath");
           return;
         }
-        P.stam -= 20;
+        P.stam = Math.max(0, P.stam - 20 * (1 - marks.roll));
         P.stamT = 0.6;
         P.holding = false;
         let dx = P.vx;
@@ -3777,6 +3794,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const ELITES = new Set(["kennelmaster", "horse", "standard_bearer", "grave_confessor", "witch"]);
   let deedQueue: string[] = [];
   let deedT = 0;
+  let markQueue: [string, string][] = [];
   function checkDeeds() {
     const ctx = { c: codex, level, shrines: discovered.size, deaths, kills };
     for (const d of DEEDS) {
@@ -3784,7 +3802,19 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       codex.d.push(d.id);
       deedQueue.push(d.name);
     }
+    checkMarks(ctx.deaths);
     saveCodex(codexId, codex);
+  }
+  /** Re-reads what the character has earned; a newly reached rank is announced once. */
+  function checkMarks(fallen: number, quiet = false) {
+    const x = { c: codex, deaths: fallen };
+    marks = markBonuses(x);
+    for (const m of MARKS) {
+      const r = markRank(m, m.count(x));
+      if (r <= (codex.m[m.id] ?? 0)) continue;
+      codex.m[m.id] = r;
+      if (!quiet) markQueue.push([`${m.name} ${RANK_NAMES[r]}`, markBoon(m, r)]);
+    }
   }
   function noteKill(kind: string) {
     if (!BEASTS[kind]) return;
@@ -3812,6 +3842,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       showBanner("DEED DONE", deedQueue.shift()!);
       audio.quest();
       deedT = 4.5;
+    } else if (markQueue.length && deedT <= 0 && (!banner || performance.now() - banner.at > 4000)) {
+      const [name, boon] = markQueue.shift()!;
+      showBanner("THE MARCH MARKS YOU", `${name} · ${boon}`);
+      audio.quest();
+      deedT = 5.5;
     }
     tipT -= dt;
     if (tipT > 0) return;
@@ -3840,6 +3875,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     return {
       beasts: Object.entries(BEASTS).map(([id, b]) => ({ id, name: b.name, where: b.where, lore: b.lore, kills: codex.k[id] ?? 0, seen: !!codex.k[id] || codex.s.includes(id), boss: !!b.boss })),
       deeds: DEEDS.map((d) => ({ id: d.id, name: d.name, text: d.text, done: codex.d.includes(d.id) })),
+      marks: marksView({ c: codex, deaths }),
     };
   }
   const RADAR_R = 46;
@@ -4290,6 +4326,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       codexId = c.id;
       codex = loadCodex(codexId);
       deedQueue = [];
+      markQueue = [];
+      // marks already earned by an older save are granted without a parade of banners
+      checkMarks(deaths, !("m" in (JSON.parse(localStorage.getItem("veyrmarch.codex." + codexId) ?? "{}") as object)));
       tip = null;
       quests = {};
       questWait.clear();

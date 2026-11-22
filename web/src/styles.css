@@ -2142,3 +2142,17 @@ input {
   grid-column: 1 / -1;
   margin: 0 0 2px;
 }
+
+/* marks: progress toward the next rank */
+.vm-mark-bar {
+  height: 5px;
+  margin: 6px 0 2px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+.vm-mark-bar i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #a8772e, #f0cf7a);
+}
