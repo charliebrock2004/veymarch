@@ -854,6 +854,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (playerRig !== rig) return;
       for (const c of rig.group.children) c.visible = false;
       playerActor = new ModelActor(body, 1.78 / ADV_HEIGHT, ADV_HEAD, chest === "bk" ? 0x6a6470 : 0xd8d0c4, anim).emptyHands();
+      const hl = lookToHuman(look);
+      playerActor.recolour({ skin: hl.skin, hair: hl.hair, coat: chest ? undefined : hl.coat });
       rig.group.add(playerActor.root);
       heldMain?.parent?.remove(heldMain);
       heldOff?.parent?.remove(heldOff);

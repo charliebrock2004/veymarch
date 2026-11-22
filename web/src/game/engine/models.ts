@@ -42,6 +42,7 @@ export class ModelActor {
   private actions = new Map<string, THREE.AnimationAction>();
   private current = "";
   private mats: THREE.MeshStandardMaterial[] = [];
+  private allMats: THREE.MeshStandardMaterial[] = [];
 
   private head: THREE.Object3D | undefined;
   handR: THREE.Object3D | undefined;
@@ -64,6 +65,7 @@ export class ModelActor {
         mine.color.multiply(new THREE.Color(tint));
         mine.roughness = Math.max(mine.roughness, 0.85);
         own.set(src, mine);
+        this.allMats.push(mine);
         if (!src.emissiveMap && src.emissive.getHex() === 0) this.mats.push(mine);
       }
       m.material = mine;
@@ -71,6 +73,70 @@ export class ModelActor {
     this.head = this.root.getObjectByName("head");
     this.handR = this.root.getObjectByName("handslotr");
     this.handL = this.root.getObjectByName("handslotl");
+  }
+
+  /**
+   * Repaint palette swatches of a KayKit adventurer's atlas: skin, hair and the two main cloth colours.
+   * The atlas is an 8 x 4 grid of gradient swatches; each keeps its shading and takes the new hue.
+   */
+  recolour(c: { skin?: number; hair?: number; coat?: number }) {
+    const jobs: [number, number, number][] = [];
+    if (c.skin !== undefined) jobs.push([0, 0, c.skin]);
+    if (c.hair !== undefined) jobs.push([1, 0, c.hair]);
+    if (c.coat !== undefined) jobs.push([0, 1, c.coat], [1, 1, c.coat]);
+    const done = new Map<THREE.Texture, THREE.Texture>();
+    for (const m of this.allMats) {
+      const src = m.map;
+      const img = src?.image as (CanvasImageSource & { width: number; height: number }) | undefined;
+      if (!src || !img || !img.width) continue;
+      let tex = done.get(src);
+      if (!tex) {
+        const cv = document.createElement("canvas");
+        cv.width = img.width;
+        cv.height = img.height;
+        const g = cv.getContext("2d");
+        if (!g) return this;
+        try {
+          g.drawImage(img, 0, 0);
+          const w = Math.floor(cv.width / 8), h = Math.floor(cv.height / 4);
+          for (const [col, row, hex] of jobs) {
+            const d = g.getImageData(col * w, row * h, w, h);
+            const px = d.data;
+            let sum = 0, sat = 0;
+            for (let i = 0; i < px.length; i += 4) {
+              sum += px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11;
+              sat += Math.max(px[i], px[i + 1], px[i + 2]) - Math.min(px[i], px[i + 1], px[i + 2]);
+            }
+            const n = px.length / 4;
+            // leave grey or white swatches (steel, linen) alone when asked for a cloth colour
+            if (row === 1 && sat / n < 40) continue;
+            const mean = sum / n || 1;
+            const r = (hex >> 16) & 255, gg = (hex >> 8) & 255, b = hex & 255;
+            for (let i = 0; i < px.length; i += 4) {
+              const k = (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / mean;
+              px[i] = Math.min(255, r * k);
+              px[i + 1] = Math.min(255, gg * k);
+              px[i + 2] = Math.min(255, b * k);
+            }
+            g.putImageData(d, col * w, row * h);
+          }
+        } catch {
+          return this;
+        }
+        tex = new THREE.CanvasTexture(cv);
+        tex.flipY = src.flipY;
+        tex.colorSpace = src.colorSpace;
+        tex.wrapS = src.wrapS;
+        tex.wrapT = src.wrapT;
+        tex.magFilter = src.magFilter;
+        tex.minFilter = src.minFilter;
+        tex.channel = src.channel;
+        done.set(src, tex);
+      }
+      m.map = tex;
+      m.needsUpdate = true;
+    }
+    return this;
   }
 
   /** Hide the stock weapons and shields parented to the hands, so the game's own can go there. */
