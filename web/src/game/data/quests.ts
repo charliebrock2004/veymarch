@@ -227,6 +227,37 @@ export const QUESTS: QuestDef[] = [
     ],
     rewards: { xp: 500, crowns: 160, items: [["cons_greater_draught", 1]] },
   },
+  // ---------------------------------------------------------------- Chapter II: the Undead Wasteland
+  {
+    id: "q_wasteland", name: "The Grave King", main: true, giver: "caldus", requires: ["q_keep"], level: 15,
+    offer: [
+      "A living face. In the Wasteland. Sit, before you fall down. I am Brother Caldus. I bury what will stay buried.",
+      "Past the dead river stands the Citadel, and in it a king who will not lie down. Every dead thing here kneels to him.",
+      "Thin the dead on the road. Silence the necromancers in their towers. Then the Confessor at the bone gate, and the king himself.",
+    ],
+    thanks: ["The court is quiet. Listen. No marching. For the first time in a hundred years, no marching.", "Take the shard. It points somewhere. Most broken things do."],
+    steps: [
+      { k: "reach", zone: "waste", text: "Go down into the Wasteland", sub: "Through the broken ring of the Black Keep" },
+      { k: "talk", npc: "caldus", text: "Find the living priest", sub: "A camp of last rites, west of the road", lines: ["So the Keep let you through. Good. Then it can let others through too. We must be quick."] },
+      { k: "kill", kind: "skeleton", n: 6, text: "Lay the road's dead to rest", sub: "Skeletons along the ash road" },
+      { k: "kill", kind: "necromancer", n: 2, text: "Silence the towers", sub: "Necromancers east and west of the dead river" },
+      { k: "flag", flag: "citadel_gate", text: "Open the bone gate", sub: "The Grave Confessor chants before the Citadel" },
+      { k: "reach", zone: "citadel", text: "Enter the Dead Citadel", sub: "North, at the end of the ash road" },
+      { k: "boss", boss: "grave_king", text: "Defeat the Grave King", sub: "The Throne of Femurs. His court will rise to fight for him." },
+    ],
+    rewards: { xp: 3000, crowns: 800, items: [["cons_last_rites", 3]] },
+  },
+  {
+    id: "q_last_rites", name: "Last Rites", main: false, giver: "caldus", requires: ["q_keep"], level: 15,
+    offer: ["The candles are almost out. Tallow from the shambling dead, grave dust from the bones. Bring me enough and I will name them all."],
+    thanks: ["Every candle is a name. You have given me forty names tonight. Here, for the road."],
+    steps: [
+      { k: "kill", kind: "zombie", n: 5, text: "Put down the shambling dead", sub: "Zombies in the dead village west of the road" },
+      { k: "give", npc: "caldus", item: "mat_tallow", n: 3, text: "Bring Caldus tallow", sub: "Zombies carry it", lines: ["Good. Good. This will burn for a week."] },
+      { k: "give", npc: "caldus", item: "mat_grave_dust", n: 4, text: "Bring Caldus grave dust", sub: "Skeletons and ghosts leave it behind", lines: ["Dust to the censer. They will sleep now."] },
+    ],
+    rewards: { xp: 1200, crowns: 300, items: [["cons_last_rites", 2], ["mat_grave_iron", 2]] },
+  },
 ];
 
 export const QUEST_BY_ID: Record<string, QuestDef> = Object.fromEntries(QUESTS.map((q) => [q.id, q]));

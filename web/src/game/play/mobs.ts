@@ -17,7 +17,8 @@ import { flatten, tint } from "../engine/kit";
 export type MobKind =
   | "wolf" | "goblin" | "redcap" | "soldier" | "mouse" | "horse" | "deer"
   | "bandit" | "deserter" | "hound" | "boar" | "blackwolf" | "kennel_hound" | "kennelmaster"
-  | "drowned" | "croc" | "witch" | "black_guard" | "keep_knight" | "crypt_dead";
+  | "drowned" | "croc" | "witch" | "black_guard" | "keep_knight" | "crypt_dead"
+  | "skeleton" | "zombie" | "ghost" | "necromancer" | "undead_knight" | "standard_bearer" | "grave_confessor";
 
 type Attack = {
   name: string;
@@ -252,6 +253,63 @@ export const MOBS: Record<MobKind, Cfg> = {
       A({ name: "lunge", range: 3.0, min: 1.4, tell: 0.65, active: 0.25, recover: 0.9, shape: 2, size: 3.2, width: 0.6, dmg: 24, lunge: 6, tellPose: "windup", hitPose: "thrust", cooldown: 1.7 }),
     ],
   },
+  // ---------------------------------------------------------------- the Undead Wasteland (16-20)
+  skeleton: {
+    hp: 150, speed: 1.8, run: 3.6, aggro: 14, leash: 32, radius: 0.42, height: 1.8, fireWeak: 1.3, mix: true, mass: 0.9, cry: "clack", xp: "skeleton",
+    loot: MOB_LOOT.skeleton,
+    attacks: [
+      A({ name: "slash", range: 2.3, tell: 0.5, active: 0.22, recover: 0.7, shape: 1, size: 2.6, half: 0.75, dmg: 26, lunge: 2.5, tellPose: "windup", hitPose: "light1", cooldown: 1.2 }),
+      A({ name: "thrust", range: 3.0, min: 1.4, tell: 0.6, active: 0.22, recover: 0.8, shape: 2, size: 3.4, width: 0.6, dmg: 28, lunge: 6, tellPose: "windup", hitPose: "thrust", cooldown: 1.6 }),
+    ],
+  },
+  zombie: {
+    hp: 210, speed: 0.8, run: 1.8, aggro: 11, leash: 26, radius: 0.5, height: 1.8, fireWeak: 1.6, mix: true, unarmed: true, mass: 0.7, cry: "bell", xp: "zombie",
+    loot: MOB_LOOT.zombie,
+    attacks: [
+      A({ name: "grab", range: 2.4, tell: 0.75, active: 0.3, recover: 1.0, shape: 2, size: 2.8, width: 0.7, dmg: 30, lunge: 3.5, knock: 1.4, tellPose: "windup", hitPose: "thrust", cooldown: 1.6 }),
+      A({ name: "slam", range: 2.2, tell: 1.0, active: 0.3, recover: 1.2, shape: 0, size: 2.4, dmg: 34, lunge: 1, knock: 2.4, tellPose: "charge", hitPose: "heavy", ground: true, cooldown: 2.0 }),
+    ],
+  },
+  ghost: {
+    hp: 130, speed: 2.0, run: 4.2, aggro: 16, leash: 34, radius: 0.45, height: 1.9, fireWeak: 1.5, mix: true, keep: 6, unarmed: true, mass: 1.4, cry: "wind", xp: "ghost",
+    loot: MOB_LOOT.ghost,
+    attacks: [
+      A({ name: "chill", range: 2.0, tell: 0.45, active: 0.2, recover: 0.6, shape: 1, size: 2.3, half: 0.8, dmg: 24, lunge: 3, tellPose: "windup", hitPose: "light2", cooldown: 1.2 }),
+      A({ name: "wail", range: 10, min: 3, tell: 0.9, active: 0.3, recover: 0.9, shape: 0, size: 2.4, dmg: 30, lunge: 0, knock: 1.6, tellPose: "cast", hitPose: "cast", ground: true, target: true, color: 0x8ad8c8, cooldown: 2.4 }),
+    ],
+  },
+  necromancer: {
+    hp: 260, speed: 1.5, run: 3.2, aggro: 16, leash: 30, radius: 0.45, height: 1.85, fireWeak: 1.3, mix: true, keep: 8, unarmed: true, cry: "shriek", xp: "necromancer",
+    loot: MOB_LOOT.necromancer,
+    attacks: [
+      A({ name: "claw", range: 1.9, tell: 0.45, active: 0.2, recover: 0.6, shape: 1, size: 2.2, half: 0.7, dmg: 26, lunge: 2, tellPose: "windup", hitPose: "light2", cooldown: 1.2 }),
+      A({ name: "soulfire", range: 12, min: 3, tell: 0.85, active: 0.3, recover: 0.8, shape: 0, size: 2.8, dmg: 36, lunge: 0, knock: 1.8, tellPose: "cast", hitPose: "cast", ground: true, target: true, color: 0x6aff9a, cooldown: 2.2 }),
+    ],
+  },
+  undead_knight: {
+    hp: 380, speed: 1.4, run: 3.0, aggro: 14, leash: 32, radius: 0.65, height: 2.2, fireWeak: 1.2, mix: true, mass: 0.35, reel: 0.7, hyper: "active", front: 0.6, guard: true, cry: "clack", xp: "undead_knight",
+    loot: MOB_LOOT.undead_knight,
+    attacks: [
+      A({ name: "cleave", range: 3.6, tell: 0.9, active: 0.3, recover: 1.2, shape: 2, size: 4.0, width: 0.8, dmg: 42, lunge: 4, knock: 3.2, tellPose: "charge", hitPose: "heavy", cooldown: 2.0 }),
+      A({ name: "sweep", range: 3.2, tell: 0.75, active: 0.28, recover: 1.0, shape: 1, size: 3.6, half: 1.2, dmg: 34, lunge: 1.5, knock: 3, tellPose: "windup", hitPose: "light1", cooldown: 1.8 }),
+    ],
+  },
+  standard_bearer: {
+    hp: 900, speed: 1.4, run: 3.0, aggro: 15, leash: 30, radius: 0.75, height: 2.5, fireWeak: 1.1, mix: true, mass: 0.25, reel: 0.5, hyper: "attack", cry: "charge", xp: "standard_bearer",
+    loot: MOB_LOOT.standard_bearer,
+    attacks: [
+      A({ name: "plant", range: 3.4, tell: 1.1, active: 0.3, recover: 1.3, shape: 0, size: 4.2, dmg: 48, lunge: 1, knock: 3.6, tellPose: "charge", hitPose: "heavy", ground: true, cooldown: 2.4 }),
+      A({ name: "pike", range: 4.6, min: 1.6, tell: 0.8, active: 0.3, recover: 1.0, shape: 2, size: 5.0, width: 0.8, dmg: 40, lunge: 5, knock: 2.8, tellPose: "windup", hitPose: "thrust", cooldown: 1.8 }),
+    ],
+  },
+  grave_confessor: {
+    hp: 1100, speed: 1.3, run: 2.8, aggro: 18, leash: 28, radius: 0.6, height: 2.3, fireWeak: 1.2, mix: true, keep: 6, mass: 0.3, reel: 0.6, hyper: "attack", unarmed: true, cry: "bell", xp: "grave_confessor",
+    loot: MOB_LOOT.grave_confessor,
+    attacks: [
+      A({ name: "censer", range: 3.0, tell: 0.7, active: 0.3, recover: 0.9, shape: 1, size: 3.4, half: 1.3, dmg: 38, lunge: 2, knock: 2.6, tellPose: "windup", hitPose: "light1", cooldown: 1.6 }),
+      A({ name: "absolution", range: 13, min: 3, tell: 1.0, active: 0.35, recover: 1.0, shape: 0, size: 3.6, dmg: 46, lunge: 0, knock: 2.2, tellPose: "cast", hitPose: "cast", ground: true, target: true, color: 0xd8f0ff, cooldown: 2.6 }),
+    ],
+  },
 };
 
 function makeRig(kind: MobKind): { rig: Rig; mat: THREE.MeshLambertMaterial; mouse?: THREE.Group } {
@@ -372,6 +430,31 @@ function buildNew(kind: MobKind): Rig {
       return buildHuman({
         skin: 0xb89a80, hair: 0x18181c, hairStyle: "short", shirt: 0x202024, coat: 0x18181c, trousers: 0x141418, boots: 0x101012, belt: 0x3a2a18,
         cape: 0x2a1618, armour: { head: "bk", chest: "bk", hands: "bk", legs: "bk", feet: "bk" }, height: 2.15, frame: 1.25,
+      });
+    case "skeleton":
+    case "undead_knight":
+    case "standard_bearer":
+      return buildHuman({
+        skin: shade(0xe0d8c0, v), hair: 0x2a2620, hairStyle: "bald", shirt: 0x3a352c, coat: kind === "skeleton" ? 0x2e2a24 : 0x22242a, trousers: 0x2e2a24, boots: 0xd8d0b8,
+        belt: 0x2a241c, cape: kind === "skeleton" ? undefined : 0x3a3a46,
+        armour: kind === "skeleton" ? { head: "iron" } : { head: "bk", chest: "bk", hands: "bk", legs: "bk", feet: "bk" },
+        height: kind === "standard_bearer" ? 2.45 : kind === "undead_knight" ? 2.15 : 1.8, frame: kind === "skeleton" ? 0.72 : 1.1,
+      });
+    case "zombie":
+      return buildHuman({
+        skin: shade(0x8a9478, v), hair: 0x2a2a22, hairStyle: pick(["long", "bald", "short"]), shirt: 0x5a5444, coat: 0x3e3a30,
+        trousers: 0x3a362c, boots: 0x262420, belt: 0x22201a, height: 1.75 + Math.random() * 0.12, frame: 1.0,
+      });
+    case "ghost":
+      return buildHuman({
+        skin: 0xc8f0e8, hair: 0xd0f0e8, hairStyle: "long", shirt: 0xa8d8d0, coat: 0x88c0b8, coatLong: true,
+        trousers: 0x88c0b8, boots: 0x88c0b8, belt: 0x6aa8a0, height: 1.9, frame: 0.85,
+      });
+    case "necromancer":
+    case "grave_confessor":
+      return buildHuman({
+        skin: 0xd8d0c4, hair: 0x101010, hairStyle: "hood", shirt: 0x1e2a22, coat: kind === "necromancer" ? 0x18221c : 0xd8d4c8, coatLong: true,
+        trousers: 0x141a16, boots: 0x101210, belt: 0x6aff9a, height: kind === "grave_confessor" ? 2.3 : 1.85, frame: kind === "grave_confessor" ? 1.15 : 0.88,
       });
     default:
       // crypt_dead
@@ -539,6 +622,40 @@ function dress(kind: MobKind, rig: Rig, mat: THREE.Material) {
       S.gripR?.add(weaponModel("wpn_steel_greatsword"));
       attach(Bn.head, mat, [K(0.03, 0.16, 0, 0.36, -0.02, 0x6a1a1c, -0.3, 0, 0, 5)]);
       break;
+    case "skeleton":
+      S.gripR?.add(weaponModel(pick(["wpn_iron_sword", "wpn_iron_spear", "wpn_iron_axe"])));
+      attach(Bn.chest, mat, [0, 1, 2, 3].map((i) => B(0.24 - i * 0.03, 0.02, 0.02, 0, 0.12 - i * 0.06, 0.13, 0xe8e0c8)));
+      attach(Bn.head, mat, [E(0.024, 0.028, 0.01, 0.042, 0.125, 0.118, 0x1a3a22), E(0.024, 0.028, 0.01, -0.042, 0.125, 0.118, 0x1a3a22)]);
+      break;
+    case "undead_knight":
+      S.gripR?.add(weaponModel("wpn_steel_greatsword"));
+      attach(Bn.head, mat, [E(0.024, 0.02, 0.01, 0.04, 0.12, 0.13, 0x6aff9a), E(0.024, 0.02, 0.01, -0.04, 0.12, 0.13, 0x6aff9a)]);
+      break;
+    case "standard_bearer": {
+      S.gripR?.add(weaponModel("wpn_iron_spear"));
+      attach(Bn.back ?? Bn.chest, mat, [B(0.04, 2.2, 0.04, 0.1, 0.6, -0.16, 0x3a2a1a), B(0.6, 0.8, 0.02, 0.4, 1.3, -0.16, 0x5a1a1e), B(0.6, 0.06, 0.022, 0.4, 1.7, -0.16, 0xc8a040)]);
+      break;
+    }
+    case "zombie":
+      attach(Bn.chest, mat, [B(0.12, 0.1, 0.02, 0.06, 0.02, 0.15, 0x6a2a24, 0, 0, 0.3), B(0.05, 0.22, 0.012, -0.12, -0.08, 0.14, 0x4a4434)]);
+      break;
+    case "ghost": {
+      const trail: Part[] = [];
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        trail.push(B(0.1, 0.4 + Math.random() * 0.2, 0.012, Math.sin(a) * 0.18, -0.5, Math.cos(a) * 0.18, 0xa8e0d8, 0, a, 0));
+      }
+      attach(Bn.hips, mat, trail);
+      attach(Bn.head, mat, [E(0.026, 0.03, 0.01, 0.042, 0.125, 0.12, 0x0a1a18), E(0.026, 0.03, 0.01, -0.042, 0.125, 0.12, 0x0a1a18)]);
+      break;
+    }
+    case "necromancer":
+    case "grave_confessor": {
+      attach(Bn.head, mat, [K(0.1, 0.3, 0, 0.24, -0.1, kind === "necromancer" ? 0x18221c : 0xd8d4c8, -0.7, 0, 0, 7)]);
+      attach(S.gripR, mat, [C(0.018, 0.018, 1.5, 0, -0.3, 0, 0x2a2018), E(0.07, 0.07, 0.07, 0, 0.48, 0, 0x6aff9a)]);
+      if (kind === "grave_confessor") attach(Bn.chest, mat, [B(0.3, 0.04, 0.02, 0, 0.14, 0.17, 0xc8a040), B(0.04, 0.3, 0.022, 0, 0.0, 0.172, 0xc8a040)]);
+      break;
+    }
     case "crypt_dead": {
       S.gripR?.add(weaponModel(pick(["club", "wpn_iron_axe", "wpn_iron_sword"])));
       const rags: Part[] = [];
@@ -562,6 +679,7 @@ export const MOB_STATES = ["idle", "chase", "tell", "active", "recover", "stagge
 export const MOB_KINDS: MobKind[] = [
   "wolf", "goblin", "redcap", "soldier", "mouse", "horse", "deer",
   "bandit", "deserter", "hound", "boar", "blackwolf", "kennel_hound", "kennelmaster", "drowned", "croc", "witch", "black_guard", "keep_knight", "crypt_dead",
+  "skeleton", "zombie", "ghost", "necromancer", "undead_knight", "standard_bearer", "grave_confessor",
 ];
 /** ax, az: where an aimed attack (a witch's hex) lands; sent only while one is told or struck. */
 export type MobSnap = [key: string, x: number, z: number, yaw: number, st: number, hp: number, atk: number, t: number, kind: number, ax?: number, az?: number];

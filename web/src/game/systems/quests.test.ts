@@ -6,7 +6,7 @@ import { NODE_DEFS, MOB_LOOT, MOB_SPAWNS } from "../data/world.ts";
 import { PORTALS, ZONES, SHRINES, STATIONS } from "../data/zones.ts";
 import { SHOPS } from "../data/shops.ts";
 import { BOSSES, bossHp } from "../data/bosses.ts";
-import { LEVEL_XP, levelOf, MOB_XP } from "../data/progression.ts";
+import { LEVEL_CAP, LEVEL_XP, levelOf, MOB_XP } from "../data/progression.ts";
 import { RECIPES } from "../data/items.ts";
 import { autoStarts, aheadDone, journal, looksDone, nextWork, npcBusiness, readyToStep, tracked, type QuestBook, type QuestCtx } from "./quests.ts";
 
@@ -90,7 +90,7 @@ test("shared data is consistent: every id points at something real", () => {
 test("levels and boss health scale sensibly", () => {
   assert.equal(levelOf(0), 1);
   assert.equal(levelOf(LEVEL_XP[1]), 2);
-  assert.equal(levelOf(1e9), 20);
+  assert.equal(levelOf(1e9), LEVEL_CAP);
   assert.equal(bossHp(BOSSES.cookie, 1), 280);
   assert.equal(bossHp(BOSSES.cookie, 4), Math.round(280 * 2.8));
   assert.ok(bossHp(BOSSES.cookie, 4) < 280 * 4, "not four times");

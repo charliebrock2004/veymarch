@@ -3,10 +3,10 @@
  * character's experience and computes the level from LEVEL_XP (seeded into vm_config).
  */
 
-export const LEVEL_CAP = 20;
+export const LEVEL_CAP = 25;
 
-/** Experience needed to go from level L to L+1, for L = 1..19. */
-const STEP = [100, 160, 230, 310, 400, 500, 610, 730, 860, 1000, 1150, 1310, 1480, 1660, 1850, 2050, 2260, 2480, 2710];
+/** Experience needed to go from level L to L+1, for L = 1..24. */
+const STEP = [100, 160, 230, 310, 400, 500, 610, 730, 860, 1000, 1150, 1310, 1480, 1660, 1850, 2050, 2260, 2480, 2710, 2950, 3200, 3460, 3730, 4010];
 
 /** Total experience at the start of each level: LEVEL_XP[L - 1] for level L. */
 export const LEVEL_XP: number[] = (() => {
@@ -53,4 +53,5 @@ export const MOB_XP: Record<string, number> = {
   blackwolf: 34, kennel_hound: 36, kennelmaster: 220,
   drowned: 48, croc: 62, witch: 80,
   black_guard: 70, keep_knight: 110, crypt_dead: 60,
+  skeleton: 72, zombie: 80, ghost: 96, necromancer: 150, undead_knight: 140, standard_bearer: 420, grave_confessor: 600,
 };

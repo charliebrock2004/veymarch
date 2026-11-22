@@ -41,6 +41,12 @@ export const BOSSES: Record<string, BossDef> = {
     rewards: [["wpn_finlay_longsword", 1], ["arm_bk_head", 1], ["arm_bk_chest", 1], ["arm_bk_hands", 1], ["arm_bk_legs", 1], ["arm_bk_feet", 1]],
     flag: "finlay", music: "boss_finlay",
   },
+  grave_king: {
+    id: "grave_king", name: "The Grave King", title: "The court kneels. The femurs creak. He stands.", zone: "citadel", x: 0, z: 112, r: 16, reach: 36,
+    hp: 1800, scale: 0.65, xp: 4200, crowns: 1000,
+    rewards: [["wpn_grave_blade", 1], ["wpn_soulbreaker_pick", 1], ["key_crown_shard", 1]],
+    flag: "grave_king", music: "boss_grave",
+  },
 };
 
 /** Fighters that count toward a boss's health: 1..4. */

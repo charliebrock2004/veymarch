@@ -7,7 +7,7 @@
  * into seed rows), so positions here are the truth both sides check against.
  */
 
-export type ZoneId = "over" | "castle" | "kingdom" | "hunt" | "kennel" | "mire" | "keep";
+export type ZoneId = "over" | "castle" | "kingdom" | "hunt" | "kennel" | "mire" | "keep" | "waste" | "citadel";
 
 export type ZoneDef = {
   id: ZoneId;
@@ -33,6 +33,8 @@ export const ZONES: Record<ZoneId, ZoneDef> = {
   kennel: { id: "kennel", name: "The Royal Kennels", sub: "Collars on hooks. Something still wags.", indoor: true, ox: 7000, bounds: { minX: -30, maxX: 30, minZ: -4, maxZ: 136 }, music: "kennel", level: 8 },
   mire: { id: "mire", name: "The Dark Mire", sub: "Green-black water, bells under it", indoor: false, ox: 9000, bounds: { minX: -140, maxX: 140, minZ: -160, maxZ: 160 }, music: "mire", level: 11 },
   keep: { id: "keep", name: "The Black Keep", sub: "The war that never stood down", indoor: true, ox: 11000, bounds: { minX: -44, maxX: 44, minZ: -4, maxZ: 146 }, music: "keep", level: 14 },
+  waste: { id: "waste", name: "The Undead Wasteland", sub: "Ash that is not snow. No birds.", indoor: false, ox: 13000, bounds: { minX: -140, maxX: 140, minZ: -160, maxZ: 160 }, music: "waste", level: 16 },
+  citadel: { id: "citadel", name: "The Dead Citadel", sub: "The court still kneels. The king never left.", indoor: true, ox: 15000, bounds: { minX: -40, maxX: 40, minZ: -4, maxZ: 140 }, music: "citadel", level: 18 },
 };
 
 export const ZONE_IDS = Object.keys(ZONES) as ZoneId[];
@@ -45,7 +47,9 @@ export function zoneAt(x: number): ZoneId {
   if (x < 6000) return "hunt";
   if (x < 8000) return "kennel";
   if (x < 10000) return "mire";
-  return "keep";
+  if (x < 12000) return "keep";
+  if (x < 14000) return "waste";
+  return "citadel";
 }
 
 export const toWorld = (zone: ZoneId, x: number, z: number) => ({ x: ZONES[zone].ox + x, z });
@@ -72,7 +76,12 @@ export type PortalDef = {
   shut?: string;
   /** walk into it rather than press a button (road edges) */
   edge?: boolean;
+  /** Chapter II roads: shut in online worlds until the realm database has the Chapter II content */
+  chapter?: 2;
 };
+
+/** Flip to true once the live realm database has been migrated with the Chapter II seed. */
+export const CHAPTER2_ONLINE = false;
 
 export const PORTALS: PortalDef[] = [
   { id: "over_castle", from: "over", x: 0, z: 163.5, r: 3.2, to: "castle", tx: 0, tz: 4, tyaw: 0, label: "Enter Cookie's Castle" },
@@ -89,6 +98,11 @@ export const PORTALS: PortalDef[] = [
   { id: "mire_kingdom", from: "mire", x: 0, z: 156, r: 7, to: "kingdom", tx: 0, tz: -156, tyaw: 0, label: "North to Harrenvale", edge: true },
   { id: "mire_keep", from: "mire", x: 0, z: -138, r: 4, to: "keep", tx: 0, tz: 4, tyaw: 0, label: "Enter the Black Keep" },
   { id: "keep_mire", from: "keep", x: 0, z: 2, r: 2.4, to: "mire", tx: 0, tz: -132, tyaw: Math.PI, label: "Back out to the Mire" },
+  { id: "keep_waste", from: "keep", x: 0, z: 142, r: 3.2, to: "waste", tx: 0, tz: -146, tyaw: 0, label: "Through the broken ring, down to the Wasteland", flag: "finlay", shut: "Beyond the ring the stair runs down into ash. Finlay still holds it.", chapter: 2 },
+  { id: "waste_keep", from: "waste", x: 0, z: -156, r: 6, to: "keep", tx: 0, tz: 136, tyaw: Math.PI, label: "Back up to the Black Keep", edge: true, chapter: 2 },
+  { id: "waste_citadel", from: "waste", x: 0, z: 140, r: 4, to: "citadel", tx: 0, tz: 4, tyaw: 0, label: "Enter the Dead Citadel", flag: "citadel_gate", shut: "The bone gate will not open while the Grave Confessor still chants.", chapter: 2 },
+  { id: "citadel_waste", from: "citadel", x: 0, z: 2, r: 2.4, to: "waste", tx: 0, tz: 134, tyaw: Math.PI, label: "Back out to the Wasteland", chapter: 2 },
+  { id: "citadel_waste_back", from: "citadel", x: 0, z: 134, r: 3, to: "waste", tx: 0, tz: 134, tyaw: Math.PI, label: "Out through the throne's collapse", flag: "grave_king", chapter: 2 },
 ];
 
 // ------------------------------------------------------------------ shrines (respawn and fast travel)
@@ -102,6 +116,7 @@ export const SHRINES: ShrineDef[] = [
   { id: "harrenvale", zone: "kingdom", x: 6, z: -6, name: "Harrenvale market cross" },
   { id: "lodge", zone: "hunt", x: -28, z: -74, name: "Royal hunting lodge" },
   { id: "drear", zone: "mire", x: -36, z: 54, name: "Drear bell-post" },
+  { id: "caldus", zone: "waste", x: -26, z: -96, name: "Last rites camp" },
 ];
 
 // ------------------------------------------------------------------ crafting stations
@@ -128,6 +143,8 @@ export const STATIONS: StationDef[] = [
   { id: "lodge_cook", kind: "cook", zone: "hunt", x: -24, z: -78, r: 3.4, name: "Lodge firepit" },
   { id: "drear_alch", kind: "alchemist", zone: "mire", x: -44, z: 64, r: 3.4, name: "Mother Phem's kettle" },
   { id: "drear_cook", kind: "cook", zone: "mire", x: -38, z: 58, r: 3.0, name: "Drear smokehouse" },
+  { id: "caldus_alch", kind: "alchemist", zone: "waste", x: -34, z: -102, r: 3.4, name: "Brother Caldus's censer" },
+  { id: "caldus_cook", kind: "cook", zone: "waste", x: -20, z: -102, r: 3.0, name: "Pilgrims' fire" },
 ];
 
 /** Server-side reach for station and shop checks, from the last saved position (it is a few seconds old). */

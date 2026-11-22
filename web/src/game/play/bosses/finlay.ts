@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Decal } from "../../engine/fx";
 import { Poser, buildHuman, characterMaterial, poseHuman, type HumanAction, type HumanLook, type Rig } from "../../engine/rig";
-import { BOSSES } from "../../data/bosses.ts";
+import { BOSSES, type BossDef } from "../../data/bosses.ts";
 import { ZONES } from "../../data/zones.ts";
 import type { Boss, BossEnv } from "../bossapi";
 import { SILENT, type HurtOpts, type PlayerState } from "../env";
@@ -198,8 +198,8 @@ function buildHelm(): THREE.Mesh {
 }
 
 export class Finlay implements Boss {
-  readonly def = BOSSES.finlay;
-  readonly phaseNames = ["", "The captain", "Helm off", "The rite"];
+  readonly def: BossDef;
+  readonly phaseNames: string[];
   readonly adds: Mob[] = [];
   readonly cx: number;
   readonly cz: number;
@@ -253,7 +253,10 @@ export class Finlay implements Boss {
   private press = new Map<PlayerState, number>();
   private recentHits: number[] = [];
 
-  constructor(private env: BossEnv, private parent: THREE.Object3D) {
+  /** Finlay's body and fight, reused by later bosses with their own def, blade and phase names. */
+  constructor(private env: BossEnv, private parent: THREE.Object3D, def: BossDef = BOSSES.finlay, o: { weapon?: string; phases?: string[] } = {}) {
+    this.def = def;
+    this.phaseNames = o.phases ?? ["", "The captain", "Helm off", "The rite"];
     this.cx = ZONES[this.def.zone].ox + this.def.x;
     this.cz = this.def.z;
     this.x = this.cx;
@@ -268,7 +271,7 @@ export class Finlay implements Boss {
     this.rig.group.add(buildPlate(this.rig, this.plateMat));
     this.helm = buildHelm();
     this.rig.bones.head.add(this.helm);
-    this.holder.add(weaponModel("wpn_finlay_longsword"));
+    this.holder.add(weaponModel(o.weapon ?? "wpn_finlay_longsword"));
     this.rig.sockets.gripR.add(this.holder);
     this.poser = new Poser(this.rig);
     parent.add(this.rig.group);

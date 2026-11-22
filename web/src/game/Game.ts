@@ -1,3 +1,4 @@
+import { createPost, DEFAULT_GRADE, ZONE_GRADES } from "./engine/post";
 import * as THREE from "three";
 import { CACHE_DEFS, DESCRIPTIONS, ITEMS, MOB_SPAWNS, MORE_LINES, RECIPES, SET_BONUS, SPEEDS, TRADES, type ItemDef } from "./content";
 import { MODIFIERS, moddedName } from "./data/items.ts";
@@ -19,7 +20,7 @@ import { buildSky } from "./engine/sky";
 import { blockTex } from "./engine/textures";
 import { buildDungeon, type Dungeon } from "./world/dungeon";
 import { DUN, GATE, REGION_TITLE, SPAWN, regionAt } from "./world/layout";
-import { PORTALS, SHRINES, STATIONS, STATION_NAMES, ZONES, toWorld, zoneAt, type PortalDef, type Station, type ZoneId } from "./data/zones";
+import { CHAPTER2_ONLINE, PORTALS, SHRINES, STATIONS, STATION_NAMES, ZONES, toWorld, zoneAt, type PortalDef, type Station, type ZoneId } from "./data/zones";
 import { buildOverworld, type NodeDef, type Overworld } from "./world/overworld";
 import { ZONE_BUILDERS, type ZoneBuild, type ZoneEnv } from "./world/zone";
 import "./world/zones/index";
@@ -224,7 +225,8 @@ const OBJ_RANGE = 4.2;
 const REWARD_TEXT: Record<string, { title: string; sub: string; seal: string }> = {
   cookie: { title: "Cookie is defeated", sub: "The music box winds down. The toys go still.", seal: "Seal broken · The Green Gate answers the Core." },
   boe: { title: "Boe rests", sub: "The collar goes dark. He licks your hand, once, and lies down.", seal: "The red collar · Elspeth will want it back." },
-  finlay: { title: "Finlay falls", sub: "The captain of the March kneels in the black rain and does not get up.", seal: "The Black Keep is silent." },
+  finlay: { title: "Finlay falls", sub: "The captain of the March kneels in the black rain and does not get up.", seal: "The Black Keep is silent. Beyond the ring, a stair runs down into ash." },
+  grave_king: { title: "The Grave King falls", sub: "The court stops kneeling. One by one, the dead lie down.", seal: "The crown is broken · A shard points south-west, toward the salt road." },
 };
 
 export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): GameApi {
@@ -256,6 +258,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.05;
   scene.add(hemi, sun, sun.target);
+  const post = createPost(renderer, scene, camera);
+  post.enabled = quality === "high";
   const lightPool: THREE.PointLight[] = [];
   for (let i = 0; i < 4; i++) {
     const l = new THREE.PointLight(0xff9a50, 0, 16, 1.6);
@@ -389,7 +393,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (b && b.fighting && b.st !== "intro" && Math.hypot(P.x - b.x, P.z - b.z) < b.def.r + 20) {
       const id = b.def.id;
       if (id === "finlay" && hazards.length > 0) return { theme: "rite", intensity: 1 };
-      return { theme: id === "cookie" || id === "boe" || id === "finlay" ? id : "keep", intensity: Math.min(1, b.phaseN / 3 + 0.2) };
+      return { theme: id === "cookie" || id === "boe" || id === "finlay" || id === "grave_king" ? id : "keep", intensity: Math.min(1, b.phaseN / 3 + 0.2) };
     }
     let near = 0;
     for (const m of mobs) {
@@ -1572,7 +1576,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
   }
 
-  const portalOpen = (p: PortalDef) => !p.flag || !!worldFlags[p.flag];
+  const chapterShut = (p: PortalDef) => !!p.chapter && !!online && !CHAPTER2_ONLINE;
+  const portalOpen = (p: PortalDef) => !chapterShut(p) && (!p.flag || !!worldFlags[p.flag]);
+  const shutText = (p: PortalDef) =>
+    chapterShut(p) ? "Chapter II is not open in online worlds yet. Play it in Single Player while the realm is updated." : p.shut ?? "It will not open.";
   let travelling = false;
   let shutSaidAt = 0;
 
@@ -1599,9 +1606,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     if (!portalOpen(p)) {
       if (p.edge) {
-        if (performance.now() - shutSaidAt > 4000) say(p.shut ?? "It will not open.");
+        if (performance.now() - shutSaidAt > 4000) say(shutText(p));
         shutSaidAt = performance.now();
-      } else openTalkLines(p.label, "", [p.shut ?? "It will not open."]);
+      } else openTalkLines(p.label, "", [shutText(p)]);
       return;
     }
     if (p.id === "over_castle" && !hasEdge()) {
@@ -1954,6 +1961,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     P.regenT = 6;
     floater(String(d), P.x, P.y + 2.0, P.z, "dmg");
     audio.hurt();
+    post.flash(0x8a1010, Math.min(0.35, 0.12 + d * 0.01));
     shake = Math.max(shake, 0.18 + d * 0.01);
     const dx = P.x - sx;
     const dz = P.z - sz;
@@ -2336,6 +2344,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     renderer.toneMappingExposure += (exposure - renderer.toneMappingExposure) * Math.min(1, rdt * 2);
     sky.set({ zenith: zen, horizon: fog.color, sunDir, sunColor: sun.color, night: 1 - dayK, time: performance.now() / 1000, cloud: 0.5 });
     sky.mesh.position.copy(camera.position);
+    post.setGrade(mode === "title" || mode === "create" ? DEFAULT_GRADE : (ZONE_GRADES[P.zone] ?? DEFAULT_GRADE));
     const fx = mode === "play" || mode === "bag" || mode === "talk" || mode === "dead" || mode === "reward" || mode === "end" ? P.x : camera.position.x;
     const fz = mode === "play" || mode === "bag" || mode === "talk" || mode === "dead" || mode === "reward" || mode === "end" ? P.z : camera.position.z;
     const snap = 68 / (quality === "high" ? 2048 : 1024);
@@ -2976,7 +2985,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       camera.updateMatrixWorld();
       updateOverlay(rdt);
     }
-    renderer.render(scene, camera);
+    if (post.enabled) post.render(rdt);
+    else renderer.render(scene, camera);
     hudT += rdt;
     if (hudT > 0.1) {
       hudT = 0;
@@ -2996,6 +3006,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (canvas.width !== Math.floor(w * pr) || canvas.height !== Math.floor(h * pr)) {
       renderer.setPixelRatio(pr);
       renderer.setSize(w, h, false);
+      post.setSize(w, h, pr);
       camera.aspect = w / h;
       camera.fov = w < h ? 70 : 60;
       camera.updateProjectionMatrix();
@@ -3709,7 +3720,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (id === "q_gate") showBanner("KINGDOM UNLOCKED", "Harrenvale opens its gates: smiths, armourers, a tavern, the Castellan's work.");
       else showBanner(q.name, "Quest complete · " + gifts);
       // the last road of this chapter ends here
-      if (id === "q_keep")
+      if (id === "q_wasteland" || (id === "q_keep" && online && !CHAPTER2_ONLINE))
         setTimeout(() => {
           if (mode === "play" || mode === "reward") {
             mode = "end";
@@ -3927,6 +3938,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     setQuality(q) {
       quality = q;
       localStorage.setItem("veyrmarch.quality", q);
+      post.enabled = q === "high";
       renderer.shadowMap.enabled = q !== "low";
       sun.castShadow = q !== "low";
       renderer.shadowMap.type = q === "high" ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;

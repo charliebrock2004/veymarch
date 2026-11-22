@@ -27,6 +27,13 @@ export const MOB_LOOT: Record<string, [string, number, number][]> = {
   black_guard: [["coin_crown", 20, 1], ["mat_black_iron", 1, 0.35], ["cons_draught", 1, 0.15]],
   keep_knight: [["coin_crown", 40, 1], ["mat_black_iron", 2, 0.6], ["mat_steel", 1, 0.4]],
   crypt_dead: [["mat_bone", 2, 1], ["mat_black_iron", 1, 0.2], ["herb_rotcap", 1, 0.3]],
+  skeleton: [["mat_bone", 2, 1], ["mat_grave_dust", 1, 0.6], ["coin_crown", 10, 0.6]],
+  zombie: [["mat_tallow", 1, 0.7], ["mat_bone", 1, 0.5], ["mat_grave_dust", 1, 0.4]],
+  ghost: [["mat_grave_dust", 2, 1], ["mat_ember_shard", 1, 0.15], ["coin_crown", 18, 0.7]],
+  necromancer: [["coin_crown", 60, 1], ["mat_grave_dust", 3, 1], ["cons_greater_draught", 1, 0.3], ["mat_ember_shard", 1, 0.3]],
+  undead_knight: [["coin_crown", 50, 1], ["mat_grave_iron", 1, 0.5], ["mat_black_iron", 1, 0.4]],
+  standard_bearer: [["coin_crown", 160, 1], ["mat_grave_iron", 3, 1], ["mat_ruined_banner", 1, 1], ["cons_last_rites", 1, 1]],
+  grave_confessor: [["coin_crown", 220, 1], ["mat_grave_iron", 3, 1], ["mat_grave_dust", 5, 1], ["cons_last_rites", 2, 1]],
 };
 
 /** Placed enemies: [key, kind, x, z, zone]. Keys are stable forever (the server remembers deaths by key). */
@@ -71,6 +78,21 @@ export const MOB_SPAWNS: Spawn[] = [
   ["kk1", "keep_knight", -24, 40, "keep"], ["kk2", "keep_knight", 24, 40, "keep"],
   ["cd1", "crypt_dead", -4, 64, "keep"], ["cd2", "crypt_dead", 4, 68, "keep"], ["cd3", "crypt_dead", -3, 74, "keep"], ["cd4", "crypt_dead", 3, 78, "keep"],
   ["kk3", "keep_knight", -6, 92, "keep"], ["kk4", "keep_knight", 6, 96, "keep"],
+  // The Undead Wasteland: the ash road, the rib bridges, the dead village, the necromancer towers
+  ["ws1", "skeleton", -8, -120, "waste"], ["ws2", "skeleton", 8, -116, "waste"], ["ws3", "skeleton", 2, -108, "waste"],
+  ["ws4", "skeleton", 54, -40, "waste"], ["ws5", "skeleton", 62, -34, "waste"], ["ws6", "skeleton", 48, -30, "waste"],
+  ["ws7", "skeleton", -60, 30, "waste"], ["ws8", "skeleton", -52, 38, "waste"], ["ws9", "skeleton", 10, 96, "waste"], ["ws10", "skeleton", -10, 100, "waste"],
+  ["wz1", "zombie", -70, -40, "waste"], ["wz2", "zombie", -78, -32, "waste"], ["wz3", "zombie", -64, -28, "waste"], ["wz4", "zombie", -84, -46, "waste"],
+  ["wz5", "zombie", 40, 60, "waste"], ["wz6", "zombie", 50, 66, "waste"], ["wz7", "zombie", 32, 70, "waste"],
+  ["wg1", "ghost", 0, -10, "waste"], ["wg2", "ghost", 18, 4, "waste"], ["wg3", "ghost", -20, 60, "waste"], ["wg4", "ghost", 90, 20, "waste"],
+  ["wn1", "necromancer", 96, -70, "waste"], ["wn2", "necromancer", -96, 70, "waste"], ["wn3", "necromancer", 92, 96, "waste"],
+  ["wk1", "undead_knight", -6, 118, "waste"], ["wk2", "undead_knight", 6, 118, "waste"], ["wsb", "standard_bearer", 70, -6, "waste"],
+  ["wgc", "grave_confessor", 0, 124, "waste"],
+  // The Dead Citadel
+  ["cs1", "skeleton", -4, 14, "citadel"], ["cs2", "skeleton", 4, 16, "citadel"], ["cs3", "skeleton", 0, 22, "citadel"],
+  ["ck1", "undead_knight", -6, 40, "citadel"], ["ck2", "undead_knight", 6, 42, "citadel"],
+  ["cg1", "ghost", -10, 56, "citadel"], ["cg2", "ghost", 10, 60, "citadel"], ["cz1", "zombie", -4, 64, "citadel"], ["cz2", "zombie", 4, 66, "citadel"],
+  ["cn1", "necromancer", 0, 78, "citadel"], ["ck3", "undead_knight", -6, 88, "citadel"], ["ck4", "undead_knight", 6, 90, "citadel"],
 ];
 
 /** Indoor zones and soldiers do not come back; out in the open, things breed. */
@@ -113,6 +135,11 @@ export const NODE_DEFS: NodeData[] = [
   N("blackiron_m0", "blackiron", "mat_black_iron", 6, "mire", 100, -20, 3), N("blackiron_m1", "blackiron", "mat_black_iron", 6, "mire", 108, -30, 3), N("blackiron_m2", "blackiron", "mat_black_iron", 6, "mire", -110, -100, 3),
   // the Black Keep's armoury
   N("blackiron_k0", "blackiron", "mat_black_iron", 6, "keep", 30, 36, 3), N("blackiron_k1", "blackiron", "mat_black_iron", 6, "keep", 32, 44, 3),
+  // the Wasteland: grave iron in the ribs of the dead river, bone everywhere
+  N("graveiron_w0", "blackiron", "mat_grave_iron", 6, "waste", 104, -100, 3), N("graveiron_w1", "blackiron", "mat_grave_iron", 6, "waste", 112, -92, 3),
+  N("graveiron_w2", "blackiron", "mat_grave_iron", 6, "waste", -112, 104, 3), N("graveiron_w3", "blackiron", "mat_grave_iron", 6, "waste", -104, 112, 3),
+  N("stone_w0", "stone", "mat_stone", 0, "waste", -40, -130), N("stone_w1", "stone", "mat_stone", 0, "waste", 60, 120),
+  N("wood_w0", "wood", "mat_wood", 0, "waste", -90, -110), N("wood_w1", "wood", "mat_wood", 0, "waste", 90, -130),
 ];
 
 /** One-time caches a character can loot once per world: contents, where, and how close you must stand. */
@@ -128,6 +155,9 @@ export const CACHE_DEFS: CacheDef[] = [
   { id: "drear_reliquary", zone: "mire", x: -46, z: 70, items: [["cons_rot_tonic", 2], ["herb_widowsveil", 2], ["coin_crown", 50]] },
   { id: "armoury_rack", zone: "keep", x: 28, z: 40, items: [["mat_black_iron", 3], ["mat_steel", 2], ["cons_greater_draught", 1]] },
   { id: "crypt_tomb", zone: "keep", x: 0, z: 82, items: [["coin_crown", 150], ["cons_greater_draught", 2]] },
+  { id: "mass_grave", zone: "waste", x: -62, z: 34, items: [["coin_crown", 120], ["mat_grave_iron", 2], ["cons_last_rites", 1]] },
+  { id: "tower_reliquary", zone: "waste", x: 100, z: -76, items: [["coin_crown", 160], ["mat_ember_shard", 2], ["cons_greater_draught", 2]] },
+  { id: "ossuary_coffer", zone: "citadel", x: 11, z: 62, items: [["coin_crown", 260], ["mat_grave_iron", 3], ["cons_last_rites", 2]] },
 ];
 
 /** Back-compat view used by older code: cache id → contents. */
@@ -150,4 +180,6 @@ export const WORLD_FLAGS: WorldFlagRule[] = [
   { flag: "keep_winch" },
   { flag: "armoury", needsMob: "kk1" },
   { flag: "crypt", needsFlag: "armoury" },
+  // the Wasteland: the bone gate opens when the Grave Confessor falls
+  { flag: "citadel_gate", needsMob: "wgc" },
 ];

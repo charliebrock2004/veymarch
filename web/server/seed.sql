@@ -81,10 +81,33 @@ insert into vm_item_defs (id, name, kind, stack, damage, tier, slot, moveset, he
   ('cons_roast', 'Roast Meat', 'consumable', 20, 0, 0, 'none', '', 42, false, 0, 'common', 12, ''),
   ('cons_stew', 'Hunter''s Stew', 'consumable', 20, 0, 0, 'none', '', 75, false, 0, 'uncommon', 30, ''),
   ('key_cookie_core', 'Cookie''s Core', 'key', 1, 0, 4, 'none', '', 0, true, 0, 'unique', 0, ''),
-  ('key_red_collar', 'Boe''s Red Collar', 'key', 1, 0, 4, 'none', '', 0, true, 0, 'unique', 0, '')
+  ('key_red_collar', 'Boe''s Red Collar', 'key', 1, 0, 4, 'none', '', 0, true, 0, 'unique', 0, ''),
+  ('key_crown_shard', 'Crown Shard', 'key', 1, 0, 7, 'none', '', 0, true, 0, 'unique', 0, ''),
+  ('mat_grave_iron', 'Grave Iron', 'mat', 99, 0, 7, 'none', '', 0, false, 0, 'rare', 60, ''),
+  ('mat_grave_dust', 'Grave Dust', 'mat', 99, 0, 6, 'none', '', 0, false, 0, 'uncommon', 8, ''),
+  ('mat_tallow', 'Tallow', 'mat', 99, 0, 5, 'none', '', 0, false, 0, 'common', 6, ''),
+  ('mat_ruined_banner', 'Ruined Banner', 'mat', 10, 0, 6, 'none', '', 0, false, 0, 'rare', 40, ''),
+  ('cons_last_rites', 'Last Rites Draught', 'consumable', 10, 0, 0, 'none', '', 160, false, 0, 'epic', 140, ''),
+  ('wpn_graveiron_sword', 'Grave Iron Sword', 'weapon', 1, 39, 7, 'main', 'sword', 0, false, 0, 'epic', 1100, 'sword'),
+  ('wpn_graveiron_axe', 'Grave Iron Axe', 'weapon', 1, 44, 7, 'main', 'axe', 0, false, 0, 'epic', 1150, 'axe'),
+  ('wpn_grave_blade', 'Grave King''s Blade', 'weapon', 1, 52, 7, 'main', 'greatsword', 0, true, 0, 'unique', 0, 'greatsword'),
+  ('wpn_soulbreaker_pick', 'Soulbreaker Pickaxe', 'weapon', 1, 22, 7, 'main', 'pick', 0, true, 0, 'unique', 0, 'pick'),
+  ('arm_gi_head', 'Grave Iron Helm', 'armour', 1, 0, 7, 'head', '', 0, false, 15, 'epic', 600, ''),
+  ('arm_gi_chest', 'Grave Iron Hauberk', 'armour', 1, 0, 7, 'chest', '', 0, false, 26, 'epic', 1000, ''),
+  ('arm_gi_hands', 'Grave Iron Gauntlets', 'armour', 1, 0, 7, 'hands', '', 0, false, 10, 'epic', 450, ''),
+  ('arm_gi_legs', 'Grave Iron Greaves', 'armour', 1, 0, 7, 'legs', '', 0, false, 18, 'epic', 700, ''),
+  ('arm_gi_feet', 'Grave Iron Sabatons', 'armour', 1, 0, 7, 'feet', '', 0, false, 10, 'epic', 450, '')
 on conflict (id) do update set name = excluded.name, kind = excluded.kind, stack = excluded.stack, damage = excluded.damage, tier = excluded.tier, slot = excluded.slot, moveset = excluded.moveset, heal = excluded.heal, soulbound = excluded.soulbound, defence = excluded.defence, rarity = excluded.rarity, value = excluded.value, family = excluded.family;
 
 insert into vm_recipes (id, out_item, station, n) values
+  ('recipe_graveiron_sword', 'wpn_graveiron_sword', 'blacksmith', 1),
+  ('recipe_graveiron_axe', 'wpn_graveiron_axe', 'blacksmith', 1),
+  ('recipe_gi_head', 'arm_gi_head', 'armourer', 1),
+  ('recipe_gi_chest', 'arm_gi_chest', 'armourer', 1),
+  ('recipe_gi_hands', 'arm_gi_hands', 'armourer', 1),
+  ('recipe_gi_legs', 'arm_gi_legs', 'armourer', 1),
+  ('recipe_gi_feet', 'arm_gi_feet', 'armourer', 1),
+  ('recipe_last_rites', 'cons_last_rites', 'alchemist', 1),
   ('recipe_stone_knife', 'wpn_stone_knife', 'hand', 1),
   ('recipe_bandage', 'cons_bandage', 'hand', 1),
   ('recipe_stump_shield', 'arm_stump_shield', 'bench', 1),
@@ -135,6 +158,25 @@ insert into vm_recipes (id, out_item, station, n) values
 on conflict (id) do update set out_item = excluded.out_item, station = excluded.station, n = excluded.n;
 
 insert into vm_recipe_inputs (recipe, item, n) values
+  ('recipe_graveiron_sword', 'mat_grave_iron', 4),
+  ('recipe_graveiron_sword', 'mat_black_iron', 2),
+  ('recipe_graveiron_sword', 'mat_leather', 1),
+  ('recipe_graveiron_axe', 'mat_grave_iron', 4),
+  ('recipe_graveiron_axe', 'mat_black_iron', 2),
+  ('recipe_graveiron_axe', 'mat_wood', 2),
+  ('recipe_gi_head', 'mat_grave_iron', 3),
+  ('recipe_gi_head', 'mat_leather', 1),
+  ('recipe_gi_chest', 'mat_grave_iron', 5),
+  ('recipe_gi_chest', 'mat_leather', 2),
+  ('recipe_gi_hands', 'mat_grave_iron', 2),
+  ('recipe_gi_hands', 'mat_leather', 1),
+  ('recipe_gi_legs', 'mat_grave_iron', 4),
+  ('recipe_gi_legs', 'mat_leather', 1),
+  ('recipe_gi_feet', 'mat_grave_iron', 2),
+  ('recipe_gi_feet', 'mat_leather', 1),
+  ('recipe_last_rites', 'cons_greater_draught', 1),
+  ('recipe_last_rites', 'mat_grave_dust', 2),
+  ('recipe_last_rites', 'mat_tallow', 1),
   ('recipe_stone_knife', 'mat_flint', 2),
   ('recipe_stone_knife', 'mat_wood', 1),
   ('recipe_bandage', 'mat_fibre', 2),
@@ -300,7 +342,31 @@ insert into vm_loot (kind, item, n, chance) values
   ('keep_knight', 'mat_steel', 1, 0.4),
   ('crypt_dead', 'mat_bone', 2, 1),
   ('crypt_dead', 'mat_black_iron', 1, 0.2),
-  ('crypt_dead', 'herb_rotcap', 1, 0.3)
+  ('crypt_dead', 'herb_rotcap', 1, 0.3),
+  ('skeleton', 'mat_bone', 2, 1),
+  ('skeleton', 'mat_grave_dust', 1, 0.6),
+  ('skeleton', 'coin_crown', 10, 0.6),
+  ('zombie', 'mat_tallow', 1, 0.7),
+  ('zombie', 'mat_bone', 1, 0.5),
+  ('zombie', 'mat_grave_dust', 1, 0.4),
+  ('ghost', 'mat_grave_dust', 2, 1),
+  ('ghost', 'mat_ember_shard', 1, 0.15),
+  ('ghost', 'coin_crown', 18, 0.7),
+  ('necromancer', 'coin_crown', 60, 1),
+  ('necromancer', 'mat_grave_dust', 3, 1),
+  ('necromancer', 'cons_greater_draught', 1, 0.3),
+  ('necromancer', 'mat_ember_shard', 1, 0.3),
+  ('undead_knight', 'coin_crown', 50, 1),
+  ('undead_knight', 'mat_grave_iron', 1, 0.5),
+  ('undead_knight', 'mat_black_iron', 1, 0.4),
+  ('standard_bearer', 'coin_crown', 160, 1),
+  ('standard_bearer', 'mat_grave_iron', 3, 1),
+  ('standard_bearer', 'mat_ruined_banner', 1, 1),
+  ('standard_bearer', 'cons_last_rites', 1, 1),
+  ('grave_confessor', 'coin_crown', 220, 1),
+  ('grave_confessor', 'mat_grave_iron', 3, 1),
+  ('grave_confessor', 'mat_grave_dust', 5, 1),
+  ('grave_confessor', 'cons_last_rites', 2, 1)
 on conflict (kind, item) do update set n = excluded.n, chance = excluded.chance;
 
 insert into vm_mods (id, on_kind, dmg, def) values
@@ -344,7 +410,14 @@ insert into vm_mob_kinds (kind, xp) values
   ('witch', 80),
   ('black_guard', 70),
   ('keep_knight', 110),
-  ('crypt_dead', 60)
+  ('crypt_dead', 60),
+  ('skeleton', 72),
+  ('zombie', 80),
+  ('ghost', 96),
+  ('necromancer', 150),
+  ('undead_knight', 140),
+  ('standard_bearer', 420),
+  ('grave_confessor', 600)
 on conflict (kind) do update set xp = excluded.xp;
 
 insert into vm_mob_spawns (key, kind, dungeon, respawns, zone, x, z) values
@@ -440,7 +513,47 @@ insert into vm_mob_spawns (key, kind, dungeon, respawns, zone, x, z) values
   ('cd3', 'crypt_dead', false, false, 'keep', 10997, 74),
   ('cd4', 'crypt_dead', false, false, 'keep', 11003, 78),
   ('kk3', 'keep_knight', false, false, 'keep', 10994, 92),
-  ('kk4', 'keep_knight', false, false, 'keep', 11006, 96)
+  ('kk4', 'keep_knight', false, false, 'keep', 11006, 96),
+  ('ws1', 'skeleton', false, true, 'waste', 12992, -120),
+  ('ws2', 'skeleton', false, true, 'waste', 13008, -116),
+  ('ws3', 'skeleton', false, true, 'waste', 13002, -108),
+  ('ws4', 'skeleton', false, true, 'waste', 13054, -40),
+  ('ws5', 'skeleton', false, true, 'waste', 13062, -34),
+  ('ws6', 'skeleton', false, true, 'waste', 13048, -30),
+  ('ws7', 'skeleton', false, true, 'waste', 12940, 30),
+  ('ws8', 'skeleton', false, true, 'waste', 12948, 38),
+  ('ws9', 'skeleton', false, true, 'waste', 13010, 96),
+  ('ws10', 'skeleton', false, true, 'waste', 12990, 100),
+  ('wz1', 'zombie', false, true, 'waste', 12930, -40),
+  ('wz2', 'zombie', false, true, 'waste', 12922, -32),
+  ('wz3', 'zombie', false, true, 'waste', 12936, -28),
+  ('wz4', 'zombie', false, true, 'waste', 12916, -46),
+  ('wz5', 'zombie', false, true, 'waste', 13040, 60),
+  ('wz6', 'zombie', false, true, 'waste', 13050, 66),
+  ('wz7', 'zombie', false, true, 'waste', 13032, 70),
+  ('wg1', 'ghost', false, true, 'waste', 13000, -10),
+  ('wg2', 'ghost', false, true, 'waste', 13018, 4),
+  ('wg3', 'ghost', false, true, 'waste', 12980, 60),
+  ('wg4', 'ghost', false, true, 'waste', 13090, 20),
+  ('wn1', 'necromancer', false, true, 'waste', 13096, -70),
+  ('wn2', 'necromancer', false, true, 'waste', 12904, 70),
+  ('wn3', 'necromancer', false, true, 'waste', 13092, 96),
+  ('wk1', 'undead_knight', false, true, 'waste', 12994, 118),
+  ('wk2', 'undead_knight', false, true, 'waste', 13006, 118),
+  ('wsb', 'standard_bearer', false, true, 'waste', 13070, -6),
+  ('wgc', 'grave_confessor', false, true, 'waste', 13000, 124),
+  ('cs1', 'skeleton', false, false, 'citadel', 14996, 14),
+  ('cs2', 'skeleton', false, false, 'citadel', 15004, 16),
+  ('cs3', 'skeleton', false, false, 'citadel', 15000, 22),
+  ('ck1', 'undead_knight', false, false, 'citadel', 14994, 40),
+  ('ck2', 'undead_knight', false, false, 'citadel', 15006, 42),
+  ('cg1', 'ghost', false, false, 'citadel', 14990, 56),
+  ('cg2', 'ghost', false, false, 'citadel', 15010, 60),
+  ('cz1', 'zombie', false, false, 'citadel', 14996, 64),
+  ('cz2', 'zombie', false, false, 'citadel', 15004, 66),
+  ('cn1', 'necromancer', false, false, 'citadel', 15000, 78),
+  ('ck3', 'undead_knight', false, false, 'citadel', 14994, 88),
+  ('ck4', 'undead_knight', false, false, 'citadel', 15006, 90)
 on conflict (key) do update set kind = excluded.kind, dungeon = excluded.dungeon, respawns = excluded.respawns, zone = excluded.zone, x = excluded.x, z = excluded.z;
 
 insert into vm_nodes (id, item, tier, seal, max_left, zone, x, z) values
@@ -515,7 +628,15 @@ insert into vm_nodes (id, item, tier, seal, max_left, zone, x, z) values
   ('blackiron_m1', 'mat_black_iron', 6, null, 3, 'mire', 9108, -30),
   ('blackiron_m2', 'mat_black_iron', 6, null, 3, 'mire', 8890, -100),
   ('blackiron_k0', 'mat_black_iron', 6, null, 3, 'keep', 11030, 36),
-  ('blackiron_k1', 'mat_black_iron', 6, null, 3, 'keep', 11032, 44)
+  ('blackiron_k1', 'mat_black_iron', 6, null, 3, 'keep', 11032, 44),
+  ('graveiron_w0', 'mat_grave_iron', 6, null, 3, 'waste', 13104, -100),
+  ('graveiron_w1', 'mat_grave_iron', 6, null, 3, 'waste', 13112, -92),
+  ('graveiron_w2', 'mat_grave_iron', 6, null, 3, 'waste', 12888, 104),
+  ('graveiron_w3', 'mat_grave_iron', 6, null, 3, 'waste', 12896, 112),
+  ('stone_w0', 'mat_stone', 0, null, 3, 'waste', 12960, -130),
+  ('stone_w1', 'mat_stone', 0, null, 3, 'waste', 13060, 120),
+  ('wood_w0', 'mat_wood', 0, null, 3, 'waste', 12910, -110),
+  ('wood_w1', 'mat_wood', 0, null, 3, 'waste', 13090, -130)
 on conflict (id) do update set item = excluded.item, tier = excluded.tier, seal = excluded.seal, max_left = excluded.max_left, zone = excluded.zone, x = excluded.x, z = excluded.z;
 
 insert into vm_caches (cache, item, n) values
@@ -545,7 +666,16 @@ insert into vm_caches (cache, item, n) values
   ('armoury_rack', 'mat_steel', 2),
   ('armoury_rack', 'cons_greater_draught', 1),
   ('crypt_tomb', 'coin_crown', 150),
-  ('crypt_tomb', 'cons_greater_draught', 2)
+  ('crypt_tomb', 'cons_greater_draught', 2),
+  ('mass_grave', 'coin_crown', 120),
+  ('mass_grave', 'mat_grave_iron', 2),
+  ('mass_grave', 'cons_last_rites', 1),
+  ('tower_reliquary', 'coin_crown', 160),
+  ('tower_reliquary', 'mat_ember_shard', 2),
+  ('tower_reliquary', 'cons_greater_draught', 2),
+  ('ossuary_coffer', 'coin_crown', 260),
+  ('ossuary_coffer', 'mat_grave_iron', 3),
+  ('ossuary_coffer', 'cons_last_rites', 2)
 on conflict (cache, item) do update set n = excluded.n;
 
 insert into vm_cache_spots (cache, zone, x, z) values
@@ -557,7 +687,10 @@ insert into vm_cache_spots (cache, zone, x, z) values
   ('kennel_secret', 'kennel', 7014, 32),
   ('drear_reliquary', 'mire', 8954, 70),
   ('armoury_rack', 'keep', 11028, 40),
-  ('crypt_tomb', 'keep', 11000, 82)
+  ('crypt_tomb', 'keep', 11000, 82),
+  ('mass_grave', 'waste', 12938, 34),
+  ('tower_reliquary', 'waste', 13100, -76),
+  ('ossuary_coffer', 'citadel', 15011, 62)
 on conflict (cache) do update set zone = excluded.zone, x = excluded.x, z = excluded.z;
 
 insert into vm_zones (id, ox, indoor, min_x, max_x, min_z, max_z) values
@@ -567,7 +700,9 @@ insert into vm_zones (id, ox, indoor, min_x, max_x, min_z, max_z) values
   ('hunt', 5000, false, -120, 120, -150, 150),
   ('kennel', 7000, true, -30, 30, -4, 136),
   ('mire', 9000, false, -140, 140, -160, 160),
-  ('keep', 11000, true, -44, 44, -4, 146)
+  ('keep', 11000, true, -44, 44, -4, 146),
+  ('waste', 13000, false, -140, 140, -160, 160),
+  ('citadel', 15000, true, -40, 40, -4, 140)
 on conflict (id) do update set ox = excluded.ox, indoor = excluded.indoor, min_x = excluded.min_x, max_x = excluded.max_x, min_z = excluded.min_z, max_z = excluded.max_z;
 
 insert into vm_stations (id, kind, zone, x, z, r) values
@@ -582,7 +717,9 @@ insert into vm_stations (id, kind, zone, x, z, r) values
   ('hv_ench', 'enchanter', 'kingdom', 3000, 27, 3.4),
   ('lodge_cook', 'cook', 'hunt', 4976, -78, 3.4),
   ('drear_alch', 'alchemist', 'mire', 8956, 64, 3.4),
-  ('drear_cook', 'cook', 'mire', 8962, 58, 3)
+  ('drear_cook', 'cook', 'mire', 8962, 58, 3),
+  ('caldus_alch', 'alchemist', 'waste', 12966, -102, 3.4),
+  ('caldus_cook', 'cook', 'waste', 12980, -102, 3)
 on conflict (id) do update set kind = excluded.kind, zone = excluded.zone, x = excluded.x, z = excluded.z, r = excluded.r;
 
 insert into vm_portals (id, from_zone, x, z, r, to_zone, tx, tz, flag) values
@@ -599,7 +736,12 @@ insert into vm_portals (id, from_zone, x, z, r, to_zone, tx, tz, flag) values
   ('kingdom_mire', 'kingdom', 3000, -164, 7, 'mire', 9000, 146, 'causeway'),
   ('mire_kingdom', 'mire', 9000, 156, 7, 'kingdom', 3000, -156, null),
   ('mire_keep', 'mire', 9000, -138, 4, 'keep', 11000, 4, null),
-  ('keep_mire', 'keep', 11000, 2, 2.4, 'mire', 9000, -132, null)
+  ('keep_mire', 'keep', 11000, 2, 2.4, 'mire', 9000, -132, null),
+  ('keep_waste', 'keep', 11000, 142, 3.2, 'waste', 13000, -146, 'finlay'),
+  ('waste_keep', 'waste', 13000, -156, 6, 'keep', 11000, 136, null),
+  ('waste_citadel', 'waste', 13000, 140, 4, 'citadel', 15000, 4, 'citadel_gate'),
+  ('citadel_waste', 'citadel', 15000, 2, 2.4, 'waste', 13000, 134, null),
+  ('citadel_waste_back', 'citadel', 15000, 134, 3, 'waste', 13000, 134, 'grave_king')
 on conflict (id) do update set from_zone = excluded.from_zone, x = excluded.x, z = excluded.z, r = excluded.r, to_zone = excluded.to_zone, tx = excluded.tx, tz = excluded.tz, flag = excluded.flag;
 
 insert into vm_shrines (id, zone, x, z) values
@@ -607,13 +749,15 @@ insert into vm_shrines (id, zone, x, z) values
   ('forest', 'over', 40, 115.6),
   ('harrenvale', 'kingdom', 3006, -6),
   ('lodge', 'hunt', 4972, -74),
-  ('drear', 'mire', 8964, 54)
+  ('drear', 'mire', 8964, 54),
+  ('caldus', 'waste', 12974, -96)
 on conflict (id) do update set zone = excluded.zone, x = excluded.x, z = excluded.z;
 
 insert into vm_bosses (id, name, zone, x, z, r, reach, hp, scale, xp, crowns, rewards, flag) values
   ('cookie', 'Evil Toy Penguin Caller Cookie', 'castle', 1200, 104, 15, 34, 280, 0.6, 400, 80, '[["wpn_cookie_blade",1],["wpn_cookie_pick",1],["key_cookie_core",1]]'::jsonb, 'cookie'),
   ('boe', 'Boe, the Collared Hound', 'kennel', 7000, 116, 14, 32, 520, 0.6, 900, 200, '[["wpn_smacko",1],["mat_boe_fang",1],["key_red_collar",1]]'::jsonb, 'boe'),
-  ('finlay', 'Finlay, Captain of the March', 'keep', 11000, 124, 16, 36, 1100, 0.65, 2500, 600, '[["wpn_finlay_longsword",1],["arm_bk_head",1],["arm_bk_chest",1],["arm_bk_hands",1],["arm_bk_legs",1],["arm_bk_feet",1]]'::jsonb, 'finlay')
+  ('finlay', 'Finlay, Captain of the March', 'keep', 11000, 124, 16, 36, 1100, 0.65, 2500, 600, '[["wpn_finlay_longsword",1],["arm_bk_head",1],["arm_bk_chest",1],["arm_bk_hands",1],["arm_bk_legs",1],["arm_bk_feet",1]]'::jsonb, 'finlay'),
+  ('grave_king', 'The Grave King', 'citadel', 15000, 112, 16, 36, 1800, 0.65, 4200, 1000, '[["wpn_grave_blade",1],["wpn_soulbreaker_pick",1],["key_crown_shard",1]]'::jsonb, 'grave_king')
 on conflict (id) do update set name = excluded.name, zone = excluded.zone, x = excluded.x, z = excluded.z, r = excluded.r, reach = excluded.reach, hp = excluded.hp, scale = excluded.scale, xp = excluded.xp, crowns = excluded.crowns, rewards = excluded.rewards, flag = excluded.flag;
 
 insert into vm_shops (id, zone, x, z, keeper, buys) values
@@ -691,7 +835,9 @@ insert into vm_quests (id, def) values
   ('q_hounds', '{"id":"q_hounds","name":"Feral Hounds of Millcross","main":false,"giver":"aldo","requires":["q_gate"],"level":5,"offer":["Hounds from the royal kennels, gone wild. They take a sheep a night. Four of them, maybe more."],"thanks":["Quiet nights. Here, take bread. Take two."],"steps":[{"k":"kill","kind":"hound","n":4,"text":"Drive off the feral hounds","sub":"Around Millcross mill, south-west"},{"k":"talk","npc":"aldo","text":"Tell Aldo","sub":"Millcross"}],"rewards":{"xp":200,"crowns":60,"items":[["cons_bread",3]]}}'::jsonb),
   ('q_stew', '{"id":"q_stew","name":"Stew for the Watch","main":false,"giver":"odo","requires":["q_gate"],"level":4,"offer":["The night watch eats like a cavalry. Three roasts and I''ll pay you better than I pay them."],"thanks":["Still warm. You can cook. Don''t tell the watch."],"steps":[{"k":"give","item":"cons_roast","n":3,"npc":"odo","text":"Bring Odo three roasts","sub":"Raw meat on the Gilded Ox''s hearth"}],"rewards":{"xp":160,"crowns":70,"items":[]}}'::jsonb),
   ('q_hides', '{"id":"q_hides","name":"Hide for Brannoc","main":false,"giver":"brannoc","requires":["q_gate"],"level":7,"offer":["Royal hounds had hides like boiled leather. Three of those and I''ll make you gloves you won''t take off."],"thanks":["These will do. These will more than do."],"steps":[{"k":"give","item":"mat_hound_hide","n":3,"npc":"brannoc","text":"Bring Brannoc three hound hides","sub":"Blackwood wolves and the kennel hounds"}],"rewards":{"xp":260,"crowns":90,"items":[["arm_hound_hands",1]]}}'::jsonb),
-  ('q_witches', '{"id":"q_witches","name":"The Bell Witches","main":false,"giver":"liss","requires":["q_causeway"],"level":11,"offer":["Two witches have taken to ringing the drowned bells at dusk. Every time they do, someone in Drear doesn''t wake.","Make them stop. I''ll make it worth the walk."],"thanks":["No bells last night. Drear slept. Here."],"steps":[{"k":"kill","kind":"witch","n":2,"text":"Silence two bell witches","sub":"Their huts stand in the witch pools"},{"k":"talk","npc":"liss","text":"Tell Liss","sub":"Her boat at Drear"}],"rewards":{"xp":500,"crowns":160,"items":[["cons_greater_draught",1]]}}'::jsonb)
+  ('q_witches', '{"id":"q_witches","name":"The Bell Witches","main":false,"giver":"liss","requires":["q_causeway"],"level":11,"offer":["Two witches have taken to ringing the drowned bells at dusk. Every time they do, someone in Drear doesn''t wake.","Make them stop. I''ll make it worth the walk."],"thanks":["No bells last night. Drear slept. Here."],"steps":[{"k":"kill","kind":"witch","n":2,"text":"Silence two bell witches","sub":"Their huts stand in the witch pools"},{"k":"talk","npc":"liss","text":"Tell Liss","sub":"Her boat at Drear"}],"rewards":{"xp":500,"crowns":160,"items":[["cons_greater_draught",1]]}}'::jsonb),
+  ('q_wasteland', '{"id":"q_wasteland","name":"The Grave King","main":true,"giver":"caldus","requires":["q_keep"],"level":15,"offer":["A living face. In the Wasteland. Sit, before you fall down. I am Brother Caldus. I bury what will stay buried.","Past the dead river stands the Citadel, and in it a king who will not lie down. Every dead thing here kneels to him.","Thin the dead on the road. Silence the necromancers in their towers. Then the Confessor at the bone gate, and the king himself."],"thanks":["The court is quiet. Listen. No marching. For the first time in a hundred years, no marching.","Take the shard. It points somewhere. Most broken things do."],"steps":[{"k":"reach","zone":"waste","text":"Go down into the Wasteland","sub":"Through the broken ring of the Black Keep"},{"k":"talk","npc":"caldus","text":"Find the living priest","sub":"A camp of last rites, west of the road","lines":["So the Keep let you through. Good. Then it can let others through too. We must be quick."]},{"k":"kill","kind":"skeleton","n":6,"text":"Lay the road''s dead to rest","sub":"Skeletons along the ash road"},{"k":"kill","kind":"necromancer","n":2,"text":"Silence the towers","sub":"Necromancers east and west of the dead river"},{"k":"flag","flag":"citadel_gate","text":"Open the bone gate","sub":"The Grave Confessor chants before the Citadel"},{"k":"reach","zone":"citadel","text":"Enter the Dead Citadel","sub":"North, at the end of the ash road"},{"k":"boss","boss":"grave_king","text":"Defeat the Grave King","sub":"The Throne of Femurs. His court will rise to fight for him."}],"rewards":{"xp":3000,"crowns":800,"items":[["cons_last_rites",3]]}}'::jsonb),
+  ('q_last_rites', '{"id":"q_last_rites","name":"Last Rites","main":false,"giver":"caldus","requires":["q_keep"],"level":15,"offer":["The candles are almost out. Tallow from the shambling dead, grave dust from the bones. Bring me enough and I will name them all."],"thanks":["Every candle is a name. You have given me forty names tonight. Here, for the road."],"steps":[{"k":"kill","kind":"zombie","n":5,"text":"Put down the shambling dead","sub":"Zombies in the dead village west of the road"},{"k":"give","npc":"caldus","item":"mat_tallow","n":3,"text":"Bring Caldus tallow","sub":"Zombies carry it","lines":["Good. Good. This will burn for a week."]},{"k":"give","npc":"caldus","item":"mat_grave_dust","n":4,"text":"Bring Caldus grave dust","sub":"Skeletons and ghosts leave it behind","lines":["Dust to the censer. They will sleep now."]}],"rewards":{"xp":1200,"crowns":300,"items":[["cons_last_rites",2],["mat_grave_iron",2]]}}'::jsonb)
 on conflict (id) do update set def = excluded.def;
 
 insert into vm_world_flag_rules (flag, needs_mob, needs_flag) values
@@ -702,12 +848,13 @@ insert into vm_world_flag_rules (flag, needs_mob, needs_flag) values
   ('kennel_gate', 'knm', null),
   ('keep_winch', null, null),
   ('armoury', 'kk1', null),
-  ('crypt', null, 'armoury')
+  ('crypt', null, 'armoury'),
+  ('citadel_gate', 'wgc', null)
 on conflict (flag) do update set needs_mob = excluded.needs_mob, needs_flag = excluded.needs_flag;
 
 insert into vm_config (key, value) values
   ('cookie_hp', '280'::jsonb),
-  ('level_xp', '[0,100,260,490,800,1200,1700,2310,3040,3900,4900,6050,7360,8840,10500,12350,14400,16660,19140,21850]'::jsonb),
+  ('level_xp', '[0,100,260,490,800,1200,1700,2310,3040,3900,4900,6050,7360,8840,10500,12350,14400,16660,19140,21850,24800,28000,31460,35190,39200]'::jsonb),
   ('sell_rate', '0.3'::jsonb)
 on conflict (key) do update set value = excluded.value;
 

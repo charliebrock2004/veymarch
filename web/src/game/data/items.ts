@@ -164,11 +164,36 @@ const LIST: ItemDef[] = [
   // ---- keys and quest items
   key("key_cookie_core", "Cookie's Core"),
   key("key_red_collar", "Boe's Red Collar"),
+  key("key_crown_shard", "Crown Shard", { tier: 7 }),
+
+  // ---- Chapter II: the Undead Wasteland
+  mat("mat_grave_iron", "Grave Iron", 60, 7, "rare"),
+  mat("mat_grave_dust", "Grave Dust", 8, 6, "uncommon"),
+  mat("mat_tallow", "Tallow", 6, 5),
+  mat("mat_ruined_banner", "Ruined Banner", 40, 6, "rare", 10),
+  food("cons_last_rites", "Last Rites Draught", 160, 140, { stack: 10, rarity: "epic" }),
+  weapon("wpn_graveiron_sword", "Grave Iron Sword", "sword", 39, 2.15, 10, 20, 7, 1100, { rarity: "epic" }),
+  weapon("wpn_graveiron_axe", "Grave Iron Axe", "axe", 44, 1.95, 12, 24, 7, 1150, { rarity: "epic" }),
+  weapon("wpn_grave_blade", "Grave King's Blade", "greatsword", 52, 2.45, 11, 22, 7, 0, { moveset: "greatsword", soulbound: true, rarity: "unique", passive: "Soul Harvest: each kill restores 12 health." }),
+  weapon("wpn_soulbreaker_pick", "Soulbreaker Pickaxe", "pick", 22, 1.7, 8, 16, 7, 0, { soulbound: true, rarity: "unique", passive: "Breaks grave iron and the ore under noble tombs." }),
+  armour("arm_gi_head", "Grave Iron Helm", "head", 15, 7, 600, { rarity: "epic" }),
+  armour("arm_gi_chest", "Grave Iron Hauberk", "chest", 26, 7, 1000, { rarity: "epic" }),
+  armour("arm_gi_hands", "Grave Iron Gauntlets", "hands", 10, 7, 450, { rarity: "epic" }),
+  armour("arm_gi_legs", "Grave Iron Greaves", "legs", 18, 7, 700, { rarity: "epic" }),
+  armour("arm_gi_feet", "Grave Iron Sabatons", "feet", 10, 7, 450, { rarity: "epic" }),
 ];
 
 export const ITEMS: Record<string, ItemDef> = Object.fromEntries(LIST.map((d) => [d.id, d]));
 
 export const RECIPES: RecipeDef[] = [
+  { id: "recipe_graveiron_sword", name: "Grave Iron Sword", out: "wpn_graveiron_sword", station: "blacksmith", inputs: [{ id: "mat_grave_iron", n: 4 }, { id: "mat_black_iron", n: 2 }, { id: "mat_leather", n: 1 }] },
+  { id: "recipe_graveiron_axe", name: "Grave Iron Axe", out: "wpn_graveiron_axe", station: "blacksmith", inputs: [{ id: "mat_grave_iron", n: 4 }, { id: "mat_black_iron", n: 2 }, { id: "mat_wood", n: 2 }] },
+  { id: "recipe_gi_head", name: "Grave Iron Helm", out: "arm_gi_head", station: "armourer", inputs: [{ id: "mat_grave_iron", n: 3 }, { id: "mat_leather", n: 1 }] },
+  { id: "recipe_gi_chest", name: "Grave Iron Hauberk", out: "arm_gi_chest", station: "armourer", inputs: [{ id: "mat_grave_iron", n: 5 }, { id: "mat_leather", n: 2 }] },
+  { id: "recipe_gi_hands", name: "Grave Iron Gauntlets", out: "arm_gi_hands", station: "armourer", inputs: [{ id: "mat_grave_iron", n: 2 }, { id: "mat_leather", n: 1 }] },
+  { id: "recipe_gi_legs", name: "Grave Iron Greaves", out: "arm_gi_legs", station: "armourer", inputs: [{ id: "mat_grave_iron", n: 4 }, { id: "mat_leather", n: 1 }] },
+  { id: "recipe_gi_feet", name: "Grave Iron Sabatons", out: "arm_gi_feet", station: "armourer", inputs: [{ id: "mat_grave_iron", n: 2 }, { id: "mat_leather", n: 1 }] },
+  { id: "recipe_last_rites", name: "Last Rites Draught", out: "cons_last_rites", station: "alchemist", inputs: [{ id: "cons_greater_draught", n: 1 }, { id: "mat_grave_dust", n: 2 }, { id: "mat_tallow", n: 1 }] },
   // by hand
   { id: "recipe_stone_knife", name: "Stone Knife", out: "wpn_stone_knife", station: "hand", inputs: [{ id: "mat_flint", n: 2 }, { id: "mat_wood", n: 1 }] },
   { id: "recipe_bandage", name: "Bandage", out: "cons_bandage", station: "hand", inputs: [{ id: "mat_fibre", n: 2 }] },
@@ -227,6 +252,21 @@ export const RECIPES: RecipeDef[] = [
 ];
 
 export const DESCRIPTIONS: Record<string, string> = {
+  mat_grave_iron: "Iron from the dead river's ribs. Cold in the hand, colder in a wound.",
+  mat_grave_dust: "What is left when the naming is forgotten.",
+  mat_tallow: "Candle fat. The priests trade it for anything.",
+  mat_ruined_banner: "A standard of a kingdom nobody remembers. The thread is still gold.",
+  cons_last_rites: "Restores 160 health. Tastes of smoke and myrrh.",
+  wpn_graveiron_sword: "A long, cold blade. Undead hesitate before it.",
+  wpn_graveiron_axe: "Heavy enough to end an argument with a skeleton.",
+  wpn_grave_blade: "The Grave King's own blade. It drinks what it cuts.",
+  wpn_soulbreaker_pick: "A pick with a priest's blessing on the haft. Grave iron splits under it.",
+  key_crown_shard: "A shard of the Grave King's crown. It points south-west, toward the salt road.",
+  arm_gi_head: "A grave iron helm with a narrow slit.",
+  arm_gi_chest: "Grave iron rings over black cloth.",
+  arm_gi_hands: "Gauntlets that never warm.",
+  arm_gi_legs: "Grave iron greaves, scored by bone blades.",
+  arm_gi_feet: "Sabatons that leave no print in ash.",
   coin_crown: "The King's silver. Harrenvale's shops take it; so does everyone else.",
   wpn_fists: "Knuckles. Better than nothing, barely.",
   mat_wood: "Seasoned limb wood.",

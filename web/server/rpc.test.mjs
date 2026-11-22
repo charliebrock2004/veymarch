@@ -8,7 +8,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { openDb } from "./db.mjs";
 import { BOSSES, bossHp } from "../src/game/data/bosses.ts";
 import { ITEMS } from "../src/game/data/items.ts";
-import { LEVEL_XP, MOB_XP, levelOf, statsFor } from "../src/game/data/progression.ts";
+import { LEVEL_CAP, LEVEL_XP, MOB_XP, levelOf, statsFor } from "../src/game/data/progression.ts";
 import { QUESTS } from "../src/game/data/quests.ts";
 import { MOB_SPAWNS, NODE_DEFS, WORLD_FLAGS } from "../src/game/data/world.ts";
 import { PORTALS, SHRINES, STATIONS, ZONES } from "../src/game/data/zones.ts";
@@ -560,10 +560,10 @@ test("B4 experience: each kill pays its worth once, and levels raise health and 
   // the cap
   await setXp(s.c.id, LEVEL_XP[LEVEL_XP.length - 1] + 5000);
   c = await me(s);
-  assert.equal(c.level, 20);
+  assert.equal(c.level, LEVEL_CAP);
   assert.equal(c.xp_lo, c.xp_hi);
-  assert.equal(c.max_hp, statsFor(20).maxHp);
-  assert.equal(c.mana_max, statsFor(20).mana);
+  assert.equal(c.max_hp, statsFor(LEVEL_CAP).maxHp);
+  assert.equal(c.mana_max, statsFor(LEVEL_CAP).mana);
 });
 
 test("B5 bosses: the arena, damage by level, health by fighters, rewards once to fighters and witnesses", async () => {

@@ -188,6 +188,37 @@ export const THEMES = {
     mel: { phrases: [P.call, P.answer, P.lament, P.fall], vol: 0.06, inst: "horn", chance: 0.6, oct: 12 },
     drums: [{ pat: "k..tk.t.k..tk.ss", vol: 0.13 }, { pat: "t.t.t.t.t.t.tttt", vol: 0.08, fight: true }],
   },
+  /** the Wasteland: a choir of few voices and a drum, no birds */
+  waste: {
+    bpm: 54, steps: 8, vol: 0.9,
+    chords: [tri(45, "m"), tri(41), tri(43, "m"), tri(40, "d")],
+    scale: scale(57, AEOL),
+    pad: { inst: "choir", vol: 0.045 },
+    drone: { notes: [33, 40], vol: 0.03 },
+    toll: { every: 4, notes: [45, 40], vol: 0.05, inst: "lowbell" },
+    mel: { phrases: [P.lament, P.slow, P.wisp], vol: 0.035, inst: "flute", chance: 0.35, oct: -12 },
+    drums: [{ pat: "f.......f.......", vol: 0.08 }, { pat: "k..tk.t.k..tk.tt", vol: 0.11, fight: true }],
+  },
+  citadel: {
+    bpm: 60, steps: 8, vol: 0.9,
+    chords: [tri(40, "m"), tri(36), tri(38, "d"), tri(35)],
+    scale: scale(52, HARM),
+    pad: { inst: "choir", vol: 0.05, oct: -12 },
+    drone: { notes: [28, 35], vol: 0.035 },
+    toll: { every: 2, notes: [40, 39], vol: 0.07, inst: "lowbell" },
+    mel: { phrases: [P.lament, P.call], vol: 0.04, inst: "horn", chance: 0.3, oct: -12 },
+    drums: [{ pat: "t.......t.....t.", vol: 0.1 }, { pat: "k.tsk.tsk.tsk.ss", vol: 0.12, fight: true }],
+  },
+  grave_king: {
+    bpm: 112, steps: 8, vol: 1,
+    chords: [tri(40, "m"), tri(36), tri(38), tri(35)],
+    scale: scale(52, HARM),
+    pad: { inst: "choir", vol: 0.055 },
+    bass: { at: [0, 3, 4, 6], vol: 0.13, len: 1 },
+    arp: { pat: [0, 2, 1, 2, 3, 2, 1, 2], vol: 0.045, inst: "celesta", oct: 12 },
+    mel: { phrases: [P.call, P.answer, P.fall, P.lament], vol: 0.06, inst: "horn", chance: 0.7 },
+    drums: [{ pat: "k.tsk.tsk.tsk.ts", vol: 0.13 }, { pat: "t.t.t.t.tttt.ttt", vol: 0.09, fight: true }],
+  },
   /** Finlay's finger rite: everything drops to a drone and a heartbeat */
   rite: {
     bpm: 66, steps: 8, vol: 1,
@@ -209,7 +240,7 @@ export const THEMES = {
 
 export type ThemeId = keyof typeof THEMES | "none";
 
-const BOSS_THEMES = new Set<ThemeId>(["cookie", "boe", "finlay", "rite"]);
+const BOSS_THEMES = new Set<ThemeId>(["cookie", "boe", "finlay", "grave_king", "rite"]);
 
 class Playing {
   readonly gain: GainNode;
