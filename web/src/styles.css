@@ -902,11 +902,13 @@ input {
 /* ------------------------------------------------ bag */
 .vm-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .vm-tabs button {
+  flex: 1 1 auto;
   min-height: 40px;
-  padding: 0 16px;
+  padding: 0 12px;
   border-radius: 20px;
   border: 1px solid rgba(231, 220, 200, 0.15);
   background: transparent;
