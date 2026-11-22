@@ -40,6 +40,8 @@ import { Room, type Bundle, type Ev } from "../net/room";
 import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
 import { BOUNTIES, FINDS, dayStamp, pickBounties, type Find } from "./data/explore";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
+import { RUMOURS, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
+import type { PlaceView } from "./data/renown.ts";
 import { MARKS, RANK_NAMES, markBonuses, markBoon, markRank, markVs, marksView, type MarkView } from "./data/marks.ts";
 
 // ------------------------------------------------------------------ public types
@@ -137,7 +139,7 @@ export type Hud = {
   /** minimap: [right, ahead, kind] in metres around the player, turned with the camera */
   radar: { r: number; pts: [number, number, string][] } | null;
   /** bestiary and deeds, filled while the journal is open */
-  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; bounties: { id: string; name: string; text: string; n: number; of: number; paid: boolean; reward: string }[]; finds: { caches: number; stones: number }; talents: { free: number; trees: { id: string; name: string; sub: string; list: { id: string; name: string; rank: number; max: number; text: string; next: string }[] }[] } ; marks: MarkView[] } | null;
+  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean; rank: number; notes: string[]; next: string }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; bounties: { id: string; name: string; text: string; n: number; of: number; paid: boolean; reward: string }[]; finds: { caches: number; stones: number }; talents: { free: number; trees: { id: string; name: string; sub: string; list: { id: string; name: string; rank: number; max: number; text: string; next: string }[] }[] } ; marks: MarkView[]; places: PlaceView[] } | null;
   /** unspent talent points */
   talentFree: number;
   /** a one-time hint */
@@ -622,6 +624,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let lookT = 10;
   let shake = 0;
   let hitStop = 0;
+  /** the world slows for a moment after a roll passes through a blow */
+  let slowT = 0;
+  /** what each villager last remarked on, so they do not repeat themselves */
+  const remarked: Record<string, string> = {};
+  /** villagers who have already passed on a rumour this session */
+  const gossiped = new Set<string>();
+  const placeFound = (id: string) => codex.f.includes(id) || cacheFlags.has(id) || !!(flags as Record<string, boolean>)[id];
   const camPos = new THREE.Vector3(0, 8, -40);
   const camTgt = new THREE.Vector3();
 
@@ -1248,7 +1257,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     brass: new THREE.MeshStandardMaterial({ color: 0xc9a24a, roughness: 0.35, metalness: 0.85 }),
     stone: new THREE.MeshStandardMaterial({ color: 0x6e6a62, roughness: 0.95, flatShading: true }),
   };
-  const found = (id: string) => !!codex.f?.includes(id);
+  const found = (id: string) => !!codex.fd?.includes(id);
   /** Where a find really stands: its listed spot, nudged off walls, trees and water. */
   function findSpot(f: Find) {
     const w = toWorld(f.zone, f.x, f.z);
@@ -1316,7 +1325,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
   function takeFind(f: Find) {
     if (found(f.id)) return;
-    (codex.f ??= []).push(f.id);
+    (codex.fd ??= []).push(f.id);
     if (f.kind === "cache") {
       if (f.loot) grant(f.loot);
       audio.reward();
@@ -1429,6 +1438,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         x: w.x, z: w.z, r: 2.0, zone: c.zone, label: () => (cacheFlags.has(c.id) ? null : "Search"),
         act: () => {
           cacheFlags.add(c.id);
+          foundPlace(c.id);
           audio.pickup();
           void heartbeat().then(() => memberFlag(c.id));
         },
@@ -1480,6 +1490,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     interacts.push({
       x: a.hollow.x, z: a.hollow.z, r: 2.0, zone: "over", label: () => (flags.hollow ? null : "Search the hollow"),
       act: () => {
+        foundPlace("hollow");
         flags.hollow = true;
         if (online) memberFlag("hollow");
         else loot([["mat_copper", 3], ["mat_leather", 1], ["cons_bandage", 1]]);
@@ -1762,6 +1773,24 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     else if (npc.def.after && (worldFlags[npc.def.after.flag] || (flags as Record<string, boolean>)[npc.def.after.flag])) lines = pick(npc.def.after.lines);
     else if (npc.def.lines?.length) lines = pick(npc.def.lines);
     else lines = pick(L.villager);
+    // people notice what the March has made of you, once per change
+    if (!end && lines.length === 1) {
+      const r = remark(marksView({ c: codex, deaths }));
+      if (r && remarked[id] !== r.key) {
+        remarked[id] = r.key;
+        lines = [r.line, ...lines];
+      } else if (!gossiped.has(id)) {
+        // otherwise they pass on one rumour of a hidden place, kept in the Journal
+        const rid = nextRumour(P.zone, codex.r, placeFound);
+        if (rid) {
+          gossiped.add(id);
+          codex.r.push(rid);
+          saveCodex(codexId, codex);
+          lines = [...lines, RUMOURS[rid].line];
+          end = () => say("Rumour noted · Journal → Places");
+        }
+      }
+    }
     openTalkLines(npc.def.name, npc.def.role, lines, end, trades);
   }
 
@@ -2259,6 +2288,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         if (performance.now() - dodgedAt > 600) {
           dodgedAt = performance.now();
           codex.dodges++;
+          slowT = 0.45;
           checkDeeds();
         }
       }
@@ -3259,6 +3289,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (hitStop > 0) {
       hitStop -= rdt;
       dt = rdt * 0.08;
+    } else if (slowT > 0) {
+      slowT -= rdt;
+      dt = rdt * 0.35;
     }
     {
       const zb = zoneBoss();
@@ -4074,6 +4107,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     saveCodex(codexId, codex);
   }
   /** Re-reads what the character has earned; a newly reached rank is announced once. */
+  function foundPlace(id: string) {
+    if (codex.f.includes(id)) return;
+    codex.f.push(id);
+    saveCodex(codexId, codex);
+    if (RUMOURS[id]) showBanner("HIDDEN PLACE FOUND", RUMOURS[id].name);
+  }
   function checkMarks(fallen: number, quiet = false) {
     const x = { c: codex, deaths: fallen };
     marks = markBonuses(x);
@@ -4148,7 +4187,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
   function codexView(): NonNullable<Hud["codex"]> {
     return {
-      beasts: Object.entries(BEASTS).map(([id, b]) => ({ id, name: b.name, where: b.where, lore: b.lore, kills: codex.k[id] ?? 0, seen: !!codex.k[id] || codex.s.includes(id), boss: !!b.boss })),
+      beasts: Object.entries(BEASTS).map(([id, b]) => {
+        const kills = codex.k[id] ?? 0;
+        const seen = kills > 0 || codex.s.includes(id);
+        const rank = studyRank(kills, seen, !!b.boss);
+        const d = (MOBS as Record<string, (typeof MOBS)[MobKind] | undefined>)[id];
+        const facts = d && { hp: d.hp, fireWeak: d.fireWeak, loot: [...new Set(d.loot.map((l) => item(l[0])?.name ?? l[0]))], attacks: d.attacks.map((a) => ({ name: a.name, tell: a.tell })) };
+        return { id, name: b.name, where: b.where, lore: b.lore, kills, seen, boss: !!b.boss, rank, notes: studyNotes(rank, facts), next: studyNext(rank, kills) };
+      }),
       deeds: DEEDS.map((d) => ({ id: d.id, name: d.name, text: d.text, done: codex.d.includes(d.id) })),
       bounties: sharedNow() ? [] : (() => {
         const b = bountyBook();
@@ -4166,6 +4212,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         })),
       },
       marks: marksView({ c: codex, deaths }),
+      places: placesView(codex.r, placeFound),
     };
   }
   const RADAR_R = 46;

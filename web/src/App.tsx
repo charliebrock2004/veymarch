@@ -906,12 +906,13 @@ function TravelMap({ api, hud }: { api: GameApi; hud: Hud }) {
 function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
   const live = hud.journal.filter((j) => !j.done);
   const done = hud.journal.filter((j) => j.done);
-  const [tab, setTab] = useState<"quests" | "marks" | "beasts" | "deeds" | "talents" | "bounties">("quests");
+  const [tab, setTab] = useState<"quests" | "marks" | "places" | "beasts" | "deeds" | "talents" | "bounties">("quests");
   const bounties = hud.codex?.bounties ?? [];
   const finds = hud.codex?.finds;
   const tal = hud.codex?.talents;
   const marks = hud.codex?.marks ?? [];
   const beasts = hud.codex?.beasts ?? [];
+  const places = hud.codex?.places ?? [];
   const deeds = hud.codex?.deeds ?? [];
   return (
     <div className="vm-panel-screen">
@@ -928,6 +929,9 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
           </button>
           <button className={tab === "marks" ? "on" : ""} onClick={() => setTab("marks")}>
             Marks <em>{marks.reduce((n, m) => n + m.rank, 0)}/{marks.length * 3}</em>
+          </button>
+          <button className={tab === "places" ? "on" : ""} onClick={() => setTab("places")}>
+            Places <em>{places.filter((p) => p.found).length}/{places.length}</em>
           </button>
           <button className={tab === "beasts" ? "on" : ""} onClick={() => setTab("beasts")}>
             Bestiary <em>{beasts.filter((b) => b.kills > 0).length}/{beasts.length}</em>
@@ -1016,16 +1020,42 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
             ))}
           </div>
         )}
+        {tab === "places" && (
+          <div className="vm-journal vm-scroll">
+            <p className="vm-sub">Hidden places. People will tell you where to look, if you stop and talk.</p>
+            {places.map((p) => (
+              <div key={p.id} className={`vm-quest ${p.found ? "main" : ""} ${p.heard || p.found ? "" : "done"}`}>
+                <b>
+                  {p.heard || p.found ? p.name : "? ? ?"}
+                  {p.found && <em>Found</em>}
+                </b>
+                <span>{p.heard ? p.line : p.found ? "Found without being told." : "No one has told you of this yet."}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {tab === "beasts" && (
           <div className="vm-journal vm-scroll">
             {beasts.map((b) => (
               <div key={b.id} className={`vm-quest ${b.boss ? "main" : ""} ${b.seen ? "" : "done"}`}>
                 <b>
                   {b.seen ? b.name : "? ? ?"}
-                  {b.kills > 0 && <em>×{b.kills}</em>}
+                  {b.kills > 0 && (
+                    <em>
+                      {["", "", "Known", "Studied", "Mastered"][b.rank]} ×{b.kills}
+                    </em>
+                  )}
                 </b>
                 <span>{b.kills > 0 ? b.lore : b.seen ? "Seen, not yet beaten. Kill one to learn its ways." : "Not yet met."}</span>
-                {b.seen && <small>{b.where}</small>}
+                {b.notes.map((n) => (
+                  <span key={n}>{n}</span>
+                ))}
+                {b.seen && (
+                  <small>
+                    {b.where}
+                    {b.next && " · " + b.next}
+                  </small>
+                )}
               </div>
             ))}
           </div>

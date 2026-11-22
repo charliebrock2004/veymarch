@@ -54,6 +54,10 @@ export type Codex = {
   falls: number;
   /** highest rank already announced for each mark */
   m: Record<string, number>;
+  /** rumours heard (cache ids) */
+  r: string[];
+  /** hidden places found (cache ids) */
+  f: string[];
   /** deeds done */
   d: string[];
   /** hints already shown */
@@ -61,12 +65,12 @@ export type Codex = {
   /** talent ranks */
   tal?: Record<string, number>;
   /** hidden caches opened and lore stones read */
-  f?: string[];
+  fd?: string[];
   /** bounties: day stamp, the three picked, progress and which are paid */
   b?: { day: string; ids: string[]; n: number[]; paid: boolean[] };
 };
 
-export const freshCodex = (): Codex => ({ k: {}, s: [], z: [], crafts: 0, parries: 0, dodges: 0, falls: 0, m: {}, d: [], t: [] });
+export const freshCodex = (): Codex => ({ k: {}, s: [], z: [], crafts: 0, parries: 0, dodges: 0, falls: 0, m: {}, r: [], f: [], d: [], t: [] });
 
 export type DeedCtx = { c: Codex; level: number; shrines: number; deaths: number; kills: number };
 export type Deed = { id: string; name: string; text: string; ok: (x: DeedCtx) => boolean };
@@ -96,9 +100,9 @@ export const DEEDS: Deed[] = [
   { id: "lvl10", name: "Seasoned", text: "Reach level 10.", ok: (x) => x.level >= 10 },
   { id: "lvl20", name: "Veteran", text: "Reach level 20.", ok: (x) => x.level >= 20 },
   { id: "lvl25", name: "Unmarked No Longer", text: "Reach level 25.", ok: (x) => x.level >= 25 },
-  { id: "seeker", name: "Seeker", text: "Open 5 hidden caches.", ok: (x) => (x.c.f ?? []).filter((f) => f.startsWith("c_")).length >= 5 },
-  { id: "hoarder", name: "Nothing Left Buried", text: "Open every hidden cache.", ok: (x) => (x.c.f ?? []).filter((f) => f.startsWith("c_")).length >= CACHES },
-  { id: "lorekeeper", name: "Lorekeeper", text: "Read every rune stone.", ok: (x) => (x.c.f ?? []).filter((f) => f.startsWith("s_")).length >= STONES },
+  { id: "seeker", name: "Seeker", text: "Open 5 hidden caches.", ok: (x) => (x.c.fd ?? []).filter((f) => f.startsWith("c_")).length >= 5 },
+  { id: "hoarder", name: "Nothing Left Buried", text: "Open every hidden cache.", ok: (x) => (x.c.fd ?? []).filter((f) => f.startsWith("c_")).length >= CACHES },
+  { id: "lorekeeper", name: "Lorekeeper", text: "Read every rune stone.", ok: (x) => (x.c.fd ?? []).filter((f) => f.startsWith("s_")).length >= STONES },
   { id: "bountyman", name: "Paid in Full", text: "Claim all three bounties in one day.", ok: (x) => !!x.c.b && x.c.b.paid.length >= 3 && x.c.b.paid.every(Boolean) },
   { id: "stubborn", name: "Stubborn", text: "Fall 10 times and get back up.", ok: (x) => x.deaths >= 10 },
 ];
