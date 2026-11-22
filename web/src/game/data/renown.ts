@@ -53,3 +53,30 @@ export function remark(marks: MarkView[]): { key: string; line: string } | null 
 }
 
 export const REMARK_IDS = Object.keys(SAID);
+
+/** Hidden places (the one-time caches, bar your own chest at home) and the rumour that points at each. Keyed by cache id. */
+export type Rumour = { zone: string; name: string; line: string };
+export const RUMOURS: Record<string, Rumour> = {
+  hollow: { zone: "over", name: "The giant's hollow", line: "The biggest tree in the deep forest is hollow at the root. North, past the creek, where the redcaps are. Things get hidden in there." },
+  mill_loft: { zone: "kingdom", name: "The mill loft", line: "In the Kingdom there's a mill out west whose miller never came back for his savings. Try the loft." },
+  bandit_strongbox: { zone: "kingdom", name: "The bandits' strongbox", line: "The outlaws east of the Kingsroad keep what they take in one box. They're poor guards of it." },
+  lodge_cellar: { zone: "hunt", name: "The lodge cellar", line: "The king's hunting lodge had a cellar, south-west in the Blackwood. The huntsmen left in a hurry." },
+  kennel_secret: { zone: "kennel", name: "The kennelmaster's store", line: "The kennelmaster kept his good steel where the hounds couldn't get it. Somewhere off the main run." },
+  drear_reliquary: { zone: "mire", name: "The drowned reliquary", line: "There was a chapel in the Mire before the water came. Its reliquary is still dry, they say, off to the north-west." },
+  armoury_rack: { zone: "keep", name: "The armoury rack", line: "The Black Keep's armoury was never emptied. Nobody was left to give the order." },
+  crypt_tomb: { zone: "keep", name: "The crypt tomb", line: "Under the Keep, at the far end of the crypt, one tomb was sealed with the pay chest inside. Soldiers talk." },
+  mass_grave: { zone: "waste", name: "The mass grave", line: "Out west on the ash they buried a whole company with its purse. Nobody dug it up. Nobody wanted to." },
+  tower_reliquary: { zone: "waste", name: "The watchtower reliquary", line: "There's a broken tower south-east on the Wasteland. Whatever the priests carried up there never came down." },
+  ossuary_coffer: { zone: "citadel", name: "The ossuary coffer", line: "In the Dead Citadel the bones are stacked to the ceiling, and behind them there's a coffer. That's the story, anyway." },
+};
+
+/** The next rumour worth telling: not yet heard, not yet found, this land's first and otherwise in the order of the road. */
+export function nextRumour(zone: string, heard: string[], found: (id: string) => boolean): string | null {
+  const open = Object.keys(RUMOURS).filter((id) => !heard.includes(id) && !found(id));
+  return open.find((id) => RUMOURS[id].zone === zone) ?? open[0] ?? null;
+}
+
+export type PlaceView = { id: string; name: string; line: string; heard: boolean; found: boolean };
+export function placesView(heard: string[], found: (id: string) => boolean): PlaceView[] {
+  return Object.entries(RUMOURS).map(([id, r]) => ({ id, name: r.name, line: r.line, heard: heard.includes(id), found: found(id) }));
+}

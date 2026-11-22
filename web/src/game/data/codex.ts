@@ -52,13 +52,17 @@ export type Codex = {
   falls: number;
   /** highest rank already announced for each mark */
   m: Record<string, number>;
+  /** rumours heard (cache ids) */
+  r: string[];
+  /** hidden places found (cache ids) */
+  f: string[];
   /** deeds done */
   d: string[];
   /** hints already shown */
   t: string[];
 };
 
-export const freshCodex = (): Codex => ({ k: {}, s: [], z: [], crafts: 0, parries: 0, dodges: 0, falls: 0, m: {}, d: [], t: [] });
+export const freshCodex = (): Codex => ({ k: {}, s: [], z: [], crafts: 0, parries: 0, dodges: 0, falls: 0, m: {}, r: [], f: [], d: [], t: [] });
 
 export type DeedCtx = { c: Codex; level: number; shrines: number; deaths: number; kills: number };
 export type Deed = { id: string; name: string; text: string; ok: (x: DeedCtx) => boolean };

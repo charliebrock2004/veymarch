@@ -906,9 +906,10 @@ function TravelMap({ api, hud }: { api: GameApi; hud: Hud }) {
 function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
   const live = hud.journal.filter((j) => !j.done);
   const done = hud.journal.filter((j) => j.done);
-  const [tab, setTab] = useState<"quests" | "marks" | "beasts" | "deeds">("quests");
+  const [tab, setTab] = useState<"quests" | "marks" | "places" | "beasts" | "deeds">("quests");
   const marks = hud.codex?.marks ?? [];
   const beasts = hud.codex?.beasts ?? [];
+  const places = hud.codex?.places ?? [];
   const deeds = hud.codex?.deeds ?? [];
   return (
     <div className="vm-panel-screen">
@@ -925,6 +926,9 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
           </button>
           <button className={tab === "marks" ? "on" : ""} onClick={() => setTab("marks")}>
             Marks <em>{marks.reduce((n, m) => n + m.rank, 0)}/{marks.length * 3}</em>
+          </button>
+          <button className={tab === "places" ? "on" : ""} onClick={() => setTab("places")}>
+            Places <em>{places.filter((p) => p.found).length}/{places.length}</em>
           </button>
           <button className={tab === "beasts" ? "on" : ""} onClick={() => setTab("beasts")}>
             Bestiary <em>{beasts.filter((b) => b.kills > 0).length}/{beasts.length}</em>
@@ -955,6 +959,20 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
                 ) : (
                   <small>Fully marked.</small>
                 )}
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "places" && (
+          <div className="vm-journal vm-scroll">
+            <p className="vm-sub">Hidden places. People will tell you where to look, if you stop and talk.</p>
+            {places.map((p) => (
+              <div key={p.id} className={`vm-quest ${p.found ? "main" : ""} ${p.heard || p.found ? "" : "done"}`}>
+                <b>
+                  {p.heard || p.found ? p.name : "? ? ?"}
+                  {p.found && <em>Found</em>}
+                </b>
+                <span>{p.heard ? p.line : p.found ? "Found without being told." : "No one has told you of this yet."}</span>
               </div>
             ))}
           </div>

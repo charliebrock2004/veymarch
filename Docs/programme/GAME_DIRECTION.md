@@ -157,7 +157,7 @@ Scores are 1 to 5. For difficulty, time and performance cost, 1 is easiest, shor
 | --- | --- | --- |
 | 1 | Marks: data, combat hooks, Journal tab, banner, tests | Built |
 | 2 | Villager reactions, perfect-dodge slow motion, bestiary ranks | Built |
-| 3 | Cold open, rumours, one hidden place in Hearthfen and the Hunt | |
+| 3 | Rumours and a Places journal for the 11 hidden caches (built); cold open (next) | Part built |
 | 4 | Marks on the body, character card, trophy hall | |
 | 5 | Naming the dead, mining gates, rematches | |
 | 6 | Offline install, codex moved into the save, online Chapter II | Needs the realm database migration |

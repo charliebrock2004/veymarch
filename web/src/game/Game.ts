@@ -38,7 +38,8 @@ import { weaponModel } from "./play/weapons";
 import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Realm, StackJson } from "../net/realm";
 import { Room, type Bundle, type Ev } from "../net/room";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
-import { remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
+import { RUMOURS, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
+import type { PlaceView } from "./data/renown.ts";
 import { MARKS, RANK_NAMES, markBonuses, markBoon, markRank, markVs, marksView, type MarkView } from "./data/marks.ts";
 
 // ------------------------------------------------------------------ public types
@@ -136,7 +137,7 @@ export type Hud = {
   /** minimap: [right, ahead, kind] in metres around the player, turned with the camera */
   radar: { r: number; pts: [number, number, string][] } | null;
   /** bestiary and deeds, filled while the journal is open */
-  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean; rank: number; notes: string[]; next: string }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; marks: MarkView[] } | null;
+  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean; rank: number; notes: string[]; next: string }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; marks: MarkView[]; places: PlaceView[] } | null;
   /** a one-time hint */
   tip: { text: string; at: number } | null;
   /** a gamepad is driving */
@@ -609,6 +610,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let slowT = 0;
   /** what each villager last remarked on, so they do not repeat themselves */
   const remarked: Record<string, string> = {};
+  /** villagers who have already passed on a rumour this session */
+  const gossiped = new Set<string>();
+  const placeFound = (id: string) => codex.f.includes(id) || cacheFlags.has(id) || !!(flags as Record<string, boolean>)[id];
   const camPos = new THREE.Vector3(0, 8, -40);
   const camTgt = new THREE.Vector3();
 
@@ -1249,6 +1253,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         x: w.x, z: w.z, r: 2.0, zone: c.zone, label: () => (cacheFlags.has(c.id) ? null : "Search"),
         act: () => {
           cacheFlags.add(c.id);
+          foundPlace(c.id);
           audio.pickup();
           void heartbeat().then(() => memberFlag(c.id));
         },
@@ -1300,6 +1305,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     interacts.push({
       x: a.hollow.x, z: a.hollow.z, r: 2.0, zone: "over", label: () => (flags.hollow ? null : "Search the hollow"),
       act: () => {
+        foundPlace("hollow");
         flags.hollow = true;
         if (online) memberFlag("hollow");
         else loot([["mat_copper", 3], ["mat_leather", 1], ["cons_bandage", 1]]);
@@ -1588,6 +1594,16 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (r && remarked[id] !== r.key) {
         remarked[id] = r.key;
         lines = [r.line, ...lines];
+      } else if (!gossiped.has(id)) {
+        // otherwise they pass on one rumour of a hidden place, kept in the Journal
+        const rid = nextRumour(P.zone, codex.r, placeFound);
+        if (rid) {
+          gossiped.add(id);
+          codex.r.push(rid);
+          saveCodex(codexId, codex);
+          lines = [...lines, RUMOURS[rid].line];
+          end = () => say("Rumour noted · Journal → Places");
+        }
       }
     }
     openTalkLines(npc.def.name, npc.def.role, lines, end, trades);
@@ -3823,6 +3839,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     saveCodex(codexId, codex);
   }
   /** Re-reads what the character has earned; a newly reached rank is announced once. */
+  function foundPlace(id: string) {
+    if (codex.f.includes(id)) return;
+    codex.f.push(id);
+    saveCodex(codexId, codex);
+    if (RUMOURS[id]) showBanner("HIDDEN PLACE FOUND", RUMOURS[id].name);
+  }
   function checkMarks(fallen: number, quiet = false) {
     const x = { c: codex, deaths: fallen };
     marks = markBonuses(x);
@@ -3900,6 +3922,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }),
       deeds: DEEDS.map((d) => ({ id: d.id, name: d.name, text: d.text, done: codex.d.includes(d.id) })),
       marks: marksView({ c: codex, deaths }),
+      places: placesView(codex.r, placeFound),
     };
   }
   const RADAR_R = 46;

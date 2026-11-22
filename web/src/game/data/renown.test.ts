@@ -37,3 +37,18 @@ test("villagers say nothing to the unmarked and remark on the strongest mark", (
 test("every mark has something said about it", () => {
   assert.deepEqual([...REMARK_IDS].sort(), MARKS.map((m) => m.id).sort());
 });
+
+test("every cache has a rumour and rumours are told once, this land first", async () => {
+  const { RUMOURS, nextRumour, placesView } = await import("./renown.ts");
+  const { CACHE_DEFS } = await import("./world.ts");
+  assert.deepEqual(Object.keys(RUMOURS).sort(), CACHE_DEFS.filter((c) => c.id !== "chest").map((c) => c.id).sort());
+  for (const c of CACHE_DEFS) if (c.id !== "chest") assert.equal(RUMOURS[c.id].zone, c.zone, c.id);
+  const none = () => false;
+  assert.equal(nextRumour("hunt", [], none), "lodge_cellar");
+  assert.equal(nextRumour("hunt", ["lodge_cellar"], none), "hollow");
+  assert.equal(nextRumour("over", [], (id) => id === "hollow"), "mill_loft");
+  assert.equal(nextRumour("over", Object.keys(RUMOURS), none), null);
+  const v = placesView(["hollow"], (id) => id === "mill_loft");
+  assert.equal(v.find((p) => p.id === "hollow")?.heard, true);
+  assert.equal(v.find((p) => p.id === "mill_loft")?.found, true);
+});
