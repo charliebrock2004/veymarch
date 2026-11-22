@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { Batch, ChunkBatch, Scatter, boxUV, grassGeo, logGeo, merge, mushroomGeo, place, rockGeo, stumpGeo, tint, treeGeo, type Cullable } from "../../engine/kit";
+import { watery, Batch, ChunkBatch, Scatter, boxUV, grassGeo, logGeo, merge, mushroomGeo, place, rockGeo, stumpGeo, tint, treeGeo, type Cullable } from "../../engine/kit";
 import { fbm, lerp, noise2, rng, smoothPath, smoothstep } from "../../engine/noise";
 import { buildFieldTerrain } from "../../engine/terrain";
 import { glowTex, waterNormalTex } from "../../engine/textures";
@@ -392,7 +392,7 @@ export function buildMire(env: ZoneEnv): ZoneBuild {
     const d = B.maxZ - B.minZ + 80;
     const g = new THREE.PlaneGeometry(w, d, 1, 1);
     g.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshPhongMaterial({
+    const mat = watery(new THREE.MeshPhongMaterial({
       color: 0x18221a,
       specular: 0x6a7a6a,
       shininess: 90,
@@ -401,7 +401,7 @@ export function buildMire(env: ZoneEnv): ZoneBuild {
       transparent: true,
       opacity: 0.86,
       depthWrite: false,
-    });
+    }));
     const water = new THREE.Mesh(g, mat);
     water.position.set(X + (B.minX + B.maxX) / 2, WATER, (B.minZ + B.maxZ) / 2);
     water.renderOrder = 1;

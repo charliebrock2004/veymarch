@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { Batch, ChunkBatch, Scatter, bushGeo, flatten, type Cullable, fernGeo, flowerGeo, grassGeo, logGeo, mushroomGeo, prep, rockGeo, rootGeo, stumpGeo, tint, treeGeo, wheatGeo, type TreeKind } from "../engine/kit";
+import { watery, Batch, ChunkBatch, Scatter, bushGeo, flatten, type Cullable, fernGeo, flowerGeo, grassGeo, logGeo, mushroomGeo, prep, rockGeo, rootGeo, stumpGeo, tint, treeGeo, wheatGeo, type TreeKind } from "../engine/kit";
 import type { Mats } from "../engine/materials";
 import { distToPolyline, fbm, rng, smoothstep } from "../engine/noise";
 import { DOOR_H, buildTerrain, rawHeight, type Terrain } from "../engine/terrain";
@@ -151,6 +151,9 @@ export function buildOverworld(M: Mats, state: { gate: () => boolean }): Overwor
   const flat = (g: THREE.BufferGeometry, x: number, y: number, z: number, ry: number, sc: number, sy = sc) => clutter.add("flat", M.clutter, g, x, y, z, ry, sc, sy);
   scatters.push(fernSet);
   const grassSets = [0, 1].map((i) => new Scatter([{ geo: grassGeo(i + 21, 14, 0.34), mat: M.grass }], 48, 55));
+  // low, wide tufts that knit the taller clumps into one continuous sward
+  const meadow = new Scatter([{ geo: grassGeo(29, 16, 0.2, 1.15), mat: M.grass }], 48, 45);
+  grassSets.push(meadow);
 
   const blockedForTree = (x: number, z: number) => {
     const dv = Math.hypot(x - VILLAGE.x, z - VILLAGE.z);
@@ -246,6 +249,17 @@ export function buildOverworld(M: Mats, state: { gate: () => boolean }): Overwor
     const s = 0.75 + r() * 0.55;
     grassSets[i % 2].add(x, h(x, z) - 0.02, z, r() * 6, s, s * (0.8 + r() * 0.5));
   }
+  for (let i = 0; i < 30000; i++) {
+    const x = BOUNDS.minX + 10 + r() * (GATE.x - BOUNDS.minX - 14);
+    const z = BOUNDS.minZ + 8 + r() * (BOUNDS.maxZ - BOUNDS.minZ - 16);
+    if (terrain.pathAt(x, z) > 0.2 || terrain.waterAt(x, z) > 0.25) continue;
+    const near = Math.min(distToPolyline(x, z, PATH_MAIN), distToPolyline(x, z, PATH_EAST));
+    let keep = Math.hypot(x, z) < VILLAGE.r + 12 ? 0.9 : near < 14 ? 0.8 : 0.3;
+    for (const c of CLEARINGS) if (Math.hypot(x - c.x, z - c.z) < c.r + 4) keep = 0.95;
+    if (r() > keep) continue;
+    const s = 0.8 + r() * 0.6;
+    meadow.add(x, h(x, z) - 0.015, z, r() * 6, s, s * (0.7 + r() * 0.7));
+  }
 
   // giant roots arching over the main path
   const roots: THREE.BufferGeometry[] = [];
@@ -315,9 +329,9 @@ export function buildOverworld(M: Mats, state: { gate: () => boolean }): Overwor
   anchors.footbridge = new THREE.Vector3(fbx, fbY, fbz);
 
   // ------------------------------------------------------------ water
-  const waterMat = new THREE.MeshPhongMaterial({
+  const waterMat = watery(new THREE.MeshPhongMaterial({
     color: 0x3b3a28, specular: 0xfff0d0, shininess: 90, transparent: true, opacity: 0.86, normalMap: waterNormalTex(), normalScale: new THREE.Vector2(0.6, 0.6),
-  });
+  }));
   waterMat.normalMap!.repeat.set(1, 6);
   const water: THREE.Mesh[] = [];
   const ribbon = (pts: [number, number][], width: (i: number) => number, depth: number) => {

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
-import { ChunkBatch, Batch, Scatter, boxUV, bushGeo, flowerGeo, grassGeo, logGeo, prep, rockGeo, stumpGeo, tint, treeGeo, wheatGeo, type Cullable, type TreeKind } from "../../engine/kit";
+import { watery, ChunkBatch, Batch, Scatter, boxUV, bushGeo, flowerGeo, grassGeo, logGeo, prep, rockGeo, stumpGeo, tint, treeGeo, wheatGeo, type Cullable, type TreeKind } from "../../engine/kit";
 import { clamp, distToPolyline, fbm, lerp, noise2, rng, smoothPath, smoothstep } from "../../engine/noise";
 import { buildFieldTerrain } from "../../engine/terrain";
 import { bannerTex, signTex, waterNormalTex } from "../../engine/textures";
@@ -1301,9 +1301,9 @@ export function buildKingdom(env: ZoneEnv): ZoneBuild {
   layChain();
 
   // ------------------------------------------------------------ water: the marsh to the south
-  const waterMat = new THREE.MeshPhongMaterial({
+  const waterMat = watery(new THREE.MeshPhongMaterial({
     color: 0x1f2a1e, specular: 0x8a9a7a, shininess: 70, transparent: true, opacity: 0.9, normalMap: waterNormalTex(), normalScale: new THREE.Vector2(0.5, 0.5),
-  });
+  }));
   {
     const g = new THREE.PlaneGeometry(700, 340, 1, 1);
     g.rotateX(-Math.PI / 2);
@@ -1377,6 +1377,8 @@ export function buildKingdom(env: ZoneEnv): ZoneBuild {
   const clutter = new ChunkBatch(64, 110);
   const wheatSet = new Scatter([{ geo: wheatGeo(), mat: M.wheat }], 64, 130);
   const grassSets = [0, 1].map((i) => new Scatter([{ geo: grassGeo(i + 41, 14, 0.36), mat: M.grass }], 48, 55));
+  const meadow = new Scatter([{ geo: grassGeo(49, 16, 0.2, 1.15), mat: M.grass }], 48, 45);
+  grassSets.push(meadow);
   scatters.push(forest, clutter, wheatSet);
   const trees: Record<string, ReturnType<typeof treeGeo>[]> = {};
   for (const k of ["oak", "beech", "pine", "young"] as TreeKind[]) trees[k] = [0, 1].map((v) => treeGeo(k, v + 21));
@@ -1527,6 +1529,10 @@ export function buildKingdom(env: ZoneEnv): ZoneBuild {
     if (fbm(x * 0.15, z * 0.15, 2) < 0.36) continue;
     const s = 0.75 + r() * 0.55;
     grassSets[i % 2].add(W(x), hL(x, z) - 0.02, z, r() * 6, s, s * (0.8 + r() * 0.5));
+    for (let k = 0; k < 2; k++) {
+      const mx = x + (r() - 0.5) * 3, mz = z + (r() - 0.5) * 3;
+      if (rdAt(mx, mz) > 3.2 && !farm(mx, mz)) meadow.add(W(mx), hL(mx, mz) - 0.015, mz, r() * 6, 0.8 + r() * 0.6, 0.6 + r() * 0.7);
+    }
   }
 
   // ------------------------------------------------------------ finish the static meshes

@@ -437,7 +437,7 @@ export function fernGeo() {
 }
 
 /** A clump of grass blades: plain triangles, coloured base-to-tip, normals up so they light like the ground. */
-export function grassGeo(seed: number, blades = 7, height = 0.55) {
+export function grassGeo(seed: number, blades = 7, height = 0.55, spread = 0.5) {
   const r = rng(seed);
   const pos: number[] = [];
   const col: number[] = [];
@@ -451,7 +451,7 @@ export function grassGeo(seed: number, blades = 7, height = 0.55) {
   const n = Math.round(blades * 1.5);
   for (let i = 0; i < n; i++) {
     const a = r() * Math.PI * 2;
-    const d = Math.sqrt(r()) * 0.5;
+    const d = Math.sqrt(r()) * spread;
     const x = Math.cos(a) * d;
     const z = Math.sin(a) * d;
     const w = 0.028 + r() * 0.026;
@@ -733,4 +733,29 @@ export function installHeightFog() {
 	#endif
 	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
 #endif`;
+}
+
+/**
+ * Water that mirrors the sky at grazing angles and stays clear when looked straight down into:
+ * a fresnel blend toward the horizon colour, with the surface turning opaque as it reflects.
+ */
+export function watery<T extends THREE.Material>(mat: T): T {
+  const prev = mat.onBeforeCompile;
+  const prevKey = mat.customProgramCacheKey;
+  mat.onBeforeCompile = (shader, renderer) => {
+    prev?.call(mat, shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace(
+      "#include <opaque_fragment>",
+      `{
+        float wf = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 3.0);
+        #ifdef USE_FOG
+          outgoingLight = mix(outgoingLight, fogColor * 1.04 + vec3(0.015, 0.025, 0.045), wf * 0.8);
+        #endif
+        diffuseColor.a = mix(diffuseColor.a, 1.0, wf);
+      }
+      #include <opaque_fragment>`,
+    );
+  };
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ""}|water`;
+  return mat;
 }
