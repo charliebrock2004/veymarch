@@ -3,6 +3,7 @@ import type { Decal, Shape } from "../engine/fx";
 import {
   Poser, buildHuman, buildQuad, buildRockingHorse, characterMaterial, poseHorse, poseHuman, poseQuad, type HumanAction, type QuadAction, type Rig,
 } from "../engine/rig";
+import { ModelActor, loadModel, modelReady, type ModelTemplate } from "../engine/models";
 import { MOB_LOOT } from "../content";
 import { SILENT, type Env, type PlayerState } from "./env";
 import type { ZoneId } from "../data/zones";
@@ -690,7 +691,16 @@ export const MOB_KINDS: MobKind[] = [
 /** ax, az: where an aimed attack (a witch's hex) lands; sent only while one is told or struck. */
 export type MobSnap = [key: string, x: number, z: number, yaw: number, st: number, hp: number, atk: number, t: number, kind: number, ax?: number, az?: number];
 
+/** Foes drawn from a modelled, clip-animated glTF instead of the procedural rig. */
+const MODELS: Partial<Record<MobKind, string[]>> = {
+  skeleton: ["/models/skeleton_minion.glb", "/models/skeleton_warrior.glb", "/models/skeleton_rogue.glb"],
+};
+// height of the stock model once its head is shrunk to the game's proportions
+const MODEL_HEIGHT = 1.72;
+
 export class Mob {
+  actor: ModelActor | null = null;
+  private swing = "1H_Melee_Attack_Chop";
   id = nextId++;
   cfg: Cfg;
   rig: Rig;
@@ -760,6 +770,42 @@ export class Mob {
     env.parent(zone).add(this.rig.group);
     this.y = env.groundAt(this.x, this.z);
     this.rig.group.position.set(this.x, this.y, this.z);
+    const urls = MODELS[kind];
+    if (urls) {
+      const url = urls[this.id % urls.length];
+      const tpl = modelReady(url);
+      if (tpl) this.wear(tpl);
+      else loadModel(url).then((t) => this.wear(t), () => {});
+    }
+  }
+
+  /** Swap the procedural body for the loaded model; the foe's weapon moves to the model's hand. */
+  private wear(tpl: ModelTemplate) {
+    const g = this.rig.group;
+    const held = this.rig.sockets.gripR?.children[0];
+    for (const c of g.children) c.visible = false;
+    const actor = new ModelActor(tpl, this.cfg.height / MODEL_HEIGHT, 0.58, 0xb8b0a0);
+    const hand = actor.node("handslotr") ?? actor.node("handslot.r");
+    if (held && hand) {
+      held.scale.multiplyScalar(MODEL_HEIGHT / this.cfg.height);
+      hand.add(held);
+    }
+    g.add(actor.root);
+    this.actor = actor;
+  }
+
+  private animateModel(a: ModelActor, dt: number, k: number) {
+    a.flash(this.flash > 0);
+    if (this.state === "dead") a.pose("Death_A", dt, Math.min(1, this.deadT / a.duration("Death_A")), 1, 20);
+    else if (this.state === "stagger") a.pose("Hit_A", dt, Math.min(1, 1 - this.t / 0.7), 1, 20);
+    else if (this.state === "tell") a.pose(this.swing, dt, k * 0.42, 1, 14);
+    else if (this.state === "active") a.pose(this.swing, dt, 0.42 + k * 0.38, 1, 30);
+    else {
+      if (this.state === "recover") this.swing = this.id % 2 ? "1H_Melee_Attack_Slice_Diagonal" : Math.random() < 0.5 ? "1H_Melee_Attack_Chop" : "1H_Melee_Attack_Stab";
+      if (this.speed > this.cfg.run * 0.75) a.pose("Running_A", dt, undefined, this.speed / 4.2);
+      else if (this.speed > 0.25) a.pose("Walking_D_Skeletons", dt, undefined, this.speed / 1.5);
+      else a.pose(this.aggro ? "Idle_Combat" : "Idle", dt, undefined, 1, 5);
+    }
   }
 
   get max() {
@@ -1292,6 +1338,7 @@ export class Mob {
     }
     const poser = this.poser!;
     const k = this.atk && this.state === "tell" ? 1 - Math.max(0, this.t) / this.atk.tell : this.atk && this.state === "active" ? 1 - Math.max(0, this.t) / this.atk.active : 0;
+    if (this.actor) return this.animateModel(this.actor, dt, k);
     if (QUADS.has(this.kind)) {
       let action: QuadAction = "none";
       let at = 0;
