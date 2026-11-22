@@ -1,7 +1,8 @@
 import * as THREE from "three";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { GTAOPass } from "three/examples/jsm/postprocessing/GTAOPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { TexturePass } from "three/examples/jsm/postprocessing/TexturePass.js";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 
@@ -85,7 +86,17 @@ const GradeShader = {
  */
 export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }));
-  composer.addPass(new RenderPass(scene, camera));
+  // the scene is drawn once into its own multisampled target, whose depth feeds the ambient occlusion
+  const depth = new THREE.DepthTexture(1, 1);
+  const sceneRT = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4, depthTexture: depth });
+  const input = new TexturePass(sceneRT.texture);
+  composer.addPass(input);
+  const ao = new GTAOPass(scene, camera, 1, 1);
+  ao.setGBuffer(depth);
+  ao.updateGtaoMaterial({ radius: 0.55, distanceExponent: 1.4, thickness: 1.2, scale: 1.15, samples: 12, distanceFallOff: 1, screenSpaceRadius: false });
+  ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 8 });
+  ao.blendIntensity = 0.85;
+  composer.addPass(ao);
   const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), DEFAULT_GRADE.bloom, 0.62, 0.8);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
@@ -99,8 +110,9 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
   let bloomScale = 0.5;
   return {
     enabled: false,
-    /** Medium runs a lighter chain: quarter-res bloom, no light shafts. */
+    /** Medium runs a lighter chain: quarter-res bloom, no light shafts, no ambient occlusion. */
     setLite(lite: boolean) {
+      ao.enabled = !lite;
       bloomScale = lite ? 0.25 : 0.5;
       u.uSharp.value = lite ? 0.2 : 0.35;
       this.lite = lite;
@@ -115,6 +127,8 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
     setSize(w: number, h: number, pr: number) {
       composer.setPixelRatio(pr);
       composer.setSize(w, h);
+      sceneRT.setSize(Math.floor(w * pr), Math.floor(h * pr));
+      ao.setSize(Math.floor(w * pr * 0.5), Math.floor(h * pr * 0.5));
       bloom.resolution.set(w * pr * bloomScale, h * pr * bloomScale);
       u.uPx.value.set(1 / (w * pr), 1 / (h * pr));
     },
@@ -137,6 +151,9 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
       u.uFlash.value = flash;
       u.uRays.value += (rays - u.uRays.value) * Math.min(1, dt * 3);
       u.uTime.value = (u.uTime.value + dt) % 100;
+      renderer.setRenderTarget(sceneRT);
+      renderer.render(scene, camera);
+      renderer.setRenderTarget(null);
       composer.render(dt);
     },
   };

@@ -708,3 +708,29 @@ export function flatten(group: THREE.Object3D, mat: THREE.Material) {
 }
 
 export const rand = { range, rng };
+
+/**
+ * Height fog for every fogged material: air thickens below eye level and thins above it,
+ * so mist pools in hollows while hilltops, towers and treetops stand clear of it.
+ */
+export function installHeightFog() {
+  THREE.ShaderChunk.fog_pars_vertex = `#ifdef USE_FOG
+	varying float vFogDepth;
+	varying float vFogRise;
+#endif`;
+  THREE.ShaderChunk.fog_vertex = `#ifdef USE_FOG
+	vFogDepth = - mvPosition.z;
+	vFogRise = dot(mvPosition.xyz, vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
+#endif`;
+  THREE.ShaderChunk.fog_pars_fragment = THREE.ShaderChunk.fog_pars_fragment.replace("varying float vFogDepth;", "varying float vFogDepth;\n\tvarying float vFogRise;");
+  THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
+	#ifdef FOG_EXP2
+		float fogH = mix(0.62, 1.45, exp(-max(0.0, vFogRise * 0.5 + 4.0) * 0.16));
+		float fogD = vFogDepth * fogH;
+		float fogFactor = 1.0 - exp( - fogDensity * fogDensity * fogD * fogD );
+	#else
+		float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+	#endif
+	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+#endif`;
+}

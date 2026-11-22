@@ -12,7 +12,7 @@ import { Audio } from "./engine/audio";
 import type { ThemeId } from "./engine/music";
 import { armourCode, armourLook } from "./play/gear";
 import { Beam, DecalPool, Flashes } from "./engine/fx";
-import { shared } from "./engine/kit";
+import { installHeightFog, shared } from "./engine/kit";
 import { makeMaterials } from "./engine/materials";
 import { Particles, buildGlows } from "./engine/particles";
 import { Poser, buildHuman, poseHuman, type ArmourLook, type HumanAction, type HumanLook, type Rig } from "./engine/rig";
@@ -244,6 +244,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   // ------------------------------------------------------------ renderer and scene
   const isTouch = matchMedia("(pointer: coarse)").matches;
   let quality: Quality = (localStorage.getItem("veyrmarch.quality") as Quality) || (isTouch ? "medium" : "high");
+  installHeightFog();
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: quality !== "low", powerPreference: "high-performance", stencil: false });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -258,12 +259,18 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const hemi = new THREE.HemisphereLight(0xc8d0d8, 0x4e4434, 1.0);
   const sun = new THREE.DirectionalLight(0xffd2a0, 2.6);
   sun.castShadow = quality !== "low";
-  sun.shadow.mapSize.set(quality === "high" ? 2048 : 1024, quality === "high" ? 2048 : 1024);
+  sun.shadow.mapSize.set(quality === "high" ? 4096 : 1024, quality === "high" ? 4096 : 1024);
   const sc = sun.shadow.camera;
-  sc.left = -34;
-  sc.right = 34;
-  sc.top = 34;
-  sc.bottom = -34;
+  // High quality throws shadows across a 110 m square; lower settings keep the tighter 68 m one
+  const shadowSpan = () => {
+    const r = quality === "high" ? 55 : 34;
+    sc.left = -r;
+    sc.right = r;
+    sc.top = r;
+    sc.bottom = -r;
+    sc.updateProjectionMatrix();
+  };
+  shadowSpan();
   sc.near = 1;
   sc.far = 220;
   sun.shadow.bias = -0.0006;
@@ -2395,7 +2402,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     post.setGrade(mode === "title" || mode === "create" ? DEFAULT_GRADE : (ZONE_GRADES[P.zone] ?? DEFAULT_GRADE));
     const fx = mode === "play" || mode === "bag" || mode === "talk" || mode === "dead" || mode === "reward" || mode === "end" ? P.x : camera.position.x;
     const fz = mode === "play" || mode === "bag" || mode === "talk" || mode === "dead" || mode === "reward" || mode === "end" ? P.z : camera.position.z;
-    const snap = 68 / (quality === "high" ? 2048 : 1024);
+    const snap = quality === "high" ? 110 / 4096 : 68 / 1024;
     const sx = Math.round(fx / snap) * snap;
     const sz = Math.round(fz / snap) * snap;
     sun.target.position.set(sx, 0, sz);
@@ -4154,7 +4161,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       renderer.shadowMap.enabled = q !== "low";
       sun.castShadow = q !== "low";
       renderer.shadowMap.type = q === "high" ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
-      const size = q === "high" ? 2048 : 1024;
+      const size = q === "high" ? 4096 : 1024;
+      shadowSpan();
       if (sun.shadow.mapSize.x !== size) {
         sun.shadow.mapSize.set(size, size);
         sun.shadow.map?.dispose();
