@@ -156,7 +156,7 @@ Scores are 1 to 5. For difficulty, time and performance cost, 1 is easiest, shor
 | Stage | Contents | State |
 | --- | --- | --- |
 | 1 | Marks: data, combat hooks, Journal tab, banner, tests | Built |
-| 2 | Villager reactions, perfect-dodge slow motion, bestiary ranks | Next |
+| 2 | Villager reactions, perfect-dodge slow motion, bestiary ranks | Built |
 | 3 | Cold open, rumours, one hidden place in Hearthfen and the Hunt | |
 | 4 | Marks on the body, character card, trophy hall | |
 | 5 | Naming the dead, mining gates, rematches | |

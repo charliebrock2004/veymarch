@@ -5,6 +5,9 @@
 ### Marks: no class, only evidence
 
 - Ten marks with three ranks each, earned by what a character actually does (kills by kind, parries, rolls through attacks, falls, bosses, crafting, lands walked). Each rank makes them better at the thing that earned it. Shown with progress in a new Marks tab of the Journal and announced by a banner. Existing characters are marked from the record they already have.
+- Villagers remark on your strongest mark the first time they see it (30 lines, one per mark and rank), ahead of their usual line. Quest talk is left alone.
+- A roll that passes through a blow slows the world for under half a second.
+- Bestiary ranks: Known at one kill, Studied at 10 (health, fire weakness, spoils), Mastered at 50 (every blow and its warning time). A beaten boss is fully known.
 - Game direction review, 40 ideas, priorities and staged plan: Docs/programme/GAME_DIRECTION.md.
 
 ### Phase 2: the RPG (web, in progress)

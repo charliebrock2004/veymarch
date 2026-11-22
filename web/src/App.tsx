@@ -965,10 +965,22 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
               <div key={b.id} className={`vm-quest ${b.boss ? "main" : ""} ${b.seen ? "" : "done"}`}>
                 <b>
                   {b.seen ? b.name : "? ? ?"}
-                  {b.kills > 0 && <em>×{b.kills}</em>}
+                  {b.kills > 0 && (
+                    <em>
+                      {["", "", "Known", "Studied", "Mastered"][b.rank]} ×{b.kills}
+                    </em>
+                  )}
                 </b>
                 <span>{b.kills > 0 ? b.lore : b.seen ? "Seen, not yet beaten. Kill one to learn its ways." : "Not yet met."}</span>
-                {b.seen && <small>{b.where}</small>}
+                {b.notes.map((n) => (
+                  <span key={n}>{n}</span>
+                ))}
+                {b.seen && (
+                  <small>
+                    {b.where}
+                    {b.next && " · " + b.next}
+                  </small>
+                )}
               </div>
             ))}
           </div>

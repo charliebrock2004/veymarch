@@ -38,6 +38,7 @@ import { weaponModel } from "./play/weapons";
 import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Realm, StackJson } from "../net/realm";
 import { Room, type Bundle, type Ev } from "../net/room";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
+import { remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
 import { MARKS, RANK_NAMES, markBonuses, markBoon, markRank, markVs, marksView, type MarkView } from "./data/marks.ts";
 
 // ------------------------------------------------------------------ public types
@@ -135,7 +136,7 @@ export type Hud = {
   /** minimap: [right, ahead, kind] in metres around the player, turned with the camera */
   radar: { r: number; pts: [number, number, string][] } | null;
   /** bestiary and deeds, filled while the journal is open */
-  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; marks: MarkView[] } | null;
+  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean; rank: number; notes: string[]; next: string }[]; deeds: { id: string; name: string; text: string; done: boolean }[]; marks: MarkView[] } | null;
   /** a one-time hint */
   tip: { text: string; at: number } | null;
   /** a gamepad is driving */
@@ -604,6 +605,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let lookT = 10;
   let shake = 0;
   let hitStop = 0;
+  /** the world slows for a moment after a roll passes through a blow */
+  let slowT = 0;
+  /** what each villager last remarked on, so they do not repeat themselves */
+  const remarked: Record<string, string> = {};
   const camPos = new THREE.Vector3(0, 8, -40);
   const camTgt = new THREE.Vector3();
 
@@ -1577,6 +1582,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     else if (npc.def.after && (worldFlags[npc.def.after.flag] || (flags as Record<string, boolean>)[npc.def.after.flag])) lines = pick(npc.def.after.lines);
     else if (npc.def.lines?.length) lines = pick(npc.def.lines);
     else lines = pick(L.villager);
+    // people notice what the March has made of you, once per change
+    if (!end && lines.length === 1) {
+      const r = remark(marksView({ c: codex, deaths }));
+      if (r && remarked[id] !== r.key) {
+        remarked[id] = r.key;
+        lines = [r.line, ...lines];
+      }
+    }
     openTalkLines(npc.def.name, npc.def.role, lines, end, trades);
   }
 
@@ -2023,6 +2036,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         if (performance.now() - dodgedAt > 600) {
           dodgedAt = performance.now();
           codex.dodges++;
+          slowT = 0.45;
           checkDeeds();
         }
       }
@@ -2993,6 +3007,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (hitStop > 0) {
       hitStop -= rdt;
       dt = rdt * 0.08;
+    } else if (slowT > 0) {
+      slowT -= rdt;
+      dt = rdt * 0.35;
     }
     {
       const zb = zoneBoss();
@@ -3873,7 +3890,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
   function codexView(): NonNullable<Hud["codex"]> {
     return {
-      beasts: Object.entries(BEASTS).map(([id, b]) => ({ id, name: b.name, where: b.where, lore: b.lore, kills: codex.k[id] ?? 0, seen: !!codex.k[id] || codex.s.includes(id), boss: !!b.boss })),
+      beasts: Object.entries(BEASTS).map(([id, b]) => {
+        const kills = codex.k[id] ?? 0;
+        const seen = kills > 0 || codex.s.includes(id);
+        const rank = studyRank(kills, seen, !!b.boss);
+        const d = (MOBS as Record<string, (typeof MOBS)[MobKind] | undefined>)[id];
+        const facts = d && { hp: d.hp, fireWeak: d.fireWeak, loot: [...new Set(d.loot.map((l) => item(l[0])?.name ?? l[0]))], attacks: d.attacks.map((a) => ({ name: a.name, tell: a.tell })) };
+        return { id, name: b.name, where: b.where, lore: b.lore, kills, seen, boss: !!b.boss, rank, notes: studyNotes(rank, facts), next: studyNext(rank, kills) };
+      }),
       deeds: DEEDS.map((d) => ({ id: d.id, name: d.name, text: d.text, done: codex.d.includes(d.id) })),
       marks: marksView({ c: codex, deaths }),
     };
