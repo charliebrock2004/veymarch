@@ -694,6 +694,8 @@ export type MobSnap = [key: string, x: number, z: number, yaw: number, st: numbe
 /** Foes drawn from a modelled, clip-animated glTF instead of the procedural rig. */
 const MODELS: Partial<Record<MobKind, string[]>> = {
   skeleton: ["/models/skeleton_minion.glb", "/models/skeleton_warrior.glb", "/models/skeleton_rogue.glb"],
+  necromancer: ["/models/skeleton_mage.glb"],
+  undead_knight: ["/models/skeleton_warrior.glb"],
 };
 // height of the stock model once its head is shrunk to the game's proportions
 const MODEL_HEIGHT = 1.72;
@@ -798,10 +800,12 @@ export class Mob {
     a.flash(this.flash > 0);
     if (this.state === "dead") a.pose("Death_A", dt, Math.min(1, this.deadT / a.duration("Death_A")), 1, 20);
     else if (this.state === "stagger") a.pose("Hit_A", dt, Math.min(1, 1 - this.t / 0.7), 1, 20);
+    else if (this.state === "tell" && this.atk?.tellPose === "cast") a.pose("Spellcast_Raise", dt, k * 0.9, 1, 14);
+    else if (this.state === "active" && this.atk?.tellPose === "cast") a.pose("Spellcast_Shoot", dt, 0.15 + k * 0.5, 1, 30);
     else if (this.state === "tell") a.pose(this.swing, dt, k * 0.42, 1, 14);
     else if (this.state === "active") a.pose(this.swing, dt, 0.42 + k * 0.38, 1, 30);
     else {
-      if (this.state === "recover") this.swing = this.id % 2 ? "1H_Melee_Attack_Slice_Diagonal" : Math.random() < 0.5 ? "1H_Melee_Attack_Chop" : "1H_Melee_Attack_Stab";
+      if (this.state === "recover") this.swing = this.kind === "undead_knight" ? "2H_Melee_Attack_Chop" : this.id % 2 ? "1H_Melee_Attack_Slice_Diagonal" : Math.random() < 0.5 ? "1H_Melee_Attack_Chop" : "1H_Melee_Attack_Stab";
       if (this.speed > this.cfg.run * 0.75) a.pose("Running_A", dt, undefined, this.speed / 4.2);
       else if (this.speed > 0.25) a.pose("Walking_D_Skeletons", dt, undefined, this.speed / 1.5);
       else a.pose(this.aggro ? "Idle_Combat" : "Idle", dt, undefined, 1, 5);
