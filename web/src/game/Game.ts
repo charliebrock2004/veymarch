@@ -40,8 +40,8 @@ import { Room, type Bundle, type Ev } from "../net/room";
 import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
 import { BOUNTIES, FINDS, pickBounties, type Find } from "./data/explore";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
-import { RUMOURS, cardView, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
-import type { Card, PlaceView } from "./data/renown.ts";
+import { RUMOURS, cardView, charmKey, charms, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
+import type { Card, Charm, PlaceView } from "./data/renown.ts";
 import { MARKS, RANK_NAMES, markBonuses, markBoon, markRank, markVs, marksView, type MarkView } from "./data/marks.ts";
 
 // ------------------------------------------------------------------ public types
@@ -859,7 +859,55 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       heldOff?.parent?.remove(heldOff);
       heldMain = heldOff = null;
       syncGear();
+      beltKey = "";
+      syncBelt();
     }, () => {});
+  }
+
+  let belt: THREE.Group | null = null;
+  let beltKey = "";
+  function charmMesh(c: Charm): THREE.Mesh {
+    const g =
+      c.shape === "fang" || c.shape === "horn" ? new THREE.ConeGeometry(0.022, 0.09, 6)
+      : c.shape === "bone" || c.shape === "awl" ? new THREE.CylinderGeometry(0.01, 0.014, 0.1, 6)
+      : c.shape === "coin" ? new THREE.CylinderGeometry(0.032, 0.032, 0.008, 12).rotateX(Math.PI / 2)
+      : c.shape === "cog" ? new THREE.TorusGeometry(0.026, 0.01, 4, 8)
+      : c.shape === "ring" ? new THREE.TorusGeometry(0.026, 0.006, 6, 14)
+      : c.shape === "feather" ? new THREE.ConeGeometry(0.016, 0.12, 4).scale(1, 1, 0.3)
+      : c.shape === "stone" ? new THREE.DodecahedronGeometry(0.028)
+      : new THREE.SphereGeometry(0.03, 8, 6).scale(1, 0.8, 0.5);
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: c.color, roughness: 0.6, metalness: c.shape === "coin" || c.shape === "ring" || c.shape === "cog" ? 0.7 : 0, emissive: c.glow ? 0xf0cf7a : 0, emissiveIntensity: c.glow ? 0.55 : 0 }));
+    if (c.shape === "fang" || c.shape === "horn" || c.shape === "feather") m.rotation.x = Math.PI;
+    m.scale.multiplyScalar(c.size);
+    return m;
+  }
+  /** Strings one charm per earned mark round the player's shoulders. */
+  function syncBelt() {
+    const hips = playerActor?.node("chest");
+    if (!hips || !playerActor) return;
+    const cs = charms(marksView({ c: codex, deaths }));
+    const key = charmKey(cs);
+    if (key === beltKey && belt?.parent === hips) return;
+    beltKey = key;
+    belt?.parent?.remove(belt);
+    belt = new THREE.Group();
+    belt.name = "mark_belt";
+    belt.scale.setScalar(1 / playerActor.root.scale.x);
+    cs.forEach((c, i) => {
+      // strung round the shoulders, outside the cloak, so they show from behind as well
+      const a = (i / Math.max(cs.length, 6)) * Math.PI * 2 + Math.PI;
+      const mesh = charmMesh(c);
+      mesh.scale.multiplyScalar(2.3);
+      mesh.position.set(Math.sin(a) * 0.39, 0.08, Math.cos(a) * 0.35);
+      mesh.rotation.y = a;
+      belt!.add(mesh);
+    });
+    if (cs.length) {
+      const cord = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.008, 5, 28).rotateX(Math.PI / 2).scale(1.06, 1, 0.95), new THREE.MeshStandardMaterial({ color: 0x4a3524, roughness: 0.9 }));
+      cord.position.y = 0.16;
+      belt.add(cord);
+    }
+    hips.add(belt);
   }
 
   function hasEdge() {
@@ -4185,6 +4233,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       codex.m[m.id] = r;
       if (!quiet) markQueue.push([`${m.name} ${RANK_NAMES[r]}`, markBoon(m, r)]);
     }
+    syncBelt();
   }
   function noteKill(kind: string) {
     if (!BEASTS[kind]) return noteBounty(kind);

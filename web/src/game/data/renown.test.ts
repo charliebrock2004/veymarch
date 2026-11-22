@@ -67,3 +67,17 @@ test("the March names you after your strongest mark", async () => {
   assert.deepEqual(card.lines[1], ["Mark ranks", "3/30"]);
   assert.deepEqual(card.lines[8], ["Hidden places", "2/11"]);
 });
+
+test("each earned mark hangs a charm on the belt, bigger by rank", async () => {
+  const { CHARM_IDS, charmKey, charms } = await import("./renown.ts");
+  assert.deepEqual([...CHARM_IDS].sort(), MARKS.map((m) => m.id).sort());
+  const c = freshCodex();
+  assert.deepEqual(charms(marksView({ c, deaths: 0 })), []);
+  c.k.wolf = 200;
+  c.parries = 8;
+  const out = charms(marksView({ c, deaths: 0 }));
+  assert.equal(charmKey(out), "beast3,hand1");
+  assert.equal(out[0].glow, true);
+  assert.equal(out[1].glow, false);
+  assert.ok(out[0].size > out[1].size);
+});

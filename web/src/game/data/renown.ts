@@ -122,3 +122,27 @@ export function cardView(marks: MarkView[], r: { level: number; kills: number; d
     ],
   };
 }
+
+/** What each mark strings round your shoulders once earned. Size and glow follow the rank. */
+export type Charm = { id: string; rank: number; shape: "fang" | "bone" | "coin" | "cog" | "ring" | "feather" | "stone" | "horn" | "awl" | "shell"; color: number; size: number; glow: boolean };
+const CHARMS: Record<string, [Charm["shape"], number]> = {
+  beast: ["fang", 0xe8e0c8],
+  grave: ["bone", 0xcfc8b0],
+  men: ["coin", 0xc9a23a],
+  toys: ["cog", 0xb8b8c4],
+  hand: ["ring", 0x8fa6b8],
+  step: ["feather", 0xdfe6ee],
+  buried: ["stone", 0x6d6a66],
+  warden: ["horn", 0x8a5a2c],
+  maker: ["awl", 0xb07a48],
+  way: ["shell", 0xe6c9b0],
+};
+export const CHARM_IDS = Object.keys(CHARMS);
+
+export function charms(marks: MarkView[]): Charm[] {
+  return marks
+    .filter((m) => m.rank > 0 && CHARMS[m.id])
+    .map((m) => ({ id: m.id, rank: m.rank, shape: CHARMS[m.id][0], color: CHARMS[m.id][1], size: 0.75 + m.rank * 0.25, glow: m.rank >= 3 }));
+}
+/** A short key that changes only when the string should be rebuilt. */
+export const charmKey = (c: Charm[]) => c.map((x) => x.id + x.rank).join(",");
