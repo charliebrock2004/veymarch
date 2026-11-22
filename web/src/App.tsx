@@ -231,6 +231,7 @@ function SettingsBody({ hud, api, extra }: { hud: Hud; api: GameApi; extra?: Rea
           Touch: left thumb moves (push to the edge to run), right thumb drags the view. Tap the sword for quick strikes, hold it for a heavy blow. Roll with the arrow. Hold the shield to block; block just as a blow lands to parry.
         </p>
         <p>Keyboard: WASD move, Shift run, mouse drag look, J or click attack (hold for heavy), Space roll, F block, Q Ember, E interact, H bandage, I bag, Esc pause.</p>
+        <p>Gamepad{hud.pad ? " (connected)" : ""}: left stick move, right stick look, X or RB attack (hold for heavy), A roll, LB block, Y interact, LT Ember, D-pad up bandage, Back bag, Start pause.</p>
       </div>
     </div>
   );
@@ -345,6 +346,76 @@ function Compass({ hud }: { hud: Hud }) {
   );
 }
 
+const RADAR_COLOR: Record<string, string> = { m: "#d8473a", e: "#ff8a3a", b: "#ff3a2a", a: "#b9a98a", n: "#e7c35a", s: "#7fc4e8", p: "#c9b8ff", f: "#7fe08a", o: "#ffd66a" };
+
+/** A round minimap that turns with the camera: foes, people, shrines, roads out and the goal. */
+function Minimap({ hud }: { hud: Hud }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const radar = hud.radar;
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv || !radar) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const size = cv.clientWidth || 120;
+    if (cv.width !== size * dpr) cv.width = cv.height = size * dpr;
+    const g = cv.getContext("2d");
+    if (!g) return;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, size, size);
+    const c = size / 2;
+    const k = (c - 7) / radar.r;
+    g.beginPath();
+    g.arc(c, c, c - 1.5, 0, Math.PI * 2);
+    g.fillStyle = "rgba(18,15,12,0.62)";
+    g.fill();
+    g.strokeStyle = "rgba(231,220,200,0.08)";
+    g.lineWidth = 1;
+    for (const f of [0.33, 0.66]) {
+      g.beginPath();
+      g.arc(c, c, (c - 7) * f, 0, Math.PI * 2);
+      g.stroke();
+    }
+    // north tick
+    const na = hud.camYaw;
+    g.fillStyle = "rgba(231,220,200,0.75)";
+    g.font = "bold 9px Georgia, serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("N", c + Math.sin(na) * (c - 8), c - Math.cos(na) * (c - 8));
+    for (const [x, y, t] of radar.pts) {
+      const px = c + x * k;
+      const py = c - y * k;
+      g.fillStyle = RADAR_COLOR[t] ?? "#fff";
+      g.beginPath();
+      if (t === "o") {
+        g.moveTo(px, py - 5);
+        g.lineTo(px + 4, py);
+        g.lineTo(px, py + 5);
+        g.lineTo(px - 4, py);
+        g.closePath();
+      } else if (t === "s" || t === "p") g.rect(px - 2.5, py - 2.5, 5, 5);
+      else g.arc(px, py, t === "b" ? 4.5 : t === "e" ? 3.4 : t === "a" ? 1.8 : 2.5, 0, Math.PI * 2);
+      g.fill();
+    }
+    // the player: an arrow pointing where the camera looks
+    g.fillStyle = "#f4ead8";
+    g.beginPath();
+    g.moveTo(c, c - 6);
+    g.lineTo(c + 4.5, c + 4.5);
+    g.lineTo(c, c + 2);
+    g.lineTo(c - 4.5, c + 4.5);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = "rgba(215,164,65,0.55)";
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.arc(c, c, c - 1.5, 0, Math.PI * 2);
+    g.stroke();
+  }, [radar, hud.camYaw]);
+  if (!radar) return null;
+  return <canvas ref={ref} className="vm-minimap" aria-label="Minimap" />;
+}
+
 function Bar({ v, max, kind }: { v: number; max: number; kind: string }) {
   return (
     <div className={`vm-vbar ${kind}`}>
@@ -448,7 +519,14 @@ function Play({ api, hud }: { api: GameApi; hud: Hud }) {
             <Glyph name="menu" size={24} />
           </button>
         </div>
+        {!hud.boss && <Minimap hud={hud} />}
       </div>
+      {hud.tip && hud.mode === "play" && (
+        <div className="vm-tip" key={hud.tip.at}>
+          <b>Hint</b>
+          {hud.tip.text}
+        </div>
+      )}
       {hud.bossLine && (
         <div className="vm-bossline" key={hud.bossLine.at}>
           “{hud.bossLine.text}”
@@ -807,6 +885,9 @@ function TravelMap({ api, hud }: { api: GameApi; hud: Hud }) {
 function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
   const live = hud.journal.filter((j) => !j.done);
   const done = hud.journal.filter((j) => j.done);
+  const [tab, setTab] = useState<"quests" | "beasts" | "deeds">("quests");
+  const beasts = hud.codex?.beasts ?? [];
+  const deeds = hud.codex?.deeds ?? [];
   return (
     <div className="vm-panel-screen">
       <div className="vm-panel wide">
@@ -816,7 +897,45 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
             <Glyph name="close" size={22} />
           </button>
         </div>
-        <div className="vm-journal vm-scroll">
+        <div className="vm-tabs">
+          <button className={tab === "quests" ? "on" : ""} onClick={() => setTab("quests")}>
+            Quests <em>{live.length}</em>
+          </button>
+          <button className={tab === "beasts" ? "on" : ""} onClick={() => setTab("beasts")}>
+            Bestiary <em>{beasts.filter((b) => b.kills > 0).length}/{beasts.length}</em>
+          </button>
+          <button className={tab === "deeds" ? "on" : ""} onClick={() => setTab("deeds")}>
+            Deeds <em>{deeds.filter((d) => d.done).length}/{deeds.length}</em>
+          </button>
+        </div>
+        {tab === "beasts" && (
+          <div className="vm-journal vm-scroll">
+            {beasts.map((b) => (
+              <div key={b.id} className={`vm-quest ${b.boss ? "main" : ""} ${b.seen ? "" : "done"}`}>
+                <b>
+                  {b.seen ? b.name : "? ? ?"}
+                  {b.kills > 0 && <em>×{b.kills}</em>}
+                </b>
+                <span>{b.kills > 0 ? b.lore : b.seen ? "Seen, not yet beaten. Kill one to learn its ways." : "Not yet met."}</span>
+                {b.seen && <small>{b.where}</small>}
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "deeds" && (
+          <div className="vm-journal vm-scroll">
+            {deeds.map((d) => (
+              <div key={d.id} className={`vm-quest ${d.done ? "main" : "done"}`}>
+                <b>
+                  {d.name}
+                  {d.done && <em>Done</em>}
+                </b>
+                <span>{d.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "quests" && <div className="vm-journal vm-scroll">
           {live.length === 0 && <p className="vm-sub">No open quests. People in towns have work; talk to them.</p>}
           {live.map((j) => (
             <div key={j.id} className={`vm-quest ${j.main ? "main" : ""}`}>
@@ -833,7 +952,7 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
               <b>{j.name}</b>
             </div>
           ))}
-        </div>
+        </div>}
       </div>
     </div>
   );

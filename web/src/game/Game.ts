@@ -36,6 +36,7 @@ import { RemotePlayer, type NetPlayer } from "./play/remote";
 import { weaponModel } from "./play/weapons";
 import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Realm, StackJson } from "../net/realm";
 import { Room, type Bundle, type Ev } from "../net/room";
+import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
 
 // ------------------------------------------------------------------ public types
 
@@ -128,6 +129,14 @@ export type Hud = {
   zone: ZoneId;
   fps: number;
   online: OnlineHud | null;
+  /** minimap: [right, ahead, kind] in metres around the player, turned with the camera */
+  radar: { r: number; pts: [number, number, string][] } | null;
+  /** bestiary and deeds, filled while the journal is open */
+  codex: { beasts: { id: string; name: string; where: string; lore: string; kills: number; seen: boolean; boss: boolean }[]; deeds: { id: string; name: string; text: string; done: boolean }[] } | null;
+  /** a one-time hint */
+  tip: { text: string; at: number } | null;
+  /** a gamepad is driving */
+  pad: boolean;
 };
 
 export type Press =
@@ -444,6 +453,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const questWait = new Map<string, number>();
   let questT = 0;
   let banner: Hud["banner"] = null;
+  let codex: Codex = freshCodex();
+  let codexId = "local";
+  let tip: Hud["tip"] = null;
+  let tipT = 0;
+  let padX = 0;
+  let padY = 0;
+  let padOn = false;
+  const padHeld = new Set<number>();
   let shopId: string | null = null;
   /** consecutive connecting hits (Smacko's fourth hit lands twice) and a riposte after a parry (Finlay's Longsword) */
   let hitChain = 0;
@@ -963,6 +980,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       combat: combatT > 0, charge: P.holding ? Math.min(1, P.holdT / 0.35) : 0,
       inDungeon: ZONES[P.zone].indoor, zone: P.zone, fps: Math.round(fps),
       online: online ? onlineHud() : null,
+      radar: mode === "play" ? radar() : null,
+      codex: mode === "journal" ? codexView() : null,
+      tip, pad: padOn,
     };
   }
   function push() {
@@ -1503,6 +1523,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (!sh) return;
     const first = !discovered.has(id);
     discovered.add(id);
+    checkDeeds();
     lastShrine = id;
     if (id === "forest") {
       if (online && !flags.shrine) memberFlag("shrine");
@@ -1836,6 +1857,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     if (!m.alive) {
       kills++;
+      noteKill(m.kind);
       const key = mobKey.get(m);
       if (key && ZONES[m.zone].indoor) deadMobs.add(key);
       const drops: [string, number][] = [];
@@ -1935,6 +1957,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         o.source.stagger(1.3);
         if (mainWeapon().id === "wpn_finlay_longsword") riposte = 3;
         audio.parry();
+        codex.parries++;
+        checkDeeds();
         sparks.burst(20, P.x + Math.sin(P.yaw) * 0.7, P.y + 1.3, P.z + Math.cos(P.yaw) * 0.7, 6, 0xfff0c0, 0.4, 0.2, { up: 1 });
         floater("Parried!", P.x, P.y + 2.2, P.z, "crit");
         hitStop = 0.12;
@@ -2065,6 +2089,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           setItems(res.items);
           const made = item(res.made);
           audio.craft();
+          codex.crafts++;
+          checkDeeds();
           say(made.name + " crafted" + (made.slot === "main" && !made.moveset.includes("pick") ? " and equipped" : ""));
           if (made.id === "wpn_stone_knife") {
             audio.quest();
@@ -2088,6 +2114,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     syncGear();
     audio.craft();
+    codex.crafts++;
+    checkDeeds();
     say((made?.name ?? "Item") + " crafted" + (made?.slot === "main" ? " and equipped" : ""));
     if (made?.id === "wpn_stone_knife") {
       audio.quest();
@@ -2403,8 +2431,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (!world || !playerRig || !playerPoser) return;
     const t = env.time;
     // input
-    let ix = stickX;
-    let iy = stickY;
+    let ix = stickX + padX;
+    let iy = stickY + padY;
     if (keys.has("KeyW") || keys.has("ArrowUp")) iy += 1;
     if (keys.has("KeyS") || keys.has("ArrowDown")) iy -= 1;
     if (keys.has("KeyD") || keys.has("ArrowRight")) ix += 1;
@@ -2817,6 +2845,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function frame(now: number) {
     if (disposed) return;
     raf = requestAnimationFrame(frame);
+    pollPad(Math.min(0.05, Math.max(0.001, (now - last) / 1000)));
     const real = Math.max(0.001, (now - last) / 1000);
     const rdt = Math.min(0.05, real);
     last = now;
@@ -2984,6 +3013,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       // labels must use this frame's camera, not the last render's
       camera.updateMatrixWorld();
       updateOverlay(rdt);
+      codexTick(rdt);
     }
     if (post.enabled) post.render(rdt);
     else renderer.render(scene, camera);
@@ -3091,7 +3121,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         P.holding = false;
         let dx = P.vx;
         let dz = P.vz;
-        const mag = Math.hypot(stickX, stickY) + (keys.size ? 1 : 0);
+        const mag = Math.hypot(stickX + padX, stickY + padY) + (keys.size ? 1 : 0);
         if (mag < 0.2 || Math.hypot(dx, dz) < 0.3) {
           dx = -Math.sin(P.yaw);
           dz = -Math.cos(P.yaw);
@@ -3273,6 +3303,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   /** This client struck the killing blow: ask the server for the loot (once per foe per spawn). */
   function claimKill(key: string, m?: Mob) {
     kills++;
+    if (m) noteKill(m.kind);
+    else checkDeeds();
     if (m?.kind === "horse") {
       say("The rocking horse is still. The painted door is free.");
       audio.quest();
@@ -3326,6 +3358,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const def = BOSSES[id];
     if (!def || bossFinished.has(id)) return;
     bossFinished.add(id);
+    noteKill("boss_" + id);
     worldFlags[def.flag] = true;
     if (id === "cookie") {
       flags.cookie = true;
@@ -3642,6 +3675,148 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function showBanner(title: string, sub: string) {
     banner = { title, sub, at: performance.now() };
     push();
+  }
+
+  // ------------------------------------------------------------ bestiary, deeds, hints, minimap
+  const ELITES = new Set(["kennelmaster", "horse", "standard_bearer", "grave_confessor", "witch"]);
+  let deedQueue: string[] = [];
+  let deedT = 0;
+  function checkDeeds() {
+    const ctx = { c: codex, level, shrines: discovered.size, deaths, kills };
+    for (const d of DEEDS) {
+      if (codex.d.includes(d.id) || !d.ok(ctx)) continue;
+      codex.d.push(d.id);
+      deedQueue.push(d.name);
+    }
+    saveCodex(codexId, codex);
+  }
+  function noteKill(kind: string) {
+    if (!BEASTS[kind]) return;
+    codex.k[kind] = (codex.k[kind] ?? 0) + 1;
+    checkDeeds();
+  }
+  function noteZone(z: string) {
+    if (codex.z.includes(z)) return;
+    codex.z.push(z);
+    checkDeeds();
+  }
+  function showTip(id: string) {
+    if (codex.t.includes(id) || !TIPS[id] || mode !== "play" || (tip && performance.now() - tip.at < 9000)) return;
+    codex.t.push(id);
+    saveCodex(codexId, codex);
+    tip = { text: TIPS[id], at: performance.now() };
+    push();
+  }
+  /** A few times a second: deeds waiting to be announced, and hints for what is in front of the player. */
+  function codexTick(dt: number) {
+    if (mode !== "play") return;
+    if (tip && performance.now() - tip.at > 9000) tip = null;
+    deedT -= dt;
+    if (deedQueue.length && deedT <= 0 && (!banner || performance.now() - banner.at > 4000)) {
+      showBanner("DEED DONE", deedQueue.shift()!);
+      audio.quest();
+      deedT = 4.5;
+    }
+    tipT -= dt;
+    if (tipT > 0) return;
+    tipT = 0.5;
+    noteZone(P.zone);
+    let seen = false;
+    for (const m of mobs) {
+      if (!m.alive || m.zone !== P.zone || m.cfg.flees) continue;
+      const d = Math.hypot(m.x - P.x, m.z - P.z);
+      if (d > 14) continue;
+      if (!codex.s.includes(m.kind)) {
+        codex.s.push(m.kind);
+        seen = true;
+      }
+      if (ELITES.has(m.kind)) showTip("elite");
+      else if (d < 9) showTip(codex.t.includes("fight") && P.shield ? "block" : "fight");
+    }
+    if (seen) saveCodex(codexId, codex);
+    if (P.hp / P.maxHp < 0.35 && !P.dead) showTip("hurt");
+    if (stationNear !== "hand") showTip("station");
+    for (const sh of SHRINES) if (sh.zone === P.zone && Math.hypot(toWorld(sh.zone, sh.x, sh.z).x - P.x, sh.z - P.z) < 7) showTip("shrine");
+    if (level >= 2) showTip("level");
+    if (playTime > 45) showTip("radar");
+  }
+  function codexView(): NonNullable<Hud["codex"]> {
+    return {
+      beasts: Object.entries(BEASTS).map(([id, b]) => ({ id, name: b.name, where: b.where, lore: b.lore, kills: codex.k[id] ?? 0, seen: !!codex.k[id] || codex.s.includes(id), boss: !!b.boss })),
+      deeds: DEEDS.map((d) => ({ id: d.id, name: d.name, text: d.text, done: codex.d.includes(d.id) })),
+    };
+  }
+  const RADAR_R = 46;
+  function radar(): NonNullable<Hud["radar"]> {
+    const pts: [number, number, string][] = [];
+    const add = (x: number, z: number, k: string, clamp = false) => {
+      const dx = x - P.x;
+      const dz = z - P.z;
+      let d = Math.hypot(dx, dz);
+      if (d > RADAR_R) {
+        if (!clamp) return;
+        d = RADAR_R;
+      }
+      const rel = Math.atan2(dx, dz) - camYaw;
+      pts.push([Math.round(-Math.sin(rel) * d * 10) / 10, Math.round(Math.cos(rel) * d * 10) / 10, k]);
+    };
+    for (const sh of SHRINES) if (sh.zone === P.zone) add(toWorld(sh.zone, sh.x, sh.z).x, sh.z, "s");
+    for (const p of PORTALS) if (p.from === P.zone) add(toWorld(p.from, p.x, p.z).x, p.z, "p");
+    for (const n of npcs) if (n.zone === P.zone) add(n.x, n.z, "n");
+    for (const m of mobs) if (m.alive && m.zone === P.zone) add(m.x, m.z, m.cfg.flees ? "a" : ELITES.has(m.kind) ? "e" : "m");
+    const zb = zoneBoss();
+    if (zb && zb.st !== "dead" && zb.st !== "dying") add(zb.x, zb.z, "b");
+    if (online) for (const r of online.remotes.values()) if (r.state.zone === P.zone && r.live(performance.now())) add(r.state.x, r.state.z, "f");
+    const obj = objective();
+    if (obj.at && zoneAt(obj.at.x) === P.zone) add(obj.at.x, obj.at.z, "o", true);
+    return { r: RADAR_R, pts };
+  }
+
+  // ------------------------------------------------------------ gamepad
+  const PAD_DOWN: Record<number, Press> = { 0: "dodge", 2: "attackDown", 5: "attackDown", 7: "attackDown", 4: "blockDown", 3: "interact", 6: "ember", 12: "heal", 8: "bag" };
+  const PAD_UP: Record<number, Press> = { 2: "attackUp", 5: "attackUp", 7: "attackUp", 4: "blockUp" };
+  function pollPad(rdt: number) {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let gp: Gamepad | null = null;
+    for (const g of pads) if (g && g.connected && g.buttons.length >= 10) { gp = g; break; }
+    if (!gp) {
+      if (padOn) {
+        padOn = false;
+        padX = padY = 0;
+        padHeld.clear();
+      }
+      return;
+    }
+    const dead = (v: number) => (Math.abs(v) < 0.18 ? 0 : (v - Math.sign(v) * 0.18) / 0.82);
+    padX = dead(gp.axes[0] ?? 0);
+    padY = -dead(gp.axes[1] ?? 0);
+    const rx = dead(gp.axes[2] ?? 0);
+    const ry = dead(gp.axes[3] ?? 0);
+    if (rx || ry) {
+      camYaw -= rx * 2.6 * rdt;
+      camPitch = THREE.MathUtils.clamp(camPitch + ry * 1.5 * rdt, -0.15, 1.05);
+      lookT = 0;
+    }
+    let any = !!(padX || padY || rx || ry);
+    for (let i = 0; i < gp.buttons.length; i++) {
+      const on = gp.buttons[i].pressed || gp.buttons[i].value > 0.5;
+      if (on) any = true;
+      if (on === padHeld.has(i)) continue;
+      if (on) padHeld.add(i);
+      else padHeld.delete(i);
+      if (!on) {
+        if (PAD_UP[i]) press(PAD_UP[i]);
+        continue;
+      }
+      if (i === 9) press(mode === "play" ? "pause" : mode === "pause" ? "resume" : "close");
+      else if (i === 1) press(mode === "play" ? "dodge" : "close");
+      else if (i === 0 && mode !== "play") press(mode === "reward" ? "rewardClose" : mode === "end" ? "endClose" : "interact");
+      else if (PAD_DOWN[i]) press(PAD_DOWN[i]);
+    }
+    if (any && !padOn) {
+      padOn = true;
+      push();
+    }
   }
 
   /** Mirrors the server's view of this character's experience, level, health and quests. */
@@ -4008,6 +4183,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.maxMana = c.mana_max;
       P.mana = P.maxMana;
       for (const k of Object.keys(killCounts)) delete killCounts[k];
+      codexId = c.id;
+      codex = loadCodex(codexId);
+      deedQueue = [];
+      tip = null;
       quests = {};
       questWait.clear();
       banner = null;
