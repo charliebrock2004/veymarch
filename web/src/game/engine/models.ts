@@ -79,6 +79,23 @@ export class ModelActor {
     return this;
   }
 
+  /** See-through, for spirits. */
+  fade(opacity: number) {
+    this.root.traverse((o) => {
+      const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+      if (!m) return;
+      m.transparent = true;
+      m.opacity = opacity;
+      m.depthWrite = false;
+      (o as THREE.Mesh).castShadow = false;
+    });
+    return this;
+  }
+
+  has(name: string) {
+    return this.tpl.clips.has(name);
+  }
+
   node(name: string) {
     return this.root.getObjectByName(name);
   }
