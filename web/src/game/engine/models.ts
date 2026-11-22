@@ -97,7 +97,6 @@ export class ModelActor {
     let skull: THREE.Object3D | undefined;
     this.root.traverse((o) => {
       if (/_Head$/.test(o.name)) skull = o;
-      if (/_Helmet$/.test(o.name)) o.visible = false;
     });
     if (!skull || !this.head) return this;
     this.root.updateMatrixWorld(true);
