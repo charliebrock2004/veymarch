@@ -21,6 +21,11 @@ const GradeShader = {
     uFlash: { value: 0 },
     uFlashColor: { value: new THREE.Color(0xffffff) },
     uTime: { value: 0 },
+    uSun: { value: new THREE.Vector2(0.5, 0.5) },
+    uRays: { value: 0 },
+    uRayColor: { value: new THREE.Color(0xffe2b0) },
+    uPx: { value: new THREE.Vector2(1 / 1280, 1 / 720) },
+    uSharp: { value: 0.35 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -28,15 +33,41 @@ const GradeShader = {
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse; uniform vec3 uTint; uniform float uSat; uniform float uContrast;
     uniform float uVignette; uniform float uLift; uniform float uFlash; uniform vec3 uFlashColor; uniform float uTime;
+    uniform vec2 uSun; uniform float uRays; uniform vec3 uRayColor; uniform vec2 uPx; uniform float uSharp;
     varying vec2 vUv;
     float h(vec2 p){ return fract(sin(dot(p, vec2(12.9898,78.233)) + uTime) * 43758.5453); }
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
+      vec2 d = vUv - 0.5;
+      // lens: the faintest colour fringe toward the corners
+      float edge = dot(d, d);
+      vec2 ca = d * edge * 0.006;
+      c.r = texture2D(tDiffuse, vUv - ca).r;
+      c.b = texture2D(tDiffuse, vUv + ca).b;
+      // unsharp mask: put back the crispness bloom and resampling take away
+      vec3 blur = (texture2D(tDiffuse, vUv + vec2(uPx.x, 0.0)).rgb + texture2D(tDiffuse, vUv - vec2(uPx.x, 0.0)).rgb
+        + texture2D(tDiffuse, vUv + vec2(0.0, uPx.y)).rgb + texture2D(tDiffuse, vUv - vec2(0.0, uPx.y)).rgb) * 0.25;
+      c.rgb += (c.rgb - blur) * uSharp;
+      // light shafts: march toward the sun, gathering whatever bright sky is not hidden
+      if (uRays > 0.004) {
+        vec2 stepv = (uSun - vUv) / 22.0;
+        vec2 p = vUv + stepv * h(vUv * 331.0);
+        float acc = 0.0; float w = 1.0;
+        for (int i = 0; i < 22; i++) {
+          vec3 s = texture2D(tDiffuse, clamp(p, 0.0, 1.0)).rgb;
+          acc += smoothstep(0.72, 1.0, dot(s, vec3(0.2126, 0.7152, 0.0722))) * w;
+          w *= 0.95; p += stepv;
+        }
+        float near = smoothstep(1.1, 0.0, length((vUv - uSun) * vec2(1.6, 1.0)));
+        c.rgb += uRayColor * acc / 22.0 * uRays * near;
+      }
       vec3 col = c.rgb * uTint;
       float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
       col = mix(vec3(l), col, uSat);
       col = (col - 0.5) * uContrast + 0.5 + uLift;
-      vec2 d = vUv - 0.5;
+      // split tone: cool the shadows a touch, warm the highlights
+      float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
+      col += mix(vec3(-0.012, 0.0, 0.02), vec3(0.018, 0.008, -0.016), smoothstep(0.15, 0.85, lum));
       float v = smoothstep(0.85, 0.2, length(d * vec2(1.15, 1.0)));
       col *= mix(1.0 - uVignette, 1.0, v);
       col = mix(col, uFlashColor, uFlash * (1.0 - v * 0.6));
@@ -52,7 +83,7 @@ const GradeShader = {
 export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
   const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }));
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), DEFAULT_GRADE.bloom, 0.55, 0.82);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), DEFAULT_GRADE.bloom, 0.62, 0.8);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
   const grade = new ShaderPass(GradeShader);
@@ -61,12 +92,28 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
   const target = { ...DEFAULT_GRADE };
   const tint = new THREE.Color();
   let flash = 0;
+  let rays = 0;
+  let bloomScale = 0.5;
   return {
     enabled: false,
+    /** Medium runs a lighter chain: quarter-res bloom, no light shafts. */
+    setLite(lite: boolean) {
+      bloomScale = lite ? 0.25 : 0.5;
+      u.uSharp.value = lite ? 0.2 : 0.35;
+      this.lite = lite;
+    },
+    lite: false,
+    /** Where the sun is on screen (0..1) and how strongly its shafts should show. */
+    setSun(x: number, y: number, strength: number, color: THREE.Color) {
+      u.uSun.value.set(x, y);
+      u.uRayColor.value.copy(color);
+      rays = this.lite ? 0 : strength;
+    },
     setSize(w: number, h: number, pr: number) {
       composer.setPixelRatio(pr);
       composer.setSize(w, h);
-      bloom.resolution.set(w * pr * 0.5, h * pr * 0.5);
+      bloom.resolution.set(w * pr * bloomScale, h * pr * bloomScale);
+      u.uPx.value.set(1 / (w * pr), 1 / (h * pr));
     },
     setGrade(g: Grade) {
       Object.assign(target, g);
@@ -85,6 +132,7 @@ export function createPost(renderer: THREE.WebGLRenderer, scene: THREE.Scene, ca
       bloom.strength += (target.bloom - bloom.strength) * k;
       flash = Math.max(0, flash - dt * 2.5);
       u.uFlash.value = flash;
+      u.uRays.value += (rays - u.uRays.value) * Math.min(1, dt * 3);
       u.uTime.value = (u.uTime.value + dt) % 100;
       composer.render(dt);
     },

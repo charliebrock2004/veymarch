@@ -1891,3 +1891,7 @@ input {
   90% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+.vm-vol { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 13px; text-transform: none; letter-spacing: 0; }
+.vm-vol span { width: 62px; opacity: 0.8; }
+.vm-vol input { flex: 1; accent-color: #d9b46a; height: 28px; }

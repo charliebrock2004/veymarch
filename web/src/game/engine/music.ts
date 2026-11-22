@@ -240,6 +240,8 @@ export const THEMES = {
 
 export type ThemeId = keyof typeof THEMES | "none";
 
+const PAN: Record<Inst, number> = { pluck: -0.32, flute: 0.26, pad: 0, bass: 0, horn: 0.18, bell: -0.12, choir: 0, fiddle: -0.24, celesta: 0.34, lowbell: 0.1 };
+
 const BOSS_THEMES = new Set<ThemeId>(["cookie", "boe", "finlay", "grave_king", "rite"]);
 
 class Playing {
@@ -397,7 +399,17 @@ export class Music {
   private note(inst: Inst, f: number, dur: number, vol: number, t: number, dest: AudioNode) {
     const c = this.ctx;
     const g = c.createGain();
-    g.connect(dest);
+    // each instrument has a seat in the stereo field, and no two notes land quite alike
+    const seat = PAN[inst] + (inst === "pad" || inst === "choir" ? 0 : (Math.random() - 0.5) * 0.12);
+    if (seat && c.createStereoPanner) {
+      const pn = c.createStereoPanner();
+      pn.pan.value = seat;
+      g.connect(pn).connect(dest);
+    } else g.connect(dest);
+    if (inst !== "pad" && inst !== "choir" && inst !== "bass") {
+      vol *= 0.86 + Math.random() * 0.28;
+      t += Math.random() * 0.012;
+    }
     switch (inst) {
       case "pluck": {
         this.env(g.gain, t, 0.004, vol, 0, Math.min(1.2, dur + 0.5));
@@ -408,13 +420,29 @@ export class Music {
         lp.connect(g);
         const end = t + dur + 0.6;
         this.osc("triangle", f, t, end, lp);
-        this.osc("sawtooth", f, t, end, lp, 4);
+        this.osc("sawtooth", f, t, end, lp, 5);
+        this.osc("sawtooth", f, t, end, lp, -6);
+        // the string's shimmer an octave up, gone almost at once
+        const sh = c.createGain();
+        sh.connect(g);
+        this.env(sh.gain, t, 0.002, 0.35, 0, 0.18);
+        this.osc("sine", f * 2, t, t + 0.25, sh);
         break;
       }
       case "flute": {
         this.env(g.gain, t, 0.07, vol, dur * 0.85, 0.25);
         const o = this.osc("sine", f, t, t + dur + 0.3, g);
-        this.vibrato(o, t, t + dur + 0.3, 5.2, 9);
+        this.vibrato(o, t + Math.min(0.25, dur * 0.4), t + dur + 0.3, 5.2, 11);
+        const h2 = c.createGain();
+        h2.gain.value = 0.22;
+        h2.connect(g);
+        this.osc("sine", f * 2, t, t + dur + 0.3, h2);
+        const h3 = c.createGain();
+        h3.gain.value = 0.08;
+        h3.connect(g);
+        this.osc("triangle", f * 3, t, t + dur + 0.3, h3);
+        // breath: a little air at the front of the note
+        this.noiseHit(t, Math.min(0.22, dur), "bandpass", Math.min(6000, f * 2.2), 0.3, g);
         break;
       }
       case "pad":
@@ -427,15 +455,43 @@ export class Music {
         lp.Q.value = inst === "choir" ? 2 : 0.7;
         lp.connect(g);
         const end = t + dur * 1.25;
-        const o1 = this.osc("sawtooth", f, t, end, lp, -7);
-        this.osc("sawtooth", f, t, end, lp, 7);
-        if (inst === "choir") this.vibrato(o1, t, end, 4.6, 12);
+        // the filter opens over the bar and closes again, so held chords breathe
+        const top = lp.frequency.value;
+        lp.frequency.setValueAtTime(top * 0.6, t);
+        lp.frequency.linearRampToValueAtTime(top * 1.25, t + dur * 0.55);
+        lp.frequency.linearRampToValueAtTime(top * 0.7, end);
+        const o1 = this.osc("sawtooth", f, t, end, lp, -9);
+        this.osc("sawtooth", f, t, end, lp, 9);
+        this.osc("triangle", f, t, end, lp, 0);
+        const up = c.createGain();
+        up.gain.value = 0.3;
+        up.connect(lp);
+        this.osc("sawtooth", f * 2, t, end, up, 4);
+        if (inst === "choir") {
+          this.vibrato(o1, t, end, 4.6, 12);
+          // a second formant gives the "ah"
+          const fm = c.createBiquadFilter();
+          fm.type = "bandpass";
+          fm.frequency.value = 2600;
+          fm.Q.value = 5;
+          const fg = c.createGain();
+          fg.gain.value = 0.5;
+          lp.connect(fm).connect(fg).connect(g);
+        }
         break;
       }
       case "bass": {
         this.env(g.gain, t, 0.01, vol, dur * 0.6, 0.18);
         this.osc("triangle", f, t, t + dur + 0.2, g);
         this.osc("sine", f / 2, t, t + dur + 0.2, g);
+        const bl = c.createBiquadFilter();
+        bl.type = "lowpass";
+        bl.frequency.setValueAtTime(700, t);
+        bl.frequency.exponentialRampToValueAtTime(180, t + 0.25);
+        const bg = c.createGain();
+        bg.gain.value = 0.3;
+        bl.connect(bg).connect(g);
+        this.osc("sawtooth", f, t, t + dur + 0.2, bl);
         break;
       }
       case "horn": {
@@ -458,6 +514,15 @@ export class Music {
         bp.connect(g);
         const o = this.osc("sawtooth", f, t, t + dur + 0.2, bp);
         this.vibrato(o, t, t + dur + 0.2, 6, 14);
+        this.osc("sawtooth", f, t, t + dur + 0.2, bp, 8);
+        const body = c.createBiquadFilter();
+        body.type = "peaking";
+        body.frequency.value = 480;
+        body.gain.value = 5;
+        this.osc("triangle", f, t, t + dur + 0.2, body);
+        const bgn = c.createGain();
+        bgn.gain.value = 0.35;
+        body.connect(bgn).connect(g);
         break;
       }
       case "bell":
@@ -509,14 +574,17 @@ export class Music {
     };
     switch (kind) {
       case "k":
-        thump(130, 42, 0.32, vol * 2.2);
+        thump(130, 42, 0.34, vol * 2.2);
+        thump(62, 38, 0.5, vol * 1.2);
+        this.noiseHit(t, 0.02, "bandpass", 2800, vol * 0.5, dest);
         break;
       case "t":
         thump(150, 80, 0.4, vol * 1.6);
         this.noiseHit(t, 0.1, "lowpass", 700, vol * 0.5, dest);
         break;
       case "s":
-        this.noiseHit(t, 0.14, "bandpass", 1900, vol * 1.4, dest);
+        this.noiseHit(t, 0.16, "bandpass", 1900, vol * 1.4, dest);
+        this.noiseHit(t, 0.22, "highpass", 4200, vol * 0.5, dest);
         thump(210, 160, 0.09, vol * 0.6);
         break;
       case "h":

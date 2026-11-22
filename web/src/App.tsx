@@ -212,7 +212,7 @@ function SettingsBody({ hud, api, extra }: { hud: Hud; api: GameApi; extra?: Rea
             </button>
           ))}
         </div>
-        <p>Low drops shadows and grass for older phones. {hud.fps ? `Now ${hud.fps} fps.` : ""}</p>
+        <p>High adds light shafts and full bloom. Low drops shadows, grass and effects for older phones. {hud.fps ? `Now ${hud.fps} fps.` : ""}</p>
       </div>
       <div className="vm-field">
         <label>Sound</label>
@@ -224,6 +224,12 @@ function SettingsBody({ hud, api, extra }: { hud: Hud; api: GameApi; extra?: Rea
             Off
           </button>
         </div>
+        {(["music", "sfx"] as const).map((k) => (
+          <label className="vm-vol" key={k}>
+            <span>{k === "music" ? "Music" : "Effects"}</span>
+            <input type="range" min={0} max={100} step={5} value={Math.round(hud.vol[k] * 100)} onChange={(e) => api.setVolume(k, Number(e.target.value) / 100)} />
+          </label>
+        ))}
       </div>
       <div className="vm-field">
         <label>Controls</label>

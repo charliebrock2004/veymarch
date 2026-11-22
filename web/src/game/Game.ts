@@ -123,6 +123,7 @@ export type Hud = {
   hurtAt: number;
   quality: Quality;
   muted: boolean;
+  vol: { music: number; sfx: number };
   combat: boolean;
   charge: number;
   inDungeon: boolean;
@@ -165,6 +166,7 @@ export type GameApi = {
   travel: (shrine: string) => void;
   setQuality: (q: Quality) => void;
   setMuted: (m: boolean) => void;
+  setVolume: (kind: "music" | "sfx", v: number) => void;
   /** Enters a persistent world with a server character (the result of vm_join / vm_enter). */
   startOnline: (realm: Realm, enter: EnterJson) => void;
 };
@@ -268,7 +270,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   sun.shadow.normalBias = 0.05;
   scene.add(hemi, sun, sun.target);
   const post = createPost(renderer, scene, camera);
-  post.enabled = quality === "high";
+  post.enabled = quality !== "low";
+  post.setLite(quality !== "high");
   const lightPool: THREE.PointLight[] = [];
   for (let i = 0; i < 4; i++) {
     const l = new THREE.PointLight(0xff9a50, 0, 16, 1.6);
@@ -282,6 +285,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   const audio = new Audio();
   audio.setMuted(localStorage.getItem("veyrmarch.muted") === "1");
+  for (const k of ["music", "sfx"] as const) {
+    const v = Number(localStorage.getItem("veyrmarch.vol." + k) ?? NaN);
+    if (Number.isFinite(v)) audio.setVolume(k, v);
+  }
   const pxScale = { value: 400 };
   const glowI = { value: 0 };
   const dust = new Particles(900, false, pxScale);
@@ -976,7 +983,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }),
       station: stationNear,
       hour, night: hour >= 20.5 || hour < 5.5,
-      reward, fade, stats: { time: playTime, deaths, kills }, hurtAt, quality, muted: audio.muted,
+      reward, fade, stats: { time: playTime, deaths, kills }, hurtAt, quality, muted: audio.muted, vol: audio.volume,
       combat: combatT > 0, charge: P.holding ? Math.min(1, P.holdT / 0.35) : 0,
       inDungeon: ZONES[P.zone].indoor, zone: P.zone, fps: Math.round(fps),
       online: online ? onlineHud() : null,
@@ -2297,6 +2304,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   const hor = new THREE.Color();
   const fogC = new THREE.Color();
   const sunDir = new THREE.Vector3();
+  const sunNdc = new THREE.Vector3();
   function lerpHex(a: number, b: number, t: number, out: THREE.Color) {
     return out.copy(cA.setHex(a)).lerp(cB.setHex(b), t);
   }
@@ -2372,6 +2380,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     renderer.toneMappingExposure += (exposure - renderer.toneMappingExposure) * Math.min(1, rdt * 2);
     sky.set({ zenith: zen, horizon: fog.color, sunDir, sunColor: sun.color, night: 1 - dayK, time: performance.now() / 1000, cloud: 0.5 });
     sky.mesh.position.copy(camera.position);
+    // light shafts: only under an open sky, and only while the sun is in front of the lens
+    sunNdc.copy(camera.position).addScaledVector(sunDir, 800).project(camera);
+    const sunSeen = sunNdc.z < 1 && Math.abs(sunNdc.x) < 1.5 && Math.abs(sunNdc.y) < 1.5;
+    const openAir = !ZONES[P.zone].indoor || openSky || mode === "title";
+    post.setSun(sunNdc.x * 0.5 + 0.5, sunNdc.y * 0.5 + 0.5, sunSeen && openAir ? (0.25 + 0.45 * (1 - Math.min(1, sunDir.y * 1.4))) * dayK : 0, sun.color);
     post.setGrade(mode === "title" || mode === "create" ? DEFAULT_GRADE : (ZONE_GRADES[P.zone] ?? DEFAULT_GRADE));
     const fx = mode === "play" || mode === "bag" || mode === "talk" || mode === "dead" || mode === "reward" || mode === "end" ? P.x : camera.position.x;
     const fz = mode === "play" || mode === "bag" || mode === "talk" || mode === "dead" || mode === "reward" || mode === "end" ? P.z : camera.position.z;
@@ -2800,6 +2813,21 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         const x = P.x + (Math.random() - 0.5) * 24;
         const z = P.z + (Math.random() - 0.5) * 24;
         sparks.emit({ x, y: world.groundAt(x, z) + 0.6 + Math.random(), z, vx: (Math.random() - 0.5) * 0.4, vy: 0.1, vz: (Math.random() - 0.5) * 0.4, life: 3, size: 0.13, color: 0xc8e070, grav: 0, drag: 0 });
+      } else if (P.zone !== "over" && P.zone !== "castle" && quality !== "low") {
+        // each land has its own air: ash on the Wasteland, souls in the Citadel, rain on the Keep, spores in the Mire
+        const n = quality === "high" ? 3 : 1;
+        for (let k = 0; k < n; k++) {
+          const x = P.x + (Math.random() - 0.5) * 34;
+          const z = P.z + (Math.random() - 0.5) * 34;
+          const y = groundAt(x, z);
+          if (P.zone === "waste") dust.emit({ x, y: y + 5 + Math.random() * 7, z, vx: 0.7 + Math.random() * 0.5, vy: -0.55, vz: 0.25, life: 8, size: 0.09 + Math.random() * 0.07, color: Math.random() < 0.8 ? 0xcfc8c0 : 0x6a6460, a: 0.75, grav: 0.01, drag: 0 });
+          else if (P.zone === "citadel") sparks.emit({ x, y: y + 0.3 + Math.random() * 3, z, vx: (Math.random() - 0.5) * 0.15, vy: 0.25 + Math.random() * 0.3, vz: (Math.random() - 0.5) * 0.15, life: 5, size: 0.09, color: Math.random() < 0.7 ? 0x8fd8ff : 0x9affc0, a: 0.5, grav: 0, drag: 0 });
+          else if (P.zone === "keep" && (zones.get("keep")?.ceiling?.(x, z) ?? 0) >= 10) {
+            for (let j = 0; j < 3; j++) dust.emit({ x: x + j * 0.7, y: y + 9 + Math.random() * 3, z: z + j * 1.3, vx: 1.2, vy: -17, vz: 0.4, life: 0.6, size: 0.07, color: 0xaab8c8, a: 0.5, grav: 0, drag: 0 });
+          } else if (P.zone === "mire") sparks.emit({ x, y: y + 0.4 + Math.random() * 2.5, z, vx: (Math.random() - 0.5) * 0.3, vy: 0.08, vz: (Math.random() - 0.5) * 0.3, life: 5, size: 0.1, color: 0x9ad860, a: 0.45, grav: 0, drag: 0 });
+          else if (P.zone === "hunt" && Math.random() < 0.5) dust.emit({ x, y: y + 0.3, z, vx: 0.25, vy: 0.04, vz: 0.1, life: 6, size: 1.6, grow: 1.2, color: 0xb8c4c0, a: 0.07, grav: 0, drag: 0 });
+          else if (P.zone === "kingdom" && !night && Math.random() < 0.5) sparks.emit({ x, y: y + 1 + Math.random() * 4, z, vx: 0.15, vy: 0.04, vz: 0.08, life: 5, size: 0.06, color: 0xffe8b0, a: 0.5, grav: 0, drag: 0 });
+        }
       } else if (P.zone === "castle" && P.z > DUN.galleryZ1 + 4 && Math.random() < 0.4) {
         sparks.emit({ x: P.x + (Math.random() - 0.5) * 20, y: 1 + Math.random() * 6, z: P.z + (Math.random() - 0.5) * 20, vy: -0.2, life: 4, size: 0.08, color: 0xffd8a0, a: 0.6, grav: 0, drag: 0 });
       }
@@ -4113,7 +4141,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     setQuality(q) {
       quality = q;
       localStorage.setItem("veyrmarch.quality", q);
-      post.enabled = q === "high";
+      post.enabled = q !== "low";
+      post.setLite(q !== "high");
+      post.setSize(canvas.clientWidth || 1, canvas.clientHeight || 1, renderer.getPixelRatio());
       renderer.shadowMap.enabled = q !== "low";
       sun.castShadow = q !== "low";
       renderer.shadowMap.type = q === "high" ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
@@ -4125,6 +4155,11 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }
       canvas.width = 0;
       cull();
+      push();
+    },
+    setVolume(kind, v) {
+      audio.setVolume(kind, v);
+      localStorage.setItem("veyrmarch.vol." + kind, String(audio.volume[kind]));
       push();
     },
     setMuted(m) {
@@ -4273,9 +4308,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     hazards: () => hazards.map((h) => ({ x: h.h.x, z: h.h.z, r: h.h.r, left: h.left })),
     theme: () => audio.theme,
     zoneMobs: (z: ZoneId) => mobs.filter((m) => m.zone === z).map((m) => ({ key: mobKey.get(m) ?? m.key, k: m.kind, x: m.x, z: m.z, hp: m.hp, alive: m.alive, st: m.state })),
-    face: (yaw: number) => {
+    face: (yaw: number, pitch?: number) => {
       P.yaw = yaw;
       camYaw = yaw;
+      if (pitch !== undefined) camPitch = pitch;
     },
     aim: (x: number, z: number) => {
       P.yaw = Math.atan2(x - P.x, z - P.z);
