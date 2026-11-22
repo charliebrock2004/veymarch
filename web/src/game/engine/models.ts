@@ -92,6 +92,40 @@ export class ModelActor {
     return this;
   }
 
+  /** Monster features fixed to the head: pointed `ears` and/or glowing `eyes` of the given colours. */
+  monster(ears?: number, eyes?: number) {
+    let skull: THREE.Object3D | undefined;
+    this.root.traverse((o) => {
+      if (/_Head$/.test(o.name)) skull = o;
+    });
+    if (!skull || !this.head) return this;
+    this.root.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(skull);
+    const c = box.getCenter(new THREE.Vector3());
+    const d = box.getSize(new THREE.Vector3());
+    const fix = (m: THREE.Mesh) => {
+      this.root.add(m);
+      m.updateMatrixWorld(true);
+      this.head!.attach(m);
+    };
+    for (const side of [-1, 1]) {
+      if (ears !== undefined) {
+        const ear = new THREE.Mesh(new THREE.ConeGeometry(d.x * 0.11, d.y * 0.6, 5), new THREE.MeshStandardMaterial({ color: ears, roughness: 0.9 }));
+        ear.position.set(c.x + side * d.x * 0.52, c.y + d.y * 0.02, c.z);
+        ear.rotation.z = -side * 1.15;
+        ear.scale.z = 0.45;
+        ear.castShadow = true;
+        fix(ear);
+      }
+      if (eyes !== undefined) {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(d.x * 0.07, 8, 6), new THREE.MeshBasicMaterial({ color: eyes }));
+        eye.position.set(c.x + side * d.x * 0.2, c.y - d.y * 0.02, c.z + d.z * 0.47);
+        fix(eye);
+      }
+    }
+    return this;
+  }
+
   has(name: string) {
     return this.tpl.clips.has(name);
   }

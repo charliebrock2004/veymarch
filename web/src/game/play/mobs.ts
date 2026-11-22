@@ -692,7 +692,7 @@ export const MOB_KINDS: MobKind[] = [
 export type MobSnap = [key: string, x: number, z: number, yaw: number, st: number, hp: number, atk: number, t: number, kind: number, ax?: number, az?: number];
 
 /** Foes drawn from a modelled, clip-animated glTF instead of the procedural rig. `adv`: an adventurer body on the shared rig. */
-type Worn = { urls: string[]; tint?: number; adv?: boolean; fade?: number };
+type Worn = { urls: string[]; tint?: number; adv?: boolean; fade?: number; ears?: number; eyes?: number; head?: number };
 const SK = { minion: "/models/skeleton_minion.glb", warrior: "/models/skeleton_warrior.glb", rogue: "/models/skeleton_rogue.glb", mage: "/models/skeleton_mage.glb" };
 const MODELS: Partial<Record<MobKind, Worn>> = {
   skeleton: { urls: [SK.minion, SK.warrior, SK.rogue] },
@@ -702,10 +702,10 @@ const MODELS: Partial<Record<MobKind, Worn>> = {
   grave_confessor: { urls: [SK.mage], tint: 0xc0a0a0 },
   crypt_dead: { urls: [SK.minion, SK.rogue], tint: 0x9aa090 },
   ghost: { urls: [SK.mage, SK.rogue], tint: 0x9fd0e8, fade: 0.5 },
-  zombie: { urls: [ADV.rogue, ADV.barbarian], adv: true, tint: 0x7f9a6a },
-  drowned: { urls: [ADV.rogue, ADV.hooded], adv: true, tint: 0x6a9a98 },
-  goblin: { urls: [ADV.rogue], adv: true, tint: 0x86b060 },
-  redcap: { urls: [ADV.barbarian], adv: true, tint: 0x9ab068 },
+  zombie: { urls: [ADV.rogue, ADV.barbarian], adv: true, tint: 0x6f8c6a, eyes: 0xd8ff70 },
+  drowned: { urls: [ADV.rogue, ADV.hooded], adv: true, tint: 0x5a9a9c, eyes: 0xa0fff0 },
+  goblin: { urls: [ADV.rogue], adv: true, tint: 0x6cc04a, ears: 0x4f8a34, eyes: 0xffe040, head: 0.8 },
+  redcap: { urls: [ADV.barbarian], adv: true, tint: 0x8fb050, ears: 0x5f7a34, eyes: 0xff5030, head: 0.8 },
   soldier: { urls: [ADV.knight], adv: true, tint: 0xc8c0b8 },
   bandit: { urls: [ADV.hooded, ADV.rogue], adv: true, tint: 0xa89888 },
   deserter: { urls: [ADV.knight], adv: true, tint: 0xa88868 },
@@ -805,8 +805,9 @@ export class Mob {
     const g = this.rig.group;
     const held = this.rig.sockets.gripR?.children[0];
     for (const c of g.children) c.visible = false;
-    const actor = new ModelActor(tpl, this.cfg.height / MODEL_HEIGHT, 0.58, worn.tint ?? 0xb8b0a0, clips);
+    const actor = new ModelActor(tpl, this.cfg.height / MODEL_HEIGHT, worn.head ?? 0.58, worn.tint ?? 0xb8b0a0, clips);
     if (worn.adv) actor.emptyHands();
+    if (worn.ears !== undefined || worn.eyes !== undefined) actor.monster(worn.ears, worn.eyes);
     if (worn.fade) actor.fade(worn.fade);
     if (held && actor.handR) {
       held.scale.multiplyScalar(MODEL_HEIGHT / this.cfg.height);
