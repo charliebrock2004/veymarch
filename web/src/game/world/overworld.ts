@@ -330,9 +330,8 @@ export function buildOverworld(M: Mats, state: { gate: () => boolean }): Overwor
 
   // ------------------------------------------------------------ water
   const waterMat = watery(new THREE.MeshPhongMaterial({
-    color: 0x3b3a28, specular: 0xfff0d0, shininess: 90, transparent: true, opacity: 0.86, normalMap: waterNormalTex(), normalScale: new THREE.Vector2(0.6, 0.6),
-  }));
-  waterMat.normalMap!.repeat.set(1, 6);
+    color: 0x2f4a44, specular: 0x000000, shininess: 10, transparent: true, opacity: 0.78, normalMap: waterNormalTex(), normalScale: new THREE.Vector2(0.001, 0.001), depthWrite: false,
+  }), { flow: [0.08, -0.6], bank: true });
   const water: THREE.Mesh[] = [];
   const ribbon = (pts: [number, number][], width: (i: number) => number, depth: number) => {
     const pos: number[] = [];

@@ -8,7 +8,7 @@ import { Finlay } from "./finlay";
  * three-phase duel as Finlay, his plate gone grave-green, his court's rite in phase three.
  */
 export function createGraveKing(env: BossEnv, parent: THREE.Object3D): Boss {
-  const b = new Finlay(env, parent, BOSSES.grave_king, { weapon: "wpn_grave_blade", phases: ["", "The king", "Crown cracked", "The court rises"] });
+  const b = new Finlay(env, parent, BOSSES.grave_king, { weapon: "wpn_grave_blade", phases: ["", "The king", "Crown cracked", "The court rises"], greeting: "Kneel. Everyone does, in the end." });
   b.plateMat.color.setHex(0xb8c4b0);
   b.plateMat.emissive = new THREE.Color(0x0e2a18);
   b.mat.color.setHex(0xa8b8a8);

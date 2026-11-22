@@ -3,7 +3,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 import { BOSSES } from "../../data/bosses.ts";
 import { ZONES } from "../../data/zones.ts";
 import { LINES } from "../../content";
-import { Poser, type Rig } from "../../engine/rig";
+import { Poser, rimmed, type Rig } from "../../engine/rig";
 import type { Decal } from "../../engine/fx";
 import type { Boss, BossEnv } from "../bossapi";
 import { SILENT, type HurtOpts, type PlayerState } from "../env";
@@ -160,9 +160,9 @@ const wingGeo = (pts: [number, number][], side: 1 | -1) => {
   return g;
 };
 
-const FUR = 0x221f24;
-const FUR_HI = 0x302c33;
-const FEATHER = 0x1a181b;
+const FUR = 0x38333b;
+const FUR_HI = 0x4c4650;
+const FEATHER = 0x2b282d;
 const NOSE = 0x0c0a0a;
 const EYE = 0x2a1409;
 const TONGUE = 0xc25a62;
@@ -278,7 +278,7 @@ function buildCollar() {
   if (!geo) throw new Error("boe: collar merge failed");
   geo.rotateX(0.5);
   geo.translate(0, 0.035, 0.025);
-  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0xff2410, emissiveIntensity: 0 });
+  const mat = rimmed(new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0xff2410, emissiveIntensity: 0 }));
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
   return { mesh, mat };

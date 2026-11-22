@@ -1302,8 +1302,8 @@ export function buildKingdom(env: ZoneEnv): ZoneBuild {
 
   // ------------------------------------------------------------ water: the marsh to the south
   const waterMat = watery(new THREE.MeshPhongMaterial({
-    color: 0x1f2a1e, specular: 0x8a9a7a, shininess: 70, transparent: true, opacity: 0.9, normalMap: waterNormalTex(), normalScale: new THREE.Vector2(0.5, 0.5),
-  }));
+    color: 0x24352c, specular: 0x000000, shininess: 10, transparent: true, opacity: 0.9, normalMap: waterNormalTex(), normalScale: new THREE.Vector2(0.001, 0.001),
+  }), { flow: [0.06, 0.04], scale: 0.7, murk: 0.1 });
   {
     const g = new THREE.PlaneGeometry(700, 340, 1, 1);
     g.rotateX(-Math.PI / 2);

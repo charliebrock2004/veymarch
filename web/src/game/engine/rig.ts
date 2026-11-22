@@ -116,7 +116,12 @@ const at = (g: THREE.BufferGeometry, x: number, y: number, z: number) => g.trans
 /** Sky-coloured rim light for anything alive, so figures lift off the ground behind them. */
 export const rim = { color: { value: new THREE.Color(0xbfd4ee) }, power: { value: 0.55 } };
 const charMat = new THREE.MeshLambertMaterial({ vertexColors: true });
-charMat.onBeforeCompile = (sh) => {
+/** Give any Lambert material the figures' rim light (bosses in black plate and fur need it most). */
+export function rimmed<T extends THREE.Material>(mat: T): T {
+  mat.onBeforeCompile = rimPatch;
+  return mat;
+}
+const rimPatch = (sh: THREE.WebGLProgramParametersWithUniforms) => {
   sh.uniforms.uRim = rim.color;
   sh.uniforms.uRimK = rim.power;
   sh.fragmentShader = sh.fragmentShader
@@ -131,6 +136,7 @@ charMat.onBeforeCompile = (sh) => {
        #include <opaque_fragment>`,
     );
 };
+charMat.onBeforeCompile = rimPatch;
 export const characterMaterial = charMat;
 
 // ------------------------------------------------------------ humanoids
@@ -169,6 +175,8 @@ export type HumanLook = {
   face?: "toy" | "skull" | "dead";
   /** eye colour for the dead and the uncanny; reads as a glow */
   eyeGlow?: number;
+  /** a traveller's outfit: mantle, satchel strap, pouches, bracers and wraps */
+  kit?: boolean;
   /** worn armour, drawn as part of the body */
   armour?: ArmourLook;
 };
@@ -324,6 +332,50 @@ export function buildHuman(look: HumanLook): Rig {
     b.part("shin" + s, cap(0.06 * f, 0.18, 0, -0.14, 0), look.trousers);
     b.part("shin" + s, cyl(0.065 * f, 0.07 * f, 0.24, 0, -0.3, 0, 10), look.boots);
     b.part("foot" + s, ell(0.055, 0.045, 0.12, 0, 0.0, 0.05, 8), look.boots);
+  }
+  if (look.kit) {
+    const ar = look.armour ?? {};
+    const leather = 0x4a3020;
+    const dark = 0x2e1e14;
+    const brass = 0xb08a4a;
+    const cloth = new THREE.Color(coat).multiplyScalar(0.78).getHex();
+    if (!ar.chest) {
+      // a short shoulder mantle with a rolled collar and a clasp
+      b.part("chest", cyl(0.13 * f, 0.26 * f, 0.15, 0, 0.115, -0.005, 12, true), cloth);
+      b.part("chest", ell(0.12 * f, 0.045, 0.1, 0, 0.2, -0.02), cloth);
+      b.part("chest", ell(0.02, 0.02, 0.012, 0, 0.165, 0.135), brass);
+      // satchel strap across the chest, the satchel on the hip
+      b.part("chest", rot(box(0.035, 0.52, 0.016, 0, 0, 0), 0, 0, 0.72).translate(0, 0.0, 0.132), leather);
+      b.part("chest", rot(box(0.035, 0.52, 0.016, 0, 0, 0), 0, 0, -0.72).translate(0, 0.0, -0.132), leather);
+      b.part("chest", box(0.04, 0.03, 0.02, -0.06, -0.06, 0.14), brass);
+    }
+    b.part("hips", box(0.13, 0.15, 0.07, 0.2 * f, -0.02, -0.03), leather);
+    b.part("hips", box(0.135, 0.06, 0.075, 0.2 * f, 0.04, -0.03), dark);
+    b.part("hips", box(0.02, 0.03, 0.01, 0.2 * f, 0.02, 0.012), brass);
+    // belt pouch, a rolled blanket across the small of the back, a wider buckle
+    b.part("hips", box(0.07, 0.08, 0.05, -0.13 * f, 0.02, 0.13), leather);
+    b.part("hips", box(0.075, 0.03, 0.055, -0.13 * f, 0.055, 0.13), dark);
+    b.part("hips", rot(cyl(0.05, 0.05, 0.32 * f, 0, 0, 0, 8), 0, 0, Math.PI / 2).translate(0, 0.1, -0.17), 0x6a5a40);
+    for (const sx of [1, -1]) b.part("hips", rot(cyl(0.053, 0.053, 0.02, 0, 0, 0, 8), 0, 0, Math.PI / 2).translate(sx * 0.1 * f, 0.1, -0.17), dark);
+    b.part("hips", box(0.075, 0.06, 0.02, 0, 0.08, 0.183 * f), brass);
+    for (const sd of ["L", "R"]) {
+      if (!ar.hands) {
+        // laced bracers
+        b.part("fore" + sd, cyl(0.055 * f, 0.049 * f, 0.13, 0, -0.16, 0, 8), leather);
+        b.part("fore" + sd, cyl(0.058 * f, 0.058 * f, 0.016, 0, -0.105, 0, 8), dark);
+        b.part("fore" + sd, cyl(0.052 * f, 0.052 * f, 0.016, 0, -0.215, 0, 8), dark);
+      }
+      if (!ar.legs) {
+        // knee wraps and a thigh strap
+        b.part("shin" + sd, cyl(0.07 * f, 0.066 * f, 0.07, 0, -0.03, 0, 8), 0x5a4a38);
+        b.part("thigh" + sd, cyl(0.082 * f, 0.08 * f, 0.022, 0, -0.2, 0, 8), dark);
+      }
+      if (!ar.feet) {
+        // turned boot cuffs and a strap over the instep
+        b.part("shin" + sd, cyl(0.079 * f, 0.073 * f, 0.05, 0, -0.2, 0, 10), 0x4a3828);
+        b.part("foot" + sd, box(0.115, 0.02, 0.03, 0, 0.02, 0.03), dark);
+      }
+    }
   }
   if (look.armour) armourParts(b, look.armour, f, hs);
   const height = (look.height ?? 1.8) / 1.8;

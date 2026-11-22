@@ -48,7 +48,8 @@ export class ModelActor {
   /** `headScale` shrinks a stock model's oversized head toward the game's own proportions; `tint` mutes its colours. */
   constructor(private tpl: ModelTemplate, scale: number, private headScale = 1, tint = 0xffffff) {
     this.root = cloneSkinned(tpl.scene);
-    this.root.scale.setScalar(scale);
+    // stock figures are stocky: draw them a little leaner so they stand with the game's own cast
+    this.root.scale.set(scale * 0.8, scale * 0.94, scale * 0.8);
     this.mixer = new THREE.AnimationMixer(this.root);
     const own = new Map<THREE.Material, THREE.MeshStandardMaterial>();
     this.root.traverse((o) => {

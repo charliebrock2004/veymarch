@@ -735,27 +735,79 @@ export function installHeightFog() {
 #endif`;
 }
 
+/** Shared by every water surface; the game sets these once a frame. */
+export const WATER = {
+  uWTime: { value: 0 },
+  uWSun: { value: new THREE.Vector3(0.4, 0.8, 0.3) },
+  uWSunCol: { value: new THREE.Color(0xfff0d0) },
+  uWZenith: { value: new THREE.Color(0x6f9fd0) },
+};
+
 /**
- * Water that mirrors the sky at grazing angles and stays clear when looked straight down into:
- * a fresnel blend toward the horizon colour, with the surface turning opaque as it reflects.
+ * Water: two layers of ripples drifting across each other in world space, a fresnel mirror of
+ * the sky (horizon colour low, zenith overhead), a sun glitter path, and a clear look straight
+ * down. `flow` is the drift in metres a second; `bank` fades a ribbon out at its edges (uv.x).
  */
-export function watery<T extends THREE.Material>(mat: T): T {
+export function watery<T extends THREE.Material>(mat: T, o: { flow?: [number, number]; scale?: number; bank?: boolean; murk?: number } = {}): T {
   const prev = mat.onBeforeCompile;
   const prevKey = mat.customProgramCacheKey;
+  const flow = o.flow ?? [0.05, 0.35];
+  const sc = (o.scale ?? 1).toFixed(3);
+  const murk = (o.murk ?? 0).toFixed(3);
   mat.onBeforeCompile = (shader, renderer) => {
     prev?.call(mat, shader, renderer);
-    shader.fragmentShader = shader.fragmentShader.replace(
-      "#include <opaque_fragment>",
-      `{
-        float wf = pow(1.0 - clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0), 3.0);
-        #ifdef USE_FOG
-          outgoingLight = mix(outgoingLight, fogColor * 1.04 + vec3(0.015, 0.025, 0.045), wf * 0.8);
+    Object.assign(shader.uniforms, WATER);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vWPos;\nvarying vec2 vWUv;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWUv = uv;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+        varying vec3 vWPos;
+        varying vec2 vWUv;
+        uniform float uWTime;
+        uniform vec3 uWSun;
+        uniform vec3 uWSunCol;
+        uniform vec3 uWZenith;`,
+      )
+      .replace(
+        "#include <opaque_fragment>",
+        `{
+        vec2 wp = vWPos.xz * ${sc};
+        vec2 fl = vec2(${flow[0].toFixed(3)}, ${flow[1].toFixed(3)}) * uWTime;
+        #ifdef USE_NORMALMAP
+          vec3 n1 = texture2D(normalMap, wp * 0.11 + fl * 0.11).xyz * 2.0 - 1.0;
+          vec3 n2 = texture2D(normalMap, wp.yx * 0.047 - fl.yx * 0.03 + 0.37).xyz * 2.0 - 1.0;
+          vec3 n3 = texture2D(normalMap, wp * 0.31 + fl * 0.4 + 0.11).xyz * 2.0 - 1.0;
+          vec2 rip = n1.xy * 0.5 + n2.xy * 0.7 + n3.xy * 0.22;
+        #else
+          vec2 rip = vec2(sin(wp.x * 1.7 + fl.x * 4.0) + sin(wp.y * 2.3 + fl.y * 4.0), cos(wp.x * 2.1 - fl.y * 3.0)) * 0.2;
         #endif
-        diffuseColor.a = mix(diffuseColor.a, 1.0, wf);
+        vec3 wN = normalize(vec3(rip.x * 0.32, 1.0, rip.y * 0.32));
+        vec3 wV = normalize(cameraPosition - vWPos);
+        float cosV = clamp(dot(wN, wV), 0.0, 1.0);
+        float wf = 0.03 + 0.97 * pow(1.0 - cosV, 4.0);
+        vec3 wR = reflect(-wV, wN);
+        #ifdef USE_FOG
+          vec3 hor = fogColor;
+        #else
+          vec3 hor = uWZenith;
+        #endif
+        vec3 skyC = mix(hor * 0.92, uWZenith, pow(clamp(wR.y, 0.0, 1.0), 0.55));
+        float sunUp = smoothstep(-0.05, 0.15, uWSun.y);
+        float sd = max(dot(wR, normalize(uWSun)), 0.0);
+        vec3 glit = uWSunCol * (pow(sd, 420.0) * 3.0 + pow(sd, 36.0) * 0.22) * sunUp;
+        // looking down: the lit body colour, a little greener where the ripples face you
+        vec3 body = outgoingLight * (0.75 + 0.5 * cosV) + diffuseColor.rgb * hor * 0.18;
+        outgoingLight = mix(body, skyC, wf * (1.0 - ${murk})) + glit;
+        float al = mix(diffuseColor.a, 1.0, clamp(wf * 1.4 + dot(glit, vec3(0.3)), 0.0, 1.0));
+        ${o.bank ? "float bk = smoothstep(0.0, 0.16, vWUv.x) * smoothstep(1.0, 0.84, vWUv.x); float foam = (1.0 - smoothstep(0.0, 0.3, bk)) * smoothstep(0.1, 0.6, rip.x + rip.y + 0.5); outgoingLight = mix(outgoingLight, hor * 1.1 + 0.08, foam * 0.35); al *= smoothstep(0.0, 0.5, bk);" : ""}
+        diffuseColor.a = al;
       }
       #include <opaque_fragment>`,
-    );
+      );
   };
-  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ""}|water`;
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ""}|water2|${flow}|${sc}|${murk}|${o.bank ? 1 : 0}`;
   return mat;
 }

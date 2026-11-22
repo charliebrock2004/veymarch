@@ -52,7 +52,7 @@ try {
     await V("face", yaw);
     await settle(10);
     await page.screenshot({ path: join(out, `${tag}-${name}.png`), timeout: 180000 });
-    stats[name] = await V("perf");
+    stats[name] = { ...(await V("perf")), ...(await V("lights")) };
   }
 } catch (e) { errors.push("harness: " + e.message); }
 writeFileSync(join(out, `${tag}-stats.json`), JSON.stringify({ stats, errors }, null, 1));

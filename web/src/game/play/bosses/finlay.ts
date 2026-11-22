@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Decal } from "../../engine/fx";
-import { Poser, buildHuman, characterMaterial, poseHuman, type HumanAction, type HumanLook, type Rig } from "../../engine/rig";
+import { Poser, buildHuman, characterMaterial, rimmed, poseHuman, type HumanAction, type HumanLook, type Rig } from "../../engine/rig";
 import { BOSSES, type BossDef } from "../../data/bosses.ts";
 import { ZONES } from "../../data/zones.ts";
 import type { Boss, BossEnv } from "../bossapi";
@@ -53,11 +53,11 @@ const LOOK: HumanLook = {
   skin: 0xd9b08c,
   hair: 0xd8c078,
   hairStyle: "short",
-  shirt: 0x1d1b1c,
-  coat: 0x151518,
+  shirt: 0x2a2729,
+  coat: 0x24242a,
   coatLong: true,
-  trousers: 0x131316,
-  boots: 0x0d0d0f,
+  trousers: 0x202026,
+  boots: 0x18181b,
   belt: 0x2a2018,
   frame: 1.22,
   height: 1.8,
@@ -65,9 +65,9 @@ const LOOK: HumanLook = {
 };
 
 // plate colours: blackened field plate, worn at the edges, one dull brass seal
-const PLATE = 0x1b1c21;
-const EDGE = 0x34363e;
-const RIVET = 0x4a4c54;
+const PLATE = 0x2e3038;
+const EDGE = 0x4c4f5a;
+const RIVET = 0x6a6d78;
 const SEAL = 0x7a6430;
 
 /** Parts in bone space, merged into one skinned mesh bound to the rig's own skeleton. */
@@ -254,8 +254,10 @@ export class Finlay implements Boss {
   private recentHits: number[] = [];
 
   /** Finlay's body and fight, reused by later bosses with their own def, blade and phase names. */
-  constructor(private env: BossEnv, private parent: THREE.Object3D, def: BossDef = BOSSES.finlay, o: { weapon?: string; phases?: string[] } = {}) {
+  private greeting: string;
+  constructor(private env: BossEnv, private parent: THREE.Object3D, def: BossDef = BOSSES.finlay, o: { weapon?: string; phases?: string[]; greeting?: string } = {}) {
     this.def = def;
+    this.greeting = o.greeting ?? "You're late.";
     this.phaseNames = o.phases ?? ["", "The captain", "Helm off", "The rite"];
     this.cx = ZONES[this.def.zone].ox + this.def.x;
     this.cz = this.def.z;
@@ -267,7 +269,7 @@ export class Finlay implements Boss {
     this.mat = characterMaterial.clone() as THREE.MeshLambertMaterial;
     this.rig.mesh.material = this.mat;
     this.rig.group.updateMatrixWorld(true);
-    this.plateMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    this.plateMat = rimmed(new THREE.MeshLambertMaterial({ vertexColors: true }));
     this.rig.group.add(buildPlate(this.rig, this.plateMat));
     this.helm = buildHelm();
     this.rig.bones.head.add(this.helm);
@@ -349,7 +351,7 @@ export class Finlay implements Boss {
   startIntro() {
     if (this.st !== "dormant") return;
     this.go("intro", 3);
-    this.env.speak("You're late.");
+    this.env.speak(this.greeting);
   }
 
   canTakeHit() {

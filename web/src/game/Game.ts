@@ -12,7 +12,7 @@ import { Audio } from "./engine/audio";
 import type { ThemeId } from "./engine/music";
 import { armourCode, armourLook } from "./play/gear";
 import { Beam, DecalPool, Flashes, Trail } from "./engine/fx";
-import { installHeightFog, shared } from "./engine/kit";
+import { WATER, installHeightFog, shared } from "./engine/kit";
 import { makeMaterials } from "./engine/materials";
 import { Particles, buildGlows } from "./engine/particles";
 import { Poser, buildHuman, poseHuman, type ArmourLook, type HumanAction, type HumanLook, type Rig } from "./engine/rig";
@@ -212,6 +212,7 @@ function lookToHuman(l: Look, armour?: ArmourLook): HumanLook {
     frame: [0.9, 1, 1.12][l.body],
     height: [1.74, 1.8, 1.84][l.body],
     pin: true,
+    kit: true,
     belt: 0x3c2a1c,
   };
 }
@@ -291,6 +292,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     scene.add(l);
     lightPool.push(l);
   }
+  const lantern = new THREE.PointLight(0xffc890, 0, 13, 1.3);
+  scene.add(lantern);
   const stage = new THREE.PointLight(0xffc888, 0, 26, 1.4);
   scene.add(stage);
   const sky = buildSky();
@@ -519,6 +522,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let lastShrine: string | null = null;
   let mapHere: string | null = null;
   let introSeen = false;
+  /** the camera leaves the shoulder to show a boss as it wakes */
+  const INTRO_CAM = 3.2;
+  let introCam = 0;
+  let introBoss: { x: number; y: number; z: number; def: BossDef } | null = null;
   let stationNear: Station = "hand";
   let prompt = "";
   let promptAct: (() => void) | null = null;
@@ -2554,6 +2561,24 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     x = camTgt.x + right.x * shoulder * 0.9;
     z = camTgt.z + right.z * shoulder * 0.9;
     camera.lookAt(x, camTgt.y, z);
+    if (introCam > 0 && introBoss && mode === "play" && !P.dead) {
+      introCam -= rdt;
+      const u = 1 - introCam / INTRO_CAM;
+      // ease in over the first quarter, hold, and hand back over the last quarter
+      const w = Math.min(1, u / 0.22, (1 - u) / 0.22);
+      const e = w * w * (3 - 2 * w);
+      const bx = introBoss.x;
+      const bz = introBoss.z;
+      const size = introBoss.def.r ? Math.min(3.2, 1.6 + introBoss.def.r * 0.12) : 2;
+      const a0 = Math.atan2(P.x - bx, P.z - bz) + (u - 0.5) * 0.7;
+      const rad = size * 2.6 - u * 0.8;
+      const ix = bx + Math.sin(a0) * rad;
+      const iz = bz + Math.cos(a0) * rad;
+      const iy = Math.max(groundAt(ix, iz) + 0.6, introBoss.y + size * 0.45);
+      const here = camera.position.clone();
+      camera.position.set(here.x + (ix - here.x) * e, here.y + (iy - here.y) * e, here.z + (iz - here.z) * e);
+      camera.lookAt(x + (bx - x) * e, camTgt.y + (introBoss.y + size * 0.85 - camTgt.y) * e, z + (bz - z) * e);
+    } else introCam = 0;
     void dt;
   }
 
@@ -2602,25 +2627,25 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       sun.intensity = 0.55 + 0.6 * dayK;
       hemi.color.setHex(0x9aa4b4);
       hemi.groundColor.setHex(0x2a2a30);
-      hemi.intensity = 0.75 + 0.45 * dayK;
+      hemi.intensity = 1.15 + 0.45 * dayK;
       zen.setHex(0x3a4250);
       hor.setHex(0x6a7280);
       fogC.setHex(0x3a4048);
       density = 0.02;
-      exposure = 1.2;
+      exposure = 1.5;
       sunDir.set(0.3, 0.9, -0.3).normalize();
     } else if (ZONES[P.zone].indoor && mode !== "title") {
       const court = P.zone === "castle" && P.z > DUN.galleryZ1 + 4;
       sun.color.setHex(court ? 0xffc890 : 0xffb070);
-      sun.intensity = court ? 1.6 : 0.35;
-      hemi.color.setHex(0x8a7a6a);
-      hemi.groundColor.setHex(0x2a2018);
-      hemi.intensity = court ? 0.9 : 0.55;
+      sun.intensity = court ? 1.6 : 0.45;
+      hemi.color.setHex(0x9a8c7c);
+      hemi.groundColor.setHex(0x3a3028);
+      hemi.intensity = court ? 0.9 : 0.95;
       zen.setHex(0x3a3050);
       hor.setHex(0xb07a5a);
       fogC.setHex(court ? 0x4a3438 : 0x1e1814);
       density = court ? 0.012 : 0.03;
-      exposure = 1.15;
+      exposure = court ? 1.15 : 1.32;
       sunDir.set(0.35, 0.9, -0.25).normalize();
     } else {
       if (reg === "forest" || reg === "castle") {
@@ -2646,6 +2671,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     fog.density += (density - fog.density) * Math.min(1, rdt * 1.5);
     renderer.toneMappingExposure += (exposure - renderer.toneMappingExposure) * Math.min(1, rdt * 2);
     sky.set({ zenith: zen, horizon: fog.color, sunDir, sunColor: sun.color, night: 1 - dayK, time: performance.now() / 1000, cloud: 0.5 });
+    WATER.uWTime.value = performance.now() / 1000;
+    WATER.uWSun.value.copy(sunDir);
+    WATER.uWSunCol.value.copy(sun.color);
+    WATER.uWZenith.value.copy(zen);
     sky.mesh.position.copy(camera.position);
     // light shafts: only under an open sky, and only while the sun is in front of the lens
     sunNdc.copy(camera.position).addScaledVector(sunDir, 800).project(camera);
@@ -2671,6 +2700,14 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const bossLit = litBoss && litBoss.stageLight && litBoss.active && litBoss.st !== "dead";
     stage.intensity += ((bossLit ? 60 : 0) - stage.intensity) * Math.min(1, rdt * 2);
     if (litBoss) stage.position.set(litBoss.x, litBoss.y + 6.5, litBoss.z - 1.5);
+    // a hand lantern's worth of warm light around the player where there is no sky
+    const dim = mode === "title" || mode === "create" ? 0 : ZONES[P.zone].indoor ? (openSky ? 0.7 : 1) : night * 0.45;
+    // while a boss is being shown, the same light keys it from the camera so it is not a silhouette
+    const keyed = introCam > 0.4;
+    lantern.intensity += ((keyed ? 55 : dim * 7) - lantern.intensity) * Math.min(1, rdt * 3);
+    lantern.distance = keyed ? 26 : 13;
+    if (keyed) lantern.position.set(camera.position.x, camera.position.y + 0.8, camera.position.z);
+    else lantern.position.set(P.x, P.y + 2.1, P.z);
     // point lights: nearest fires (always) and lamps (at night)
     const cands: { p: THREE.Vector3; fire: boolean }[] = [];
     const zb = zones.get(P.zone);
@@ -2906,8 +2943,6 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       n.mesh.scale.setScalar(s);
     }
     // water and gate
-    world.waterMat.normalMap!.offset.y -= dt * 0.08;
-    world.waterMat.normalMap!.offset.x += dt * 0.01;
     world.gate.sealMat.uniforms.uTime.value = t;
     if (gateOpening) {
       gateT += dt;
@@ -3015,6 +3050,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }
       if (zb.st === "intro" && lastBossSt !== "intro") {
         introSeen = true;
+        introCam = INTRO_CAM;
+        introBoss = zb;
         audio.bell(0.2, 523);
         placeAt = performance.now();
         placeName = zb.def.name;
@@ -4681,6 +4718,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       });
       return out;
     },
+    lights: () => ({ intro: introCam, sun: sun.intensity, hemi: hemi.intensity, exp: renderer.toneMappingExposure, fog: (scene.fog as THREE.FogExp2).density, fogC: (scene.fog as THREE.FogExp2).color.getHexString(), lantern: lantern.intensity }),
     perf: () => ({ calls: renderer.info.render.calls, tris: renderer.info.render.triangles, geos: renderer.info.memory.geometries, tex: renderer.info.memory.textures, progs: renderer.info.programs?.length ?? 0, fps }),
     cookiePos: () => (cookie ? { x: cookie.x, z: cookie.z, yaw: cookie.yaw, st: cookie.st } : null),
     npc: (id: string) => {

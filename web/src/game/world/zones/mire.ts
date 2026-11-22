@@ -393,15 +393,15 @@ export function buildMire(env: ZoneEnv): ZoneBuild {
     const g = new THREE.PlaneGeometry(w, d, 1, 1);
     g.rotateX(-Math.PI / 2);
     const mat = watery(new THREE.MeshPhongMaterial({
-      color: 0x18221a,
-      specular: 0x6a7a6a,
-      shininess: 90,
+      color: 0x1c2a20,
+      specular: 0x000000,
+      shininess: 10,
       normalMap: waterTex,
-      normalScale: new THREE.Vector2(0.35, 0.35),
+      normalScale: new THREE.Vector2(0.001, 0.001),
       transparent: true,
-      opacity: 0.86,
+      opacity: 0.88,
       depthWrite: false,
-    }));
+    }), { flow: [0.03, 0.05], scale: 0.8, murk: 0.25 });
     const water = new THREE.Mesh(g, mat);
     water.position.set(X + (B.minX + B.maxX) / 2, WATER, (B.minZ + B.maxZ) / 2);
     water.renderOrder = 1;

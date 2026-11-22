@@ -35,11 +35,11 @@ const GAPS = [0.22, 1.42, 2.62];
 const GAP_HALF = 0.11;
 
 const C = {
-  black: 0x3a3a40,
-  blacker: 0x26262c,
-  wet: 0x2e3034,
-  iron: 0x2e2e32,
-  timber: 0x2e2620,
+  black: 0x505058,
+  blacker: 0x383840,
+  wet: 0x42454a,
+  iron: 0x3e3e44,
+  timber: 0x40352c,
   bone: 0xc8bea4,
   candle: 0xe8dcc0,
   red: 0x4a1a1a,
@@ -146,7 +146,7 @@ export function buildKeep(env: ZoneEnv): ZoneBuild {
 
   // ------------------------------------------------------------ building kit
   const floor = (x0: number, x1: number, z0: number, z1: number, color = 0x5a5a60, y = 0) => {
-    put(ctx, "flagstone", boxUV(x1 - x0, 0.4, z1 - z0, 3, 3), F((x0 + x1) / 2, (z0 + z1) / 2, 0, y), 0, -0.2, 0, 0, 0, 0, color, false);
+    put(ctx, "flagstone", boxUV(x1 - x0, 0.4, z1 - z0, 3, 3), F((x0 + x1) / 2, (z0 + z1) / 2, 0, y), 0, -0.2, 0, 0, 0, 0, new THREE.Color(color).multiplyScalar(1.75).getHex(), false);
   };
   const ceil = (x0: number, x1: number, z0: number, z1: number, h: number) => {
     put(ctx, "stoneDark", boxUV(x1 - x0 + 1, 0.6, z1 - z0 + 1, 3, 3), F((x0 + x1) / 2, (z0 + z1) / 2, 0, h), 0, 0.3, 0, 0, 0, 0, 0x2a2a30, false);
@@ -1096,6 +1096,6 @@ export function buildKeep(env: ZoneEnv): ZoneBuild {
     anchors,
     interacts,
     update,
-    fog: { color: 0x26282e, density: 0.02 },
+    fog: { color: 0x3a4048, density: 0.015 },
   };
 }
