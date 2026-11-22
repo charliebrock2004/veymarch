@@ -97,6 +97,7 @@ export class ModelActor {
     let skull: THREE.Object3D | undefined;
     this.root.traverse((o) => {
       if (/_Head$/.test(o.name)) skull = o;
+      if (/_Helmet$/.test(o.name)) o.visible = false;
     });
     if (!skull || !this.head) return this;
     this.root.updateMatrixWorld(true);
@@ -131,6 +132,7 @@ export class ModelActor {
     let skull: THREE.Object3D | undefined;
     this.root.traverse((o) => {
       if (/_Head$/.test(o.name)) skull = o;
+      if (/_Helmet$/.test(o.name)) o.visible = false;
     });
     if (!skull || !this.head) return this;
     this.root.updateMatrixWorld(true);
@@ -149,7 +151,7 @@ export class ModelActor {
       spike.position.set(Math.sin(a) * r, d.y * (i % 2 ? 0.17 : 0.24), Math.cos(a) * r);
       g.add(spike);
     }
-    g.position.set(c.x, c.y + d.y * 0.06, c.z);
+    g.position.set(c.x, c.y - d.y * 0.02, c.z);
     g.traverse((o) => (o.castShadow = true));
     this.root.add(g);
     g.updateMatrixWorld(true);
