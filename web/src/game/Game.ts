@@ -4209,7 +4209,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (mode !== "play") return;
     if (tip && performance.now() - tip.at > 9000) tip = null;
     deedT -= dt;
-    if (deedQueue.length && deedT <= 0 && (!banner || performance.now() - banner.at > 4000)) {
+    // a boss reveal has the middle of the screen to itself
+    if (introCam > 0 || performance.now() - placeAt < 4200) {
+      /* wait */
+    } else if (deedQueue.length && deedT <= 0 && (!banner || performance.now() - banner.at > 4000)) {
       showBanner("DEED DONE", deedQueue.shift()!);
       audio.quest();
       deedT = 4.5;

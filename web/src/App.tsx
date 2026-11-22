@@ -960,7 +960,7 @@ function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
                 <span>{b.text}</span>
                 <small>Pays {b.reward}</small>
                 {!b.paid && b.n >= b.of && (
-                  <button className="vm-btn primary vm-claim" onClick={() => api.claimBounty(b.id)}>
+                  <button className="vm-mbtn small primary vm-claim" onClick={() => api.claimBounty(b.id)}>
                     Claim
                   </button>
                 )}

@@ -1450,11 +1450,13 @@ input {
     width: 44vw;
   }
   .vm-top {
-    top: calc(84px + var(--sat));
-    width: 70vw;
+    top: calc(124px + var(--sat));
+    width: 62vw;
+    left: calc(12px + var(--sal));
+    transform: none;
   }
   .vm-boss {
-    top: calc(84px + var(--sat));
+    top: calc(164px + var(--sat));
     width: 86vw;
   }
   .vm-bag {
@@ -1556,7 +1558,8 @@ input {
     display: block;
     position: absolute;
     left: 50%;
-    top: calc(50px + var(--sat));
+    top: auto;
+    bottom: calc(190px + var(--sab, 0px));
     transform: translateX(-50%);
     z-index: 55;
     padding: 6px 12px;
@@ -2212,7 +2215,7 @@ input {
 }
 .vm-claim {
   margin-top: 8px;
-  padding: 6px 18px;
+  justify-self: start;
 }
 
 /* marks: progress toward the next rank */
@@ -2271,4 +2274,15 @@ input {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+
+/* portrait: the objective sits under the vitals, so passing notices move clear of it */
+@media (orientation: portrait) {
+  .vm-banner {
+    top: 27%;
+  }
+  .vm-tip {
+    top: auto;
+    bottom: calc(300px + var(--sab));
+  }
 }
