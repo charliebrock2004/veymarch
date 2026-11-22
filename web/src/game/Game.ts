@@ -40,7 +40,7 @@ import { Room, type Bundle, type Ev } from "../net/room";
 import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
 import { BOUNTIES, FINDS, pickBounties, type Find } from "./data/explore";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
-import { RUMOURS, cardView, charmKey, charms, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
+import { RUMOURS, cardView, charmKey, charms, trophies, trophyLines, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
 import type { Card, Charm, PlaceView } from "./data/renown.ts";
 import { MARKS, RANK_NAMES, markBonuses, markBoon, markRank, markVs, marksView, type MarkView } from "./data/marks.ts";
 
@@ -864,6 +864,54 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }, () => {});
   }
 
+  const RACK = { x: -4.6, z: -15.2, yaw: -0.5 };
+  let rack: THREE.Group | null = null;
+  let rackKey = "?";
+  let rackCol = false;
+  /** The trophy rack by your door: four pegs, filled as the great ones fall. */
+  function syncRack() {
+    if (!world) return;
+    const ts = trophies(codex.k);
+    const key = ts.map((t) => (t.won ? 1 : 0)).join("");
+    if (rack && key === rackKey) return;
+    rackKey = key;
+    rack?.parent?.remove(rack);
+    rack = new THREE.Group();
+    const wood = new THREE.MeshStandardMaterial({ color: 0x5a4028, roughness: 0.9 });
+    const add = (g: THREE.BufferGeometry, m: THREE.Material, x: number, y: number, z = 0) => {
+      const o = new THREE.Mesh(g, m);
+      o.position.set(x, y, z);
+      o.castShadow = true;
+      rack!.add(o);
+      return o;
+    };
+    for (const x of [-1.5, 1.5]) add(new THREE.BoxGeometry(0.16, 2.0, 0.16), wood, x, 1.0);
+    add(new THREE.BoxGeometry(3.3, 0.14, 0.14), wood, 0, 1.85);
+    add(new THREE.BoxGeometry(3.3, 0.1, 0.1), wood, 0, 0.9);
+    ts.forEach((t, i) => {
+      const x = -1.05 + i * 0.7;
+      add(new THREE.CylinderGeometry(0.025, 0.025, 0.22, 6).rotateX(Math.PI / 2), wood, x, 1.72, 0.1);
+      if (!t.won) return;
+      const mat = new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.55, metalness: t.id === "finlay" ? 0.6 : 0.1 });
+      if (t.id === "cookie") {
+        add(new THREE.BoxGeometry(0.34, 0.26, 0.26), mat, x, 1.42, 0.14);
+        add(new THREE.CylinderGeometry(0.02, 0.02, 0.2, 6).rotateZ(Math.PI / 2), wood, x + 0.24, 1.44, 0.14);
+      } else if (t.id === "boe") {
+        add(new THREE.TorusGeometry(0.2, 0.05, 8, 18), mat, x, 1.48, 0.14);
+        add(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshStandardMaterial({ color: 0xff5a3a, emissive: 0xff3a1a, emissiveIntensity: 0.8 }), x, 1.28, 0.16);
+      } else if (t.id === "finlay") {
+        add(new THREE.SphereGeometry(0.2, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.62), mat, x, 1.44, 0.14);
+        add(new THREE.BoxGeometry(0.05, 0.2, 0.06), mat, x, 1.36, 0.33);
+      } else {
+        add(new THREE.CylinderGeometry(0.19, 0.19, 0.12, 12, 1, true, 0, Math.PI * 1.1), new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.6, side: THREE.DoubleSide }), x, 1.42, 0.14);
+        for (const a of [0.3, 1.2, 2.1, 3.0]) add(new THREE.ConeGeometry(0.035, 0.14, 5), mat, x + Math.sin(a) * 0.19, 1.54, 0.14 + Math.cos(a) * 0.19);
+      }
+    });
+    rack.position.set(RACK.x, world.groundAt(RACK.x, RACK.z), RACK.z);
+    rack.rotation.y = RACK.yaw;
+    zoneRoot("over").add(rack);
+  }
+
   let belt: THREE.Group | null = null;
   let beltKey = "";
   function charmMesh(c: Charm): THREE.Mesh {
@@ -1539,6 +1587,15 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         else loot([["cons_bandage", 2], ["mat_fibre", 2], ["mat_wood", 1]]);
         audio.pickup();
       },
+    });
+    syncRack();
+    if (!rackCol) {
+      rackCol = true;
+      world.col.circle(RACK.x, RACK.z, 0.5);
+    }
+    interacts.push({
+      x: RACK.x, z: RACK.z, r: 2.6, zone: "over", label: () => "Look over your trophies",
+      act: () => openTalkLines("The trophy rack", "By your door", trophyLines(trophies(codex.k))),
     });
     interacts.push({
       x: a.hollow.x, z: a.hollow.z, r: 2.0, zone: "over", label: () => (flags.hollow ? null : "Search the hollow"),
@@ -3884,6 +3941,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (!def || bossFinished.has(id)) return;
     bossFinished.add(id);
     noteKill("boss_" + id);
+    syncRack();
     worldFlags[def.flag] = true;
     if (id === "cookie") {
       flags.cookie = true;

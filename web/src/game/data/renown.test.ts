@@ -81,3 +81,15 @@ test("each earned mark hangs a charm on the belt, bigger by rank", async () => {
   assert.equal(out[1].glow, false);
   assert.ok(out[0].size > out[1].size);
 });
+
+test("the trophy rack has a peg for every boss and fills as they fall", async () => {
+  const { TROPHY_IDS, trophies, trophyLines } = await import("./renown.ts");
+  const { BOSSES } = await import("./bosses.ts");
+  assert.deepEqual([...TROPHY_IDS].sort(), Object.keys(BOSSES).sort());
+  assert.equal(trophyLines(trophies({})).length, 1);
+  const t = trophies({ boss_cookie: 1, wolf: 9 });
+  assert.deepEqual(t.map((x) => x.won), [true, false, false, false]);
+  assert.match(trophyLines(t)[0], /^Cookie: /);
+  assert.equal(trophyLines(t)[1], "3 pegs still empty.");
+  assert.match(trophyLines(trophies({ boss_cookie: 1, boss_boe: 1, boss_finlay: 2, boss_grave_king: 1 })).at(-1)!, /Every peg is full/);
+});

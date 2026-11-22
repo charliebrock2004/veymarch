@@ -158,7 +158,7 @@ Scores are 1 to 5. For difficulty, time and performance cost, 1 is easiest, shor
 | 1 | Marks: data, combat hooks, Journal tab, banner, tests | Built |
 | 2 | Villager reactions, perfect-dodge slow motion, bestiary ranks | Built |
 | 3 | Rumours and a Places journal for the 11 hidden caches; cold open on the Kingsroad | Built |
-| 4 | Character card with earned title (built); marks on the body, trophy hall | Part built |
+| 4 | Character card with earned title, charms on the body for each mark, trophy rack in Hearthfen | Built |
 | 5 | Naming the dead, mining gates, rematches | |
 | 6 | Offline install, codex moved into the save, online Chapter II | Needs the realm database migration |
 

@@ -146,3 +146,23 @@ export function charms(marks: MarkView[]): Charm[] {
 }
 /** A short key that changes only when the string should be rebuilt. */
 export const charmKey = (c: Charm[]) => c.map((x) => x.id + x.rank).join(",");
+
+/** The trophy rack by your door in Hearthfen: one peg for each of the great ones. */
+export type Trophy = { id: string; name: string; what: string; color: number; won: boolean };
+const TROPHIES: [string, string, string, number][] = [
+  ["cookie", "Cookie", "A cracked music box. It still tries to play.", 0x8fb7d8],
+  ["boe", "Boe", "A red collar, far too big for any dog you would want to meet.", 0xb02a22],
+  ["finlay", "Finlay", "A captain's black helm, dented where you dented it.", 0x2a2830],
+  ["grave_king", "The Grave King", "Half a crown of bone. The other half is still pointing south-west.", 0xd8d2b8],
+];
+export const TROPHY_IDS = TROPHIES.map((t) => t[0]);
+export function trophies(k: Record<string, number>): Trophy[] {
+  return TROPHIES.map(([id, name, what, color]) => ({ id, name, what, color, won: (k["boss_" + id] ?? 0) > 0 }));
+}
+/** What you read when you look the rack over. */
+export function trophyLines(t: Trophy[]): string[] {
+  const won = t.filter((x) => x.won);
+  if (!won.length) return ["Four empty pegs. Somebody expected you to fill them."];
+  const left = t.length - won.length;
+  return [...won.map((x) => `${x.name}: ${x.what}`), left ? `${left} peg${left > 1 ? "s" : ""} still empty.` : "Every peg is full. The March has run out of great ones, for now."];
+}

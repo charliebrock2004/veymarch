@@ -8,6 +8,7 @@
 - Villagers remark on your strongest mark the first time they see it (30 lines, one per mark and rank), ahead of their usual line. Quest talk is left alone.
 - A roll that passes through a blow slows the world for under half a second.
 - Bestiary ranks: Known at one kill, Studied at 10 (health, fire weakness, spoils), Mastered at 50 (every blow and its warning time). A beaten boss is fully known.
+- Trophy rack by your door in Hearthfen: four pegs, one for each boss. Beating one hangs its trophy there (music box, collar, helm, half a crown), and looking the rack over tells you what each is.
 - Marks show on the body: each earned mark strings a charm round your shoulders (a fang for beasts, a bone for the dead, a coin for men, and so on). Charms grow with rank and glow at rank III.
 - Character card at the top of the Marks tab: your name, the title your strongest mark has earned you (30 titles, "the Unmarked" until then), and your record: level, mark ranks, foes and great ones felled, times buried, blows turned and slipped, lands walked, hidden places found.
 - Cold open: a brand-new single-player character starts on the Kingsroad at night facing an undead knight that cannot be beaten. Struck down, run off, or after 45 seconds, they wake in their bed in Hearthfen. It is not counted as a death and does not repeat. Existing characters and shared worlds are untouched.
