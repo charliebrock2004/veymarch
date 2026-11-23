@@ -1,20 +1,34 @@
 # Unity integration
 
-Not verified. No Unity editor has opened this folder.
+**Status: written, type-checked, never opened in Unity.** Follow `Docs/device/PHASE3.md` for the first open, setup, and the phone checkpoint.
 
-The simulation and content live in local packages:
+## On first open
 
-- `Packages/com.veyrmarch.content` — definitions. `noEngineReferences`.
-- `Packages/com.veyrmarch.sim` — rules. `noEngineReferences`.
+1. Open the repository folder with Unity 6.3 LTS (6000.3.x). Accept a different 6000.3 patch if the Hub offers one.
+2. Answer **Yes** if asked to enable the new input backends.
+3. Run **Veyrmarch → Setup → Run All Setup Steps**, then restart the editor once.
+4. Run **Veyrmarch → Validate Project**. It should say `clean`.
+5. Run every EditMode and PlayMode test in the Test Runner.
+6. Commit the `.meta` files and everything the setup generated.
 
-`dotnet test sim/Veyr.Tests.Sim` runs the same test sources Unity's editor test runner should pick up later (`Veyr.Tests.Sim.asmdef`, Edit Mode, Test Assemblies).
+## Where things are
 
-Do not add `UnityEngine` to those packages. Client adapters (tick, CharacterController, camera, uGUI) belong in `Assets/_Project/Client` and are not written yet, because they cannot be compiled here.
+| What | Path |
+| --- | --- |
+| Rules (pure C#, no `UnityEngine`) | `Packages/com.veyrmarch.sim`, `com.veyrmarch.content` |
+| Net contract, embedded host, client core (pure C#) | `Packages/com.veyrmarch.net`, `com.veyrmarch.server`, `com.veyrmarch.clientcore` |
+| Unity views and adapters | `Assets/_Project/Code/Client` (`Veyr.Client`) |
+| Composition root | `Assets/_Project/Code/App` (`Veyr.App`) |
+| Editor setup and scene generator | `Assets/_Project/Code/Editor` (`Veyr.Editor`) |
+| Input map | `Assets/_Project/Input/Veyr.inputactions` |
+| Generated after setup | `Assets/_Project/Scenes`, `Prefabs`, `Settings/Rendering`, `Art/Materials`, `Generated/<scene>` |
+| Play-mode tests | `Assets/Tests/PlayMode` |
 
-`ProjectSettings/ProjectVersion.txt` names Unity 6.3 LTS patch `6000.3.25f1`. That pin was not launched. If Hub has a different 6000.3 patch, retarget and commit the file the editor writes.
+## Rules for changing this layer
 
-URP and the Input System are not in `Packages/manifest.json` yet. Add them from Package Manager on first open. Do not invent a second engine.
-
-`Assets/_Project/Input/Veyr.inputactions` names the ten player actions and Touch plus Gamepad schemes. It has not been imported. If the editor rejects a binding path, fix the asset in the editor and commit that file. Do not treat this copy as proof the asset loaded.
-
-`Docs/assets/SLICE_PREFAB_SPEC.md` is the prefab and clip list for the first scenes. No `.unity` scene is in the repo on purpose. An unopened scene file would be a fake.
+- Rules live in `Veyr.Sim`. A MonoBehaviour reads snapshots and events and sends intents. It never sets health, items, seals, or damage.
+- `Veyr.Client` must not reference `Veyr.Server`. Only `Veyr.App` sees both.
+- Do not add `UnityEngine` to the packages under `Packages/com.veyrmarch.*`. The .NET build fails if you do.
+- One MonoBehaviour or ScriptableObject per file, file named after the class. Unity cannot bind a component otherwise.
+- Do not hand-edit generated scenes for structural changes. Change `SceneBuilder` and regenerate, so the next region is built the same way.
+- `tools/unity-api-stubs` declares the Unity API these files use, so CI can type-check them. If you use a new Unity member, declare it there with Unity's real signature. If Unity disagrees with the stub, Unity is right: fix both.

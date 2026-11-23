@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "claude/**", "slice/**"]
+  pull_request:
+
+jobs:
+  sim:
+    name: sim, server, client core, Unity compile checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      # Builds the shared libraries as netstandard2.1 / C# 9 (Unity's limits), the Unity
+      # assemblies against the hand-written API declarations, and the test projects.
+      - run: dotnet build sim/Veyrmarch.sln -c Release
+      - run: dotnet test sim/Veyrmarch.sln -c Release --no-build
+      - run: dotnet run --project sim/Veyr.Check -c Release --no-build
+      - run: dotnet run --project sim/Veyr.Loop -c Release --no-build
+
+  web:
+    name: browser reference client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build

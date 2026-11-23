@@ -1,0 +1,11 @@
+{
+  "name": "com.veyrmarch.server",
+  "version": "0.1.0",
+  "displayName": "Veyrmarch Server Host",
+  "description": "Runs the authoritative simulation: the embedded 20 Hz host used offline, snapshots, and interest. No UnityEngine yet; the dedicated process adds a Unity adapter in Phase 13.",
+  "unity": "6000.3",
+  "dependencies": {
+    "com.veyrmarch.sim": "0.1.0",
+    "com.veyrmarch.net": "0.1.0"
+  }
+}

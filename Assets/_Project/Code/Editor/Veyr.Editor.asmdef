@@ -1,0 +1,27 @@
+{
+    "name": "Veyr.Editor",
+    "rootNamespace": "Veyr.EditorTools",
+    "references": [
+        "Veyr.Sim",
+        "Veyr.Content",
+        "Veyr.Net",
+        "Veyr.Client.Core",
+        "Veyr.Client",
+        "Veyr.App",
+        "Unity.InputSystem",
+        "UnityEngine.UI",
+        "Unity.RenderPipelines.Universal.Runtime",
+        "Unity.RenderPipelines.Core.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

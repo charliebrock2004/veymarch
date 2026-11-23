@@ -52,3 +52,4 @@ credentials.json
 # Browser client
 web/node_modules/
 web/dist/
+.claude/worktrees/

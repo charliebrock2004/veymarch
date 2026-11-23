@@ -1,339 +1,1215 @@
-import { Backpack, Flame, Hand, Shield, Swords } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import type { GameApi, Hud } from "./game/Game";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { STATION_NAMES } from "./game/data/zones";
+import { RARITY_COLOR, SET_BONUS, type Rarity } from "./game/data/items";
+import type { GameApi, Hud, Look, Quality } from "./game/Game";
+import { Controls } from "./ui/Controls";
+import { Glyph, IconDefs, ItemIcon } from "./ui/icons";
+import { Online, PlayerKey, copyText, hasJoinLink } from "./ui/Online";
+import { Realm } from "./net/realm";
 
-const empty: Hud = {
-  ready: false,
-  mode: "boot",
-  name: "",
-  hp: 80,
-  maxHp: 80,
-  stam: 60,
-  maxStam: 60,
-  mana: 0,
-  maxMana: 0,
-  weapon: "Fists",
-  prompt: "",
-  quest: "",
-  talk: "",
-  talkName: "",
-  toast: "",
-  banner: "",
-  hour: 8,
-  night: false,
-  place: "Hearthfen",
-  ember: false,
-  boss: "",
-  bossHp: 0,
-  bossMax: 1,
-  items: [],
-  crafts: [],
-  floaters: [],
-  hasSave: false,
-  seal: false,
-};
+const SKINS = ["#f0d8c0", "#e2c0a0", "#c8a080", "#a07858", "#6e4a32"];
+const HAIRS = ["#2a2118", "#5a3a22", "#8a5a2a", "#b89a6a", "#9a3a22", "#d8d0c4"];
+const COATS = ["#7a6248", "#5e6b45", "#6a3b2a", "#3c4458", "#8a7a5a", "#2e2a26"];
+const STYLES = ["Tied", "Short", "Long", "Shaved"];
+const BODIES = ["Slight", "Average", "Broad"];
 
-export default function Home() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const apiRef = useRef<GameApi | null>(null);
-  const [hud, setHud] = useState<Hud>(empty);
-  const [charName, setCharName] = useState("");
-  const [hair, setHair] = useState<"tied" | "short">("tied");
-  const stick = useRef({ id: -1, x: 0, y: 0, ox: 0, oy: 0 });
-  const queued = useRef<boolean | null>(null);
+const STATION_NAME: Record<string, string> = STATION_NAMES;
 
-  const nameRef = useRef(charName);
-  const hairRef = useRef(hair);
-  nameRef.current = charName;
-  hairRef.current = hair;
+function fmtTime(s: number) {
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  return h ? `${h}h ${m % 60}m` : `${m}m`;
+}
+
+export default function App() {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const overlay = useRef<HTMLDivElement>(null);
+  const [api, setApi] = useState<GameApi | null>(null);
+  const [hud, setHud] = useState<Hud | null>(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    let dead = false;
-    let api: GameApi | null = null;
-    void import("./game/Game").then(({ mountGame }) => {
-      if (dead) return;
-      const game = mountGame(canvas);
-      api = game;
-      apiRef.current = game;
-      game.subscribe(setHud);
-      if (queued.current !== null) {
-        game.start({ name: nameRef.current, hair: hairRef.current, cont: queued.current });
-        queued.current = null;
-      }
-    });
+    let alive = true;
+    let dispose: (() => void) | null = null;
+    import("./game/Game")
+      .then(({ mountGame }) => {
+        if (!alive || !canvas.current || !overlay.current) return;
+        try {
+          const g = mountGame(canvas.current, overlay.current);
+          const off = g.subscribe(setHud);
+          setApi(g);
+          dispose = () => {
+            off();
+            g.dispose();
+          };
+        } catch (e) {
+          setError(String((e as Error)?.message ?? e));
+        }
+      })
+      .catch((e) => setError(String(e)));
     return () => {
-      dead = true;
-      api?.dispose();
-      apiRef.current = null;
+      alive = false;
+      dispose?.();
     };
   }, []);
 
-  const playing = hud.mode === "play" || hud.mode === "inventory" || hud.mode === "talk" || hud.mode === "dead";
-
-  function begin(cont: boolean) {
-    if (!apiRef.current) {
-      queued.current = cont;
-      return;
-    }
-    apiRef.current.start({ name: charName, hair, cont });
-  }
-
-  function onStickDown(e: ReactPointerEvent) {
-    const r = e.currentTarget.getBoundingClientRect();
-    stick.current = { id: e.pointerId, x: 0, y: 0, ox: r.left + r.width / 2, oy: r.top + r.height / 2 };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-  function onStickMove(e: ReactPointerEvent) {
-    if (stick.current.id !== e.pointerId) return;
-    const dx = e.clientX - stick.current.ox;
-    const dy = e.clientY - stick.current.oy;
-    const len = Math.hypot(dx, dy) || 1;
-    const cap = 42;
-    const m = Math.min(1, len / cap);
-    apiRef.current?.setStick((dx / len) * m, (dy / len) * m);
-  }
-  function onStickUp(e: ReactPointerEvent) {
-    if (stick.current.id !== e.pointerId) return;
-    stick.current.id = -1;
-    apiRef.current?.setStick(0, 0);
-  }
-
-  const hpPct = Math.max(0, (hud.hp / hud.maxHp) * 100);
-  const stPct = Math.max(0, (hud.stam / hud.maxStam) * 100);
+  useEffect(() => {
+    const stop = (e: Event) => e.preventDefault();
+    document.addEventListener("gesturestart", stop);
+    document.addEventListener("dblclick", stop);
+    const tm = (e: TouchEvent) => {
+      if ((e.target as HTMLElement)?.closest?.(".vm-scroll")) return;
+      e.preventDefault();
+    };
+    document.addEventListener("touchmove", tm, { passive: false });
+    return () => {
+      document.removeEventListener("gesturestart", stop);
+      document.removeEventListener("dblclick", stop);
+      document.removeEventListener("touchmove", tm);
+    };
+  }, []);
 
   return (
-    <main className="fixed inset-0 overflow-hidden bg-ink text-parchment select-none touch-none">
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
-      {hud.floaters.map((f) => (
-        <span key={f.id} className="pointer-events-none absolute font-display text-parchment" style={{ left: f.x, top: f.y }}>
-          {f.text}
-        </span>
-      ))}
+    <div className="vm-root">
+      <canvas ref={canvas} className="vm-canvas" />
+      <div ref={overlay} className="vm-overlay" />
+      {error && <div className="vm-error">This device could not start WebGL: {error}</div>}
+      <IconDefs />
+      {hud?.mode === "title" && <div className="vm-keyart drift back" />}
+      {api && hud && <Screens api={api} hud={hud} />}
+      {(!hud || hud.mode === "loading") && !error && <Loading progress={hud?.loading ?? 0} />}
+      <div className="vm-fade" style={{ opacity: hud?.fade ?? 0 }} />
+      <div className="vm-rotate">Turn your phone sideways for the best view.</div>
+    </div>
+  );
+}
 
-      {playing && (
-        <div className="pointer-events-none absolute inset-x-0 top-0 flex flex-col gap-2 px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <p className="font-display text-lg leading-none">{hud.place}</p>
-              <p className="text-sm text-muted">{hud.weapon} · {formatHour(hud.hour)}{hud.night ? " · night" : ""}</p>
+function Loading({ progress }: { progress: number }) {
+  return (
+    <div className="vm-loading">
+      <div className="vm-keyart" />
+      <div className="vm-wordmark big">VEYRMARCH</div>
+      <div className="vm-tagline">The Sealed Continent</div>
+      <div className="vm-progress">
+        <i style={{ width: `${Math.round(progress * 100)}%` }} />
+      </div>
+      <div className="vm-hint">Raising Hearthfen…</div>
+    </div>
+  );
+}
+
+const DEFAULT_LOOK: Look = { body: 1, skin: 1, hair: 0, hairColor: 1, coat: 0 };
+
+function Screens({ api, hud }: { api: GameApi; hud: Hud }) {
+  // a ?join=CODE link opens straight into online play
+  const [screen, setScreen] = useState<"main" | "solo" | "settings" | "online">(() => (hasJoinLink() ? "online" : "main"));
+  const [creating, setCreating] = useState<"solo" | "online">("online");
+  const [createErr, setCreateErr] = useState("");
+  if (hud.mode === "loading") return null;
+  if (hud.mode === "title")
+    return screen === "online" || screen === "solo" ? (
+      <Online
+        key={screen}
+        api={api}
+        solo={screen === "solo"}
+        back={() => setScreen("main")}
+        newCharacter={() => {
+          setCreating(screen);
+          setCreateErr("");
+          api.create(DEFAULT_LOOK);
+        }}
+      />
+    ) : screen === "settings" ? (
+      <Settings hud={hud} api={api} back={() => setScreen("main")} />
+    ) : (
+      <Main toOnline={() => setScreen("online")} toSingle={() => setScreen("solo")} toSettings={() => setScreen("settings")} />
+    );
+  if (hud.mode === "create")
+    return (
+      <Creator
+        api={api}
+        title="A new character"
+        sub="Your character travels with you between worlds: gear, health and progress."
+        confirm="Create"
+        error={createErr}
+        back={() => {
+          api.toTitle();
+          setScreen(creating);
+        }}
+        onConfirm={async (name, look) => {
+          try {
+            const realm = creating === "solo" ? await Realm.openSolo() : await Realm.open();
+            if (!realm) throw new Error("Online play is not set up on this build.");
+            const c = await realm.createCharacter(name, look);
+            try {
+              localStorage.setItem("veyrmarch.char", c.id);
+            } catch {
+              /* ignore */
+            }
+            api.toTitle();
+            setScreen(creating);
+          } catch (e) {
+            setCreateErr(String((e as Error)?.message ?? e));
+          }
+        }}
+      />
+    );
+  return <Play api={api} hud={hud} />;
+}
+
+function Main({ toOnline, toSingle, toSettings }: { toOnline: () => void; toSingle: () => void; toSettings: () => void }) {
+  const standalone = typeof window !== "undefined" && (window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone);
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  return (
+    <div className="vm-title">
+      <div className="vm-embers" aria-hidden="true">
+        {Array.from({ length: 14 }, (_, i) => (
+          <i key={i} style={{ left: `${(i * 37) % 100}%`, animationDelay: `${-i * 1.3}s`, animationDuration: `${9 + (i % 5) * 2.2}s` }} />
+        ))}
+      </div>
+      <div className="vm-title-head">
+        <div className="vm-wordmark big">VEYRMARCH</div>
+        <div className="vm-tagline">The Sealed Continent</div>
+      </div>
+      <div className="vm-menu">
+        <button className="vm-mbtn primary" onClick={toOnline}>
+          Play
+          <small>Your characters and worlds · play with friends</small>
+        </button>
+        <button className="vm-mbtn" onClick={toSingle}>
+          Single Player
+          <small>Your own world, saved on this device</small>
+        </button>
+        <button className="vm-mbtn" onClick={toSettings}>
+          Settings
+        </button>
+      </div>
+      <div className="vm-title-foot">
+        {ios && !standalone ? "For full screen: Share → Add to Home Screen. Play in landscape." : "Best played in landscape."}
+      </div>
+    </div>
+  );
+}
+
+function Settings({ hud, api, back }: { hud: Hud; api: GameApi; back: () => void }) {
+  return (
+    <div className="vm-panel-screen">
+      <div className="vm-panel">
+        <div className="vm-panel-head">
+          <h2>Settings</h2>
+          <button className="vm-icon" onClick={back} aria-label="Back">
+            <Glyph name="close" size={22} />
+          </button>
+        </div>
+        <SettingsBody hud={hud} api={api} extra={<PlayerKey />} />
+      </div>
+    </div>
+  );
+}
+
+function SettingsBody({ hud, api, extra }: { hud: Hud; api: GameApi; extra?: React.ReactNode }) {
+  return (
+    <div className="vm-settings vm-scroll">
+      {extra}
+      <div className="vm-field">
+        <label>Graphics</label>
+        <div className="vm-seg">
+          {(["low", "medium", "high"] as Quality[]).map((q) => (
+            <button key={q} className={hud.quality === q ? "on" : ""} onClick={() => api.setQuality(q)}>
+              {q[0].toUpperCase() + q.slice(1)}
+            </button>
+          ))}
+        </div>
+        <p>High adds light shafts and full bloom. Low drops shadows, grass and effects for older phones. {hud.fps ? `Now ${hud.fps} fps.` : ""}</p>
+      </div>
+      <div className="vm-field">
+        <label>Sound</label>
+        <div className="vm-seg">
+          <button className={!hud.muted ? "on" : ""} onClick={() => api.setMuted(false)}>
+            On
+          </button>
+          <button className={hud.muted ? "on" : ""} onClick={() => api.setMuted(true)}>
+            Off
+          </button>
+        </div>
+        {(["music", "sfx"] as const).map((k) => (
+          <label className="vm-vol" key={k}>
+            <span>{k === "music" ? "Music" : "Effects"}</span>
+            <input type="range" min={0} max={100} step={5} value={Math.round(hud.vol[k] * 100)} onChange={(e) => api.setVolume(k, Number(e.target.value) / 100)} />
+          </label>
+        ))}
+      </div>
+      <div className="vm-field">
+        <label>Controls</label>
+        <p>
+          Touch: left thumb moves (push to the edge to run), right thumb drags the view. Tap the sword for quick strikes, hold it for a heavy blow. Roll with the arrow. Hold the shield to block; block just as a blow lands to parry. The ring button holds the view on one foe; tap it again to let go.
+        </p>
+        <p>Keyboard: WASD move, Shift run, mouse drag look, J or click attack (hold for heavy), Space roll, F block, Q Ember, E interact, H bandage, T hold a foe in view, I bag, Esc pause.</p>
+        <p>Gamepad{hud.pad ? " (connected)" : ""}: left stick move, right stick look, X or RB attack (hold for heavy), A roll, LB block, Y interact, LT Ember, D-pad up bandage, press the right stick to hold a foe in view, Back bag, Start pause.</p>
+      </div>
+    </div>
+  );
+}
+
+function Creator({ api, back, onConfirm, title = "The Unmarked", sub = "No class, no mark. The seals do not know you.", confirm = "Wake in Hearthfen", error = "" }: {
+  api: GameApi; back: () => void; onConfirm: (name: string, look: Look) => void | Promise<void>; title?: string; sub?: string; confirm?: string; error?: string;
+}) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [look, setLook] = useState<Look>({ body: 1, skin: 1, hair: 0, hairColor: 1, coat: 0 });
+  const set = (p: Partial<Look>) => {
+    const next = { ...look, ...p };
+    setLook(next);
+    api.preview(next);
+  };
+  return (
+    <div className="vm-creator">
+      <div className="vm-creator-panel vm-scroll">
+        <h2>{title}</h2>
+        <p className="vm-sub">{sub}</p>
+        <div className="vm-field">
+          <label>Name</label>
+          <input value={name} maxLength={18} placeholder="Walker" onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div className="vm-field">
+          <label>Build</label>
+          <div className="vm-seg">
+            {BODIES.map((b, i) => (
+              <button key={b} className={look.body === i ? "on" : ""} onClick={() => set({ body: i as 0 | 1 | 2 })}>
+                {b}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="vm-field">
+          <label>Skin</label>
+          <div className="vm-swatches">
+            {SKINS.map((c, i) => (
+              <button key={c} className={look.skin === i ? "on" : ""} style={{ background: c }} onClick={() => set({ skin: i })} aria-label={"skin " + i} />
+            ))}
+          </div>
+        </div>
+        <div className="vm-field">
+          <label>Hair</label>
+          <div className="vm-seg">
+            {STYLES.map((s, i) => (
+              <button key={s} className={look.hair === i ? "on" : ""} onClick={() => set({ hair: i as 0 | 1 | 2 | 3 })}>
+                {s}
+              </button>
+            ))}
+          </div>
+          <div className="vm-swatches">
+            {HAIRS.map((c, i) => (
+              <button key={c} className={look.hairColor === i ? "on" : ""} style={{ background: c }} onClick={() => set({ hairColor: i })} aria-label={"hair colour " + i} />
+            ))}
+          </div>
+        </div>
+        <div className="vm-field">
+          <label>Coat</label>
+          <div className="vm-swatches">
+            {COATS.map((c, i) => (
+              <button key={c} className={look.coat === i ? "on" : ""} style={{ background: c }} onClick={() => set({ coat: i })} aria-label={"coat " + i} />
+            ))}
+          </div>
+        </div>
+        <div className="vm-creator-actions">
+          <button className="vm-mbtn" onClick={back}>
+            Back
+          </button>
+          <button
+            className="vm-mbtn primary"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await onConfirm(name, look);
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {busy ? "…" : confirm}
+          </button>
+        </div>
+        {error && <p className="vm-err">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+function Compass({ hud }: { hud: Hud }) {
+  const span = Math.PI * 0.9;
+  const marks = useMemo(() => [["N", 0], ["E", Math.PI / 2], ["S", Math.PI], ["W", -Math.PI / 2]] as const, []);
+  return (
+    <div className="vm-compass">
+      {marks.map(([l, a]) => {
+        const rel = Math.atan2(Math.sin(a - hud.camYaw), Math.cos(a - hud.camYaw));
+        if (Math.abs(rel) > span / 2) return null;
+        return (
+          <span key={l} className="vm-cmark" style={{ left: `${50 - (rel / span) * 100}%` }}>
+            {l}
+          </span>
+        );
+      })}
+      {hud.bearing !== null && (
+        <span className={`vm-cobj ${Math.abs(hud.bearing) > span / 2 ? "edge" : ""}`} style={{ left: `${50 - (Math.max(-span / 2, Math.min(span / 2, hud.bearing)) / span) * 100}%` }}>
+          ◆<small>{hud.dist > 3 ? `${Math.round(hud.dist)}m` : ""}</small>
+        </span>
+      )}
+    </div>
+  );
+}
+
+const RADAR_COLOR: Record<string, string> = { m: "#d8473a", e: "#ff8a3a", b: "#ff3a2a", a: "#b9a98a", n: "#e7c35a", s: "#7fc4e8", p: "#c9b8ff", f: "#7fe08a", o: "#ffd66a" };
+
+/** A round minimap that turns with the camera: foes, people, shrines, roads out and the goal. */
+function Minimap({ hud }: { hud: Hud }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const radar = hud.radar;
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv || !radar) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const size = cv.clientWidth || 120;
+    if (cv.width !== size * dpr) cv.width = cv.height = size * dpr;
+    const g = cv.getContext("2d");
+    if (!g) return;
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, size, size);
+    const c = size / 2;
+    const k = (c - 7) / radar.r;
+    g.beginPath();
+    g.arc(c, c, c - 1.5, 0, Math.PI * 2);
+    g.fillStyle = "rgba(18,15,12,0.62)";
+    g.fill();
+    g.strokeStyle = "rgba(231,220,200,0.08)";
+    g.lineWidth = 1;
+    for (const f of [0.33, 0.66]) {
+      g.beginPath();
+      g.arc(c, c, (c - 7) * f, 0, Math.PI * 2);
+      g.stroke();
+    }
+    // north tick
+    const na = hud.camYaw;
+    g.fillStyle = "rgba(231,220,200,0.75)";
+    g.font = "bold 9px Georgia, serif";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("N", c + Math.sin(na) * (c - 8), c - Math.cos(na) * (c - 8));
+    for (const [x, y, t] of radar.pts) {
+      const px = c + x * k;
+      const py = c - y * k;
+      g.fillStyle = RADAR_COLOR[t] ?? "#fff";
+      g.beginPath();
+      if (t === "o") {
+        g.moveTo(px, py - 5);
+        g.lineTo(px + 4, py);
+        g.lineTo(px, py + 5);
+        g.lineTo(px - 4, py);
+        g.closePath();
+      } else if (t === "s" || t === "p") g.rect(px - 2.5, py - 2.5, 5, 5);
+      else g.arc(px, py, t === "b" ? 4.5 : t === "e" ? 3.4 : t === "a" ? 1.8 : 2.5, 0, Math.PI * 2);
+      g.fill();
+    }
+    // the player: an arrow pointing where the camera looks
+    g.fillStyle = "#f4ead8";
+    g.beginPath();
+    g.moveTo(c, c - 6);
+    g.lineTo(c + 4.5, c + 4.5);
+    g.lineTo(c, c + 2);
+    g.lineTo(c - 4.5, c + 4.5);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = "rgba(215,164,65,0.55)";
+    g.lineWidth = 1.5;
+    g.beginPath();
+    g.arc(c, c, c - 1.5, 0, Math.PI * 2);
+    g.stroke();
+  }, [radar, hud.camYaw]);
+  if (!radar) return null;
+  return <canvas ref={ref} className="vm-minimap" aria-label="Minimap" />;
+}
+
+function Bar({ v, max, kind }: { v: number; max: number; kind: string }) {
+  return (
+    <div className={`vm-vbar ${kind}`}>
+      <i style={{ width: `${Math.max(0, Math.min(100, (v / max) * 100))}%` }} />
+    </div>
+  );
+}
+
+function Play({ api, hud }: { api: GameApi; hud: Hud }) {
+  const [toast, setToast] = useState("");
+  const [title, setTitle] = useState<{ a: string; b: string; at: number } | null>(null);
+  useEffect(() => {
+    if (!hud.toast) return;
+    setToast(hud.toast);
+    const t = setTimeout(() => setToast(""), 3200);
+    return () => clearTimeout(t);
+  }, [hud.toastId, hud.toast]);
+  useEffect(() => {
+    if (!hud.placeAt) return;
+    setTitle({ a: hud.place, b: hud.placeSub, at: hud.placeAt });
+    const t = setTimeout(() => setTitle(null), 3600);
+    return () => clearTimeout(t);
+  }, [hud.placeAt, hud.place, hud.placeSub]);
+  const [hint, setHint] = useState(() => {
+    try {
+      return localStorage.getItem("veyrmarch.hint") !== "1";
+    } catch {
+      return true;
+    }
+  });
+  const closeHint = () => {
+    setHint(false);
+    try {
+      localStorage.setItem("veyrmarch.hint", "1");
+    } catch {
+      /* private mode */
+    }
+  };
+  useEffect(() => {
+    if (!hint || hud.mode !== "play") return;
+    const t = setTimeout(closeHint, 12000);
+    return () => clearTimeout(t);
+  }, [hint, hud.mode]);
+  const hurt = performance.now() - hud.hurtAt < 500;
+  const low = hud.hp / hud.maxHp < 0.3;
+  const showControls = hud.mode === "play";
+  return (
+    <>
+      <div className={`vm-vignette ${hurt ? "hurt" : ""} ${low ? "low" : ""}`} />
+      {showControls && <Controls api={api} hud={hud} />}
+      <div className="vm-hud">
+        <div className="vm-vitals">
+          <div className="vm-name">
+            {hud.name}
+            <span className="vm-lvl">Lv {hud.level}</span>
+          </div>
+          <Bar v={hud.hp} max={hud.maxHp} kind="hp" />
+          <Bar v={hud.stam} max={hud.maxStam} kind="stam" />
+          {hud.ember && <Bar v={hud.mana} max={hud.maxMana} kind="mana" />}
+          <div className="vm-xp" title={`${hud.xp - hud.xpLo} / ${hud.xpHi - hud.xpLo} XP`}>
+            <i style={{ width: `${hud.xpHi > hud.xpLo ? Math.min(100, ((hud.xp - hud.xpLo) / (hud.xpHi - hud.xpLo)) * 100) : 100}%` }} />
+          </div>
+          <div className="vm-weapon">
+            <ItemIcon id={hud.weaponId} size={22} />
+            <span>{hud.weapon}</span>
+            <em className="vm-crowns">{hud.crowns}<ItemIcon id="coin_crown" size={16} /></em>
+          </div>
+          {hud.online && !hud.online.solo && <Party hud={hud} />}
+        </div>
+        {hud.boss ? (
+          <div className="vm-boss">
+            <div className="vm-boss-name">{hud.boss.name}</div>
+            <div className="vm-boss-bar">
+              <i style={{ width: `${(hud.boss.hp / hud.boss.max) * 100}%` }} />
+              <span className="pip" style={{ left: "66%" }} />
+              <span className="pip" style={{ left: "33%" }} />
             </div>
-            {hud.seal && <p className="text-sm text-copper">Gate open</p>}
+            <div className="vm-boss-phase">{hud.boss.phaseName}</div>
           </div>
-          <div className="h-2 w-full max-w-xs overflow-hidden rounded-full bg-soot">
-            <div className="h-full bg-nursery" style={{ width: `${hpPct}%` }} />
+        ) : (
+          <div className="vm-top">
+            <Compass hud={hud} />
+            {hud.objective && (
+              <div className="vm-objective">
+                <b>{hud.objective}</b>
+                <span>{hud.objectiveSub}</span>
+              </div>
+            )}
           </div>
-          <div className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-soot">
-            <div className="h-full bg-moss" style={{ width: `${stPct}%` }} />
-          </div>
-          {hud.maxMana > 0 && (
-            <div className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-soot">
-              <div className="h-full bg-copper" style={{ width: `${(hud.mana / hud.maxMana) * 100}%` }} />
-            </div>
+        )}
+        <div className="vm-topright">
+          {hud.online && (
+            <button className="vm-icon" onClick={() => api.journal()} aria-label="Journal">
+              <Glyph name="book" size={24} />
+            </button>
           )}
-          {hud.boss && (
-            <div>
-              <p className="text-sm">{hud.boss}</p>
-              <div className="h-2 w-full max-w-xs overflow-hidden rounded-full bg-soot">
-                <div className="h-full bg-bone" style={{ width: `${(hud.bossHp / hud.bossMax) * 100}%` }} />
+          <button className="vm-icon" onClick={() => api.press("bag")} aria-label="Bag">
+            <Glyph name="bag" size={24} />
+          </button>
+          <button className="vm-icon" onClick={() => api.press("pause")} aria-label="Menu">
+            <Glyph name="menu" size={24} />
+          </button>
+        </div>
+        {!hud.boss && <Minimap hud={hud} />}
+      </div>
+      {hud.tip && hud.mode === "play" && (
+        <div className="vm-tip" key={hud.tip.at}>
+          <b>Hint</b>
+          {hud.tip.text}
+        </div>
+      )}
+      {hud.bossLine && (
+        <div className="vm-bossline" key={hud.bossLine.at}>
+          “{hud.bossLine.text}”
+        </div>
+      )}
+      {title && (
+        <div className="vm-region" key={title.at}>
+          <span className="vm-region-art" style={{ backgroundImage: `url(/art/zone-${hud.zone}.webp)` }} />
+          <div>{title.a}</div>
+          <small>{title.b}</small>
+        </div>
+      )}
+      {toast && hud.mode === "play" && (
+        <div className="vm-toast" key={hud.toastId}>
+          {toast}
+        </div>
+      )}
+      {hint && hud.mode === "play" && (
+        <div className="vm-hint-overlay" onPointerDown={closeHint}>
+          <div className="vm-hint-left">
+            <b>Move</b>
+            <span>Left thumb anywhere. Push to the edge to run.</span>
+          </div>
+          <div className="vm-hint-mid">
+            <b>Look</b>
+            <span>Drag with your right thumb.</span>
+          </div>
+          <div className="vm-hint-right">
+            <span><Glyph name="sword" size={18} /> Tap to strike, hold for a heavy blow</span>
+            <span><Glyph name="dodge" size={18} /> Roll through attacks</span>
+            <span><Glyph name="shield" size={18} /> Hold to block; time it to parry</span>
+            <span><Glyph name="hand" size={18} /> Gold button: talk, gather, enter</span>
+          </div>
+          <div className="vm-hint-tap">Tap to begin</div>
+        </div>
+      )}
+      {hud.mode === "bag" && <Bag api={api} hud={hud} />}
+      {hud.mode === "talk" && hud.talk && <Talk api={api} hud={hud} />}
+      {hud.mode === "shop" && hud.shop && <Shop api={api} hud={hud} />}
+      {hud.mode === "journal" && <Journal api={api} hud={hud} />}
+      {hud.mode === "map" && hud.map && <TravelMap api={api} hud={hud} />}
+      {hud.banner && hud.mode !== "title" && (
+        <div className="vm-banner" key={hud.banner.at}>
+          <div>{hud.banner.title}</div>
+          <small>{hud.banner.sub}</small>
+        </div>
+      )}
+      {hud.mode === "dead" && (
+        <div className="vm-dead">
+          <div className="vm-dead-title">You fall</div>
+          <p>{hud.online && hud.online.players.some((p) => !p.me && !p.away && !p.dead) ? "A friend can reach you and pull you up. Or wake at the shrine." : "The forest keeps what it takes. Not you. Not yet."}</p>
+          <button className="vm-mbtn primary" onClick={() => api.press("wake")}>
+            Wake
+          </button>
+        </div>
+      )}
+      {hud.mode === "reward" && hud.reward && <Reward api={api} hud={hud} />}
+      {hud.mode === "end" && <Ending api={api} hud={hud} />}
+      {hud.mode === "pause" && (
+        <div className="vm-panel-screen">
+          <div className="vm-panel">
+            <div className="vm-panel-art" style={{ backgroundImage: `url(/art/zone-${hud.zone}.webp)` }} />
+            <div className="vm-panel-head">
+              <h2>Paused</h2>
+              <button className="vm-icon" onClick={() => api.press("resume")} aria-label="Resume">
+                <Glyph name="close" size={22} />
+              </button>
+            </div>
+            {hud.online && !hud.online.solo && <WorldCodeRow hud={hud} />}
+            <SettingsBody hud={hud} api={api} />
+            <div className="vm-row">
+              <button className="vm-mbtn primary" onClick={() => api.press("resume")}>
+                Resume
+              </button>
+              {hud.online && (
+                <button className="vm-mbtn" onClick={() => api.journal()}>
+                  Journal
+                </button>
+              )}
+              <button className="vm-mbtn" onClick={() => api.toTitle()}>
+                {hud.online && !hud.online.solo ? "Leave world" : "Save and quit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Other players in the world: name, health, where they are. */
+function Party({ hud }: { hud: Hud }) {
+  const o = hud.online!;
+  const others = o.players.filter((p) => !p.me);
+  return (
+    <div className="vm-party">
+      <div className="vm-party-head">
+        <span>{o.world}</span>
+        <em>{o.status === "connected" ? o.code : "Reconnecting…"}</em>
+      </div>
+      {others.length === 0 && <div className="vm-party-empty">Alone here. Share code {o.code}.</div>}
+      {others.map((p, i) => (
+        <div key={i} className={`vm-party-row ${p.dead ? "down" : ""} ${p.away ? "away" : ""}`}>
+          <span>{p.name}</span>
+          <small>{p.away ? "away" : p.dead ? "down" : p.zone}</small>
+          <i>
+            <b style={{ width: `${Math.max(0, Math.min(100, (p.hp / p.max) * 100))}%` }} />
+          </i>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WorldCodeRow({ hud }: { hud: Hud }) {
+  const o = hud.online!;
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="vm-coderow">
+      <div>
+        <label>{o.world} · Day {o.day}</label>
+        <b>{o.code}</b>
+      </div>
+      <button className="vm-mbtn small" onClick={async () => setCopied(await copyText(o.code))}>
+        {copied ? "Copied" : "Copy code"}
+      </button>
+    </div>
+  );
+}
+
+function Bag({ api, hud }: { api: GameApi; hud: Hud }) {
+  const [tab, setTab] = useState<"bag" | "craft">(hud.station !== "hand" ? "craft" : "bag");
+  const [sel, setSel] = useState<string | null>(null);
+  const items = hud.items.filter((i) => i.id !== "arm_cloth");
+  const selected = items.find((i) => i.uid === sel) ?? null;
+  const main = hud.items.find((i) => i.equipped && i.slot === "main");
+  const worn = (slot: string) => hud.items.find((i) => i.equipped && i.slot === slot);
+  const sets = Object.entries(SET_BONUS).filter(([k, b]) => hud.items.filter((i) => i.equipped && i.set === k).length >= b.pieces);
+  return (
+    <div className="vm-panel-screen">
+      <div className="vm-panel bag">
+        <div className="vm-panel-head">
+          <div className="vm-tabs">
+            <button className={tab === "bag" ? "on" : ""} onClick={() => setTab("bag")}>
+              Bag
+            </button>
+            <button className={tab === "craft" ? "on" : ""} onClick={() => setTab("craft")}>
+              Craft {hud.station !== "hand" && <em>· {STATION_NAME[hud.station]}</em>}
+            </button>
+          </div>
+          <button className="vm-icon" onClick={() => api.press("close")} aria-label="Close">
+            <Glyph name="close" size={22} />
+          </button>
+        </div>
+        {tab === "bag" ? (
+          <div className="vm-bag">
+            <div className="vm-gear vm-scroll">
+              <div className="vm-slots">
+                {SLOTS.map(([slot, label]) => {
+                  const it = slot === "main" ? main : worn(slot);
+                  return (
+                    <button key={slot} className={`vm-gslot ${it && sel === it.uid ? "on" : ""}`} onClick={() => it && setSel(it.uid)} title={label}>
+                      <label>{label}</label>
+                      {it ? <ItemIcon id={it.id} size={30} /> : slot === "main" ? <ItemIcon id="wpn_fists" size={30} /> : <div className="vm-empty" />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="vm-stats">
+                <span>Level {hud.level} · {hud.xp - hud.xpLo}/{Math.max(1, hud.xpHi - hud.xpLo)} XP</span>
+                <span>Health {hud.hp}/{hud.maxHp}</span>
+                <span>Damage {main?.dmg ?? 4} · Defence {hud.defence}</span>
+                <span>Crowns {hud.crowns}</span>
+                {sets.map(([k, b]) => (
+                  <span key={k} className="vm-setbonus">{b.name}: {b.text}</span>
+                ))}
               </div>
             </div>
-          )}
-          <p className="max-w-sm text-sm leading-snug text-bone">{hud.quest}</p>
-        </div>
-      )}
-
-      {hud.toast && playing && (
-        <p className="pointer-events-none absolute top-36 left-1/2 w-[min(90%,22rem)] -translate-x-1/2 rounded-panel bg-soot/90 px-3 py-2 text-center text-sm">
-          {hud.toast}
-        </p>
-      )}
-      {hud.banner && (
-        <div className="pointer-events-auto absolute top-48 left-1/2 w-[min(92%,24rem)] -translate-x-1/2 rounded-panel border border-copper bg-ink/95 p-4">
-          <p className="font-display text-lg leading-snug">{hud.banner}</p>
-          <button type="button" className="mt-3 min-h-11 rounded-md bg-copper px-4 text-ink" onClick={() => apiRef.current?.press("close")}>
-            Onward
-          </button>
-        </div>
-      )}
-
-      {hud.mode === "talk" && (
-        <div className="absolute inset-x-4 bottom-36 rounded-panel bg-parchment p-4 text-ink">
-          <p className="font-display text-lg">{hud.talkName}</p>
-          <p className="mt-1 leading-relaxed">{hud.talk}</p>
-          <button type="button" className="mt-3 min-h-11 w-full rounded-md bg-ink text-parchment" onClick={() => apiRef.current?.press("talk")}>
-            Continue
-          </button>
-        </div>
-      )}
-
-      {hud.mode === "dead" && (
-        <div className="absolute inset-x-4 bottom-40 rounded-panel bg-ink/95 p-4">
-          <p className="font-display text-2xl">Down</p>
-          <p className="mt-1 text-sm text-muted">Adventure keeps what you carry. Cookie, if still wound, starts the bow again.</p>
-          <button type="button" className="mt-3 min-h-12 w-full rounded-md bg-parchment text-ink" onClick={() => apiRef.current?.press("wake")}>
-            Wake at the pad
-          </button>
-        </div>
-      )}
-
-      {hud.mode === "inventory" && (
-        <div className="absolute inset-x-3 bottom-28 top-28 overflow-auto rounded-panel bg-parchment p-4 text-ink">
-          <div className="flex items-center justify-between">
-            <p className="font-display text-xl">Pack</p>
-            <button type="button" className="min-h-11 rounded-md bg-ink px-3 text-parchment" onClick={() => apiRef.current?.press("close")}>
-              Close
-            </button>
-          </div>
-          <ul className="mt-3 flex flex-col gap-2">
-            {hud.items.map((it) => (
-              <li key={it.uid} className="flex items-center justify-between gap-2 border-b border-soot/20 pb-2">
-                <span>{it.name}{it.count > 1 ? ` ×${it.count}` : ""}{it.equipped ? " · worn" : ""}</span>
-                <button
-                  type="button"
-                  className="min-h-11 rounded-md bg-soot px-3 text-parchment"
-                  onClick={() => (it.kind === "consumable" ? apiRef.current?.useUid(it.uid) : apiRef.current?.equipUid(it.uid))}
-                >
-                  {it.kind === "consumable" ? "Use" : it.kind === "weapon" || it.kind === "armour" ? "Wear" : "Keep"}
+            <div className="vm-grid vm-scroll">
+              {items.length === 0 && <p className="vm-sub vm-grid-note">Empty. Gather flint and wood in the forest.</p>}
+              {items.map((i) => (
+                <button key={i.uid} className={`vm-item ${sel === i.uid ? "on" : ""} ${i.equipped ? "eq" : ""}`} style={{ borderColor: i.rarity !== "common" ? RARITY_COLOR[i.rarity as Rarity] : undefined }} onClick={() => setSel(i.uid)}>
+                  <ItemIcon id={i.id} size={38} />
+                  {i.count > 1 && <b>{i.count}</b>}
+                  {i.equipped && <em>E</em>}
                 </button>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-4 font-display text-lg">Craft</p>
-          <ul className="mt-2 flex flex-col gap-2">
-            {hud.crafts.map((c) => (
-              <li key={c.id} className="flex items-center justify-between gap-2">
-                <span className="text-sm">
-                  {c.name}
-                  <span className="block text-muted">{c.station === "bench" ? "Bench · " : "Hand · "}{c.hint}</span>
-                </span>
-                <button type="button" disabled={!c.ok} className="min-h-11 rounded-md bg-copper px-3 text-ink disabled:opacity-40" onClick={() => apiRef.current?.craft(c.id)}>
-                  Make
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {(hud.mode === "menu" || hud.mode === "boot") && (
-        <div className="absolute inset-0 flex items-end justify-center bg-ink/45 px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:items-center">
-          <div className="w-full max-w-md rounded-panel bg-parchment p-5 text-ink">
-            <p className="font-display text-4xl leading-none">VEYRMARCH</p>
-            <p className="mt-2 leading-relaxed">The sealed continent. No class. A knife, a castle, a toy that still thinks it is calling the children in.</p>
-            <label className="mt-4 block text-sm text-soot">
-              Name
-              <input
-                value={charName}
-                onChange={(e) => setCharName(e.target.value)}
-                maxLength={18}
-                placeholder="Walker"
-                className="mt-1 min-h-11 w-full rounded-md border border-soot bg-bone px-3"
-              />
-            </label>
-            <div className="mt-3 flex gap-2">
-              <button type="button" className={`min-h-11 flex-1 rounded-md ${hair === "tied" ? "bg-ink text-parchment" : "bg-bone"}`} onClick={() => setHair("tied")}>Tied hair</button>
-              <button type="button" className={`min-h-11 flex-1 rounded-md ${hair === "short" ? "bg-ink text-parchment" : "bg-bone"}`} onClick={() => setHair("short")}>Short hair</button>
+              ))}
+              {Array.from({ length: Math.max(0, 32 - items.length) }, (_, k) => (
+                <div key={`e${k}`} className="vm-item vm-item-empty" aria-hidden />
+              ))}
             </div>
-            <button type="button" className="mt-4 min-h-12 w-full rounded-md bg-nursery text-parchment" onClick={() => begin(false)}>
-              Start
+            <div className="vm-detail">
+              {selected ? (
+                <>
+                  <ItemIcon id={selected.id} size={56} />
+                  <h3 style={{ color: RARITY_COLOR[selected.rarity as Rarity] }}>{selected.name}</h3>
+                  <p className="vm-rarity">{selected.rarity} · tier {selected.tier}</p>
+                  <p>{selected.desc}</p>
+                  {selected.dmg > 0 && <p className="vm-sub">Damage {selected.dmg}</p>}
+                  {selected.def > 0 && <p className="vm-sub">Defence {selected.def}</p>}
+                  {selected.modText && <p className="vm-passive">{selected.modText}</p>}
+                  {selected.passive && <p className="vm-passive">{selected.passive}</p>}
+                  {selected.set && SET_BONUS[selected.set] && <p className="vm-sub">Set: {SET_BONUS[selected.set].name}, {SET_BONUS[selected.set].pieces} pieces. {SET_BONUS[selected.set].text}</p>}
+                  {selected.kind === "consumable" && (
+                    <button className="vm-mbtn primary small" onClick={() => api.use(selected.uid)}>
+                      Use
+                    </button>
+                  )}
+                  {selected.slot !== "none" && !selected.equipped && (
+                    <button className="vm-mbtn primary small" onClick={() => api.equip(selected.uid)}>
+                      Equip
+                    </button>
+                  )}
+                  {selected.equipped && <p className="vm-sub">Equipped</p>}
+                  {selected.enchants.length > 0 && (
+                    <div className="vm-enchants">
+                      <p className="vm-sub">The enchanter can set one rune (it replaces any other):</p>
+                      {selected.enchants.map((e) => (
+                        <div key={e.id} className={`vm-enchant ${e.ok ? "ok" : ""}`}>
+                          <div>
+                            <b>{e.name}</b> <span>{e.text}</span>
+                            <em>{e.cost}</em>
+                          </div>
+                          <button className="vm-mbtn small primary" disabled={!e.ok} onClick={() => api.enchant(selected.uid, e.id)}>
+                            Set
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="vm-sub">Tap an item.</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="vm-crafts vm-scroll">
+            {hud.crafts.map((c) => (
+              <div key={c.id} className={`vm-craft ${c.ok ? "ok" : ""}`}>
+                <ItemIcon id={c.out} size={40} />
+                <div className="vm-craft-text">
+                  <b>{c.name}</b>
+                  <span>{c.have}</span>
+                  <em className={c.can ? "" : "need"}>{STATION_NAME[c.station]}</em>
+                </div>
+                <button className="vm-mbtn small primary" disabled={!c.ok} onClick={() => api.craft(c.id)}>
+                  Craft
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const SLOTS: [string, string][] = [["main", "Main"], ["off", "Off"], ["head", "Head"], ["chest", "Chest"], ["hands", "Hands"], ["legs", "Legs"], ["feet", "Feet"], ["trinket", "Trinket"]];
+
+function Shop({ api, hud }: { api: GameApi; hud: Hud }) {
+  const sh = hud.shop!;
+  const [tab, setTab] = useState<"buy" | "sell">("buy");
+  return (
+    <div className="vm-panel-screen">
+      <div className="vm-panel bag">
+        <div className="vm-panel-head">
+          <div className="vm-tabs">
+            <button className={tab === "buy" ? "on" : ""} onClick={() => setTab("buy")}>
+              Buy
             </button>
-            {hud.hasSave && (
-              <button type="button" className="mt-2 min-h-12 w-full rounded-md bg-ink text-parchment" onClick={() => begin(true)}>
-                Continue
+            {sh.buys && (
+              <button className={tab === "sell" ? "on" : ""} onClick={() => setTab("sell")}>
+                Sell
               </button>
             )}
-            <p className="mt-3 text-sm text-soot">Stick to walk. Full stick sprints. Strike, dodge, use. Keys: WASD, Shift sprint, J strike, K dodge, E use, I pack.</p>
           </div>
+          <h2 className="vm-shopname">{sh.name}</h2>
+          <span className="vm-crowns big">{hud.crowns}<ItemIcon id="coin_crown" size={20} /></span>
+          <button className="vm-icon" onClick={() => api.press("close")} aria-label="Close">
+            <Glyph name="close" size={22} />
+          </button>
         </div>
-      )}
+        <div className="vm-crafts vm-scroll">
+          {tab === "buy"
+            ? sh.stock.map((it) => (
+                <div key={it.id} className={`vm-craft ${it.ok ? "ok" : ""}`}>
+                  <ItemIcon id={it.id} size={40} />
+                  <div className="vm-craft-text">
+                    <b>{it.name}</b>
+                    <span>{it.price} crowns</span>
+                  </div>
+                  <button className="vm-mbtn small primary" disabled={!it.ok} onClick={() => api.buy(it.id, 1)}>
+                    Buy
+                  </button>
+                </div>
+              ))
+            : sh.sell.length === 0
+              ? <p className="vm-sub">Nothing they want. Equipped and soulbound things stay with you.</p>
+              : sh.sell.map((it) => (
+                  <div key={it.uid} className="vm-craft ok">
+                    <ItemIcon id={it.id} size={40} />
+                    <div className="vm-craft-text">
+                      <b>{it.name}{it.count > 1 ? ` ×${it.count}` : ""}</b>
+                      <span>{it.price} crowns each</span>
+                    </div>
+                    <button className="vm-mbtn small" onClick={() => api.sell(it.uid, 1)}>
+                      Sell
+                    </button>
+                    {it.count > 1 && (
+                      <button className="vm-mbtn small" onClick={() => api.sell(it.uid, it.count)}>
+                        All
+                      </button>
+                    )}
+                  </div>
+                ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-      {hud.mode === "play" && (
-        <>
-          <div
-            className="absolute top-28 right-4 bottom-44 left-4"
-            onPointerDown={(e) => {
-              const id = e.pointerId;
-              const startX = e.clientX;
-              const move = (ev: PointerEvent) => {
-                if (ev.pointerId !== id) return;
-                apiRef.current?.look(ev.clientX - startX);
-              };
-              const up = () => {
-                window.removeEventListener("pointermove", move);
-                window.removeEventListener("pointerup", up);
-              };
-              window.addEventListener("pointermove", move);
-              window.addEventListener("pointerup", up);
-            }}
-          />
-          <div className="absolute bottom-[max(1rem,env(safe-area-inset-bottom))] left-4 flex items-end gap-3">
-            <div
-              className="relative h-28 w-28 rounded-full border border-bone/50 bg-ink/50"
-              onPointerDown={onStickDown}
-              onPointerMove={onStickMove}
-              onPointerUp={onStickUp}
-              onPointerCancel={onStickUp}
-            >
-              <span className="pointer-events-none absolute top-1/2 left-1/2 h-10 w-10 -translate-x-1/2 -translate-y-1/2 rounded-full bg-bone/80" />
+function TravelMap({ api, hud }: { api: GameApi; hud: Hud }) {
+  const m = hud.map!;
+  const zones = [...new Set(m.shrines.map((s) => s.zoneName))];
+  return (
+    <div className="vm-panel-screen">
+      <div className="vm-panel wide">
+        <div className="vm-panel-head">
+          <h2>Shrines</h2>
+          <button className="vm-icon" onClick={() => api.press("close")} aria-label="Close">
+            <Glyph name="close" size={22} />
+          </button>
+        </div>
+        <p className="vm-sub">{m.here ? "Rested. Travel to any shrine you have found, or close to stay." : "Rest at a shrine to travel."}</p>
+        <div className="vm-journal vm-scroll">
+          {zones.map((zn) => (
+            <div key={zn}>
+              <h3 className="vm-zone-head" style={{ backgroundImage: `linear-gradient(90deg, rgba(20,17,14,.92) 0%, rgba(20,17,14,.35) 60%, rgba(20,17,14,.1)), url(/art/zone-${m.shrines.find((x) => x.zoneName === zn)!.zone}.webp)` }}>
+                {zn}
+              </h3>
+              {m.shrines
+                .filter((s) => s.zoneName === zn)
+                .map((s) => (
+                  <div key={s.id} className={`vm-craft ${s.known ? "ok" : ""}`}>
+                    <div className="vm-craft-text">
+                      <b>{s.name}</b>
+                      <span>{s.here ? "You are here" : s.known ? "Found" : "Not found yet"}</span>
+                    </div>
+                    <button className="vm-mbtn small primary" disabled={!s.known || s.here || !m.here} onClick={() => api.travel(s.id)}>
+                      Travel
+                    </button>
+                  </div>
+                ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Journal({ api, hud }: { api: GameApi; hud: Hud }) {
+  const live = hud.journal.filter((j) => !j.done);
+  const done = hud.journal.filter((j) => j.done);
+  const [tab, setTab] = useState<"quests" | "marks" | "places" | "beasts" | "deeds" | "talents" | "bounties">("quests");
+  const bounties = hud.codex?.bounties ?? [];
+  const finds = hud.codex?.finds;
+  const tal = hud.codex?.talents;
+  const marks = hud.codex?.marks ?? [];
+  const beasts = hud.codex?.beasts ?? [];
+  const places = hud.codex?.places ?? [];
+  const deeds = hud.codex?.deeds ?? [];
+  return (
+    <div className="vm-panel-screen">
+      <div className="vm-panel wide">
+        <div className="vm-panel-head">
+          <h2>Journal</h2>
+          <button className="vm-icon" onClick={() => api.press("close")} aria-label="Close">
+            <Glyph name="close" size={22} />
+          </button>
+        </div>
+        <div className="vm-tabs">
+          <button className={tab === "quests" ? "on" : ""} onClick={() => setTab("quests")}>
+            Quests <em>{live.length}</em>
+          </button>
+          <button className={tab === "marks" ? "on" : ""} onClick={() => setTab("marks")}>
+            Marks <em>{marks.reduce((n, m) => n + m.rank, 0)}/{marks.length * 3}</em>
+          </button>
+          <button className={tab === "places" ? "on" : ""} onClick={() => setTab("places")}>
+            Places <em>{places.filter((p) => p.found).length}/{places.length}</em>
+          </button>
+          <button className={tab === "beasts" ? "on" : ""} onClick={() => setTab("beasts")}>
+            Bestiary <em>{beasts.filter((b) => b.kills > 0).length}/{beasts.length}</em>
+          </button>
+          {bounties.length > 0 && (
+            <button className={tab === "bounties" ? "on" : ""} onClick={() => setTab("bounties")}>
+              Bounties <em>{bounties.filter((b) => b.paid).length}/{bounties.length}</em>
+            </button>
+          )}
+          <button className={tab === "talents" ? "on" : ""} onClick={() => setTab("talents")}>
+            Talents {hud.talentFree > 0 && <em>{hud.talentFree}</em>}
+          </button>
+          <button className={tab === "deeds" ? "on" : ""} onClick={() => setTab("deeds")}>
+            Deeds <em>{deeds.filter((d) => d.done).length}/{deeds.length}</em>
+          </button>
+        </div>
+        {tab === "bounties" && (
+          <div className="vm-journal vm-scroll">
+            <p className="vm-sub">Three bounties stand on the board. Kill what is asked, then claim the pay here. A new board goes up when all three are paid.</p>
+            {bounties.map((b) => (
+              <div key={b.id} className={`vm-quest ${b.paid ? "done" : "main"}`}>
+                <b>
+                  {b.name}
+                  <em>{b.paid ? "Paid" : `${b.n}/${b.of}`}</em>
+                </b>
+                <span>{b.text}</span>
+                <small>Pays {b.reward}</small>
+                {!b.paid && b.n >= b.of && (
+                  <button className="vm-mbtn small primary vm-claim" onClick={() => api.claimBounty(b.id)}>
+                    Claim
+                  </button>
+                )}
+              </div>
+            ))}
+            {finds && <p className="vm-sub">Off the roads: {finds.caches} hidden caches opened, {finds.stones} rune stones read.</p>}
+          </div>
+        )}
+        {tab === "talents" && tal && (
+          <div className="vm-journal vm-scroll">
+            <p className="vm-sub">
+              {tal.free > 0 ? `${tal.free} point${tal.free > 1 ? "s" : ""} to spend. ` : "No points to spend. "}One point comes with each level. There are more ranks than points, so choose.
+            </p>
+            <div className="vm-talents">
+              {tal.trees.map((t) => (
+                <div key={t.id} className="vm-tree">
+                  <h3>{t.name}</h3>
+                  <small>{t.sub}</small>
+                  {t.list.map((d) => (
+                    <button key={d.id} className={`vm-talent ${d.rank > 0 ? "has" : ""}`} disabled={tal.free <= 0 || d.rank >= d.max} onClick={() => api.learn(d.id)}>
+                      <b>
+                        {d.name}
+                        <em>{d.rank}/{d.max}</em>
+                      </b>
+                      <span>{d.text}</span>
+                      {d.next && tal.free > 0 && <small>Next: {d.next}</small>}
+                    </button>
+                  ))}
+                </div>
+              ))}
             </div>
           </div>
-          <div className="absolute right-3 bottom-[max(1rem,env(safe-area-inset-bottom))] grid grid-cols-2 gap-2">
-            <Action label="Dodge" onClick={() => apiRef.current?.press("dodge")} icon={<Hand className="h-5 w-5" />} />
-            <Action label={hud.prompt || "Use"} onClick={() => apiRef.current?.press("interact")} icon={<Hand className="h-5 w-5" />} />
-            <Action label="Block" onPointerDown={() => apiRef.current?.press("blockDown")} onPointerUp={() => apiRef.current?.press("blockUp")} icon={<Shield className="h-5 w-5" />} />
-            <Action label="Pack" onClick={() => apiRef.current?.press("bag")} icon={<Backpack className="h-5 w-5" />} />
-            {hud.ember && <Action label="Ember" onClick={() => apiRef.current?.press("ember")} icon={<Flame className="h-5 w-5" />} />}
-            <button
-              type="button"
-              className="col-span-2 flex min-h-14 items-center justify-center gap-2 rounded-panel bg-nursery text-parchment"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                apiRef.current?.press("attackDown");
-              }}
-              onPointerUp={() => apiRef.current?.press("attackUp")}
-              onPointerLeave={() => apiRef.current?.press("attackUp")}
-            >
-              <Swords className="h-5 w-5" />
-              Strike
+        )}
+        {tab === "marks" && (
+          <div className="vm-journal vm-scroll">
+            <p className="vm-sub">The March has no classes. What you do, often enough, leaves a mark.</p>
+            {hud.codex?.card && (
+              <div className="vm-card">
+                <b>{hud.name}</b>
+                <em>{hud.codex.card.title}</em>
+                <div className="vm-card-grid">
+                  {hud.codex.card.lines.map(([k, v]) => (
+                    <span key={k}>
+                      <small>{k}</small>
+                      {v}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {marks.map((m) => (
+              <div key={m.id} className={`vm-quest vm-mark ${m.rank > 0 ? "main" : ""}`}>
+                <b>
+                  {m.name}
+                  <em>{m.rank > 0 ? "Rank " + ["", "I", "II", "III"][m.rank] : "Unmarked"}</em>
+                </b>
+                <span>{m.rank > 0 ? m.boon : m.how}</span>
+                {m.rank < 3 ? (
+                  <>
+                    <div className="vm-mark-bar">
+                      <i style={{ width: `${Math.min(100, (m.have / m.need) * 100)}%` }} />
+                    </div>
+                    <small>
+                      {m.have}/{m.need} · {m.rank > 0 ? m.how + " " : ""}Next: {m.next}
+                    </small>
+                  </>
+                ) : (
+                  <small>Fully marked.</small>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "places" && (
+          <div className="vm-journal vm-scroll">
+            <p className="vm-sub">Hidden places. People will tell you where to look, if you stop and talk.</p>
+            {places.map((p) => (
+              <div key={p.id} className={`vm-quest ${p.found ? "main" : ""} ${p.heard || p.found ? "" : "done"}`}>
+                <b>
+                  {p.heard || p.found ? p.name : "? ? ?"}
+                  {p.found && <em>Found</em>}
+                </b>
+                <span>{p.heard ? p.line : p.found ? "Found without being told." : "No one has told you of this yet."}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "beasts" && (
+          <div className="vm-journal vm-scroll">
+            {beasts.map((b) => (
+              <div key={b.id} className={`vm-quest ${b.boss ? "main" : ""} ${b.seen ? "" : "done"}`}>
+                <b>
+                  {b.seen ? b.name : "? ? ?"}
+                  {b.kills > 0 && (
+                    <em>
+                      {["", "", "Known", "Studied", "Mastered"][b.rank]} ×{b.kills}
+                    </em>
+                  )}
+                </b>
+                <span>{b.kills > 0 ? b.lore : b.seen ? "Seen, not yet beaten. Kill one to learn its ways." : "Not yet met."}</span>
+                {b.notes.map((n) => (
+                  <span key={n}>{n}</span>
+                ))}
+                {b.seen && (
+                  <small>
+                    {b.where}
+                    {b.next && " · " + b.next}
+                  </small>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "deeds" && (
+          <div className="vm-journal vm-scroll">
+            {deeds.map((d) => (
+              <div key={d.id} className={`vm-quest ${d.done ? "main" : "done"}`}>
+                <b>
+                  {d.name}
+                  {d.done && <em>Done</em>}
+                </b>
+                <span>{d.text}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {tab === "quests" && <div className="vm-journal vm-scroll">
+          {live.length === 0 && <p className="vm-sub">No open quests. People in towns have work; talk to them.</p>}
+          {live.map((j) => (
+            <div key={j.id} className={`vm-quest ${j.main ? "main" : ""}`}>
+              <b>{j.name}</b>
+              <span>
+                {j.step} {j.progress && <em>{j.progress}</em>}
+              </span>
+              <small>{j.sub} · step {j.stepN} of {j.steps}</small>
+            </div>
+          ))}
+          {done.length > 0 && <h3>Done</h3>}
+          {done.map((j) => (
+            <div key={j.id} className="vm-quest done">
+              <b>{j.name}</b>
+            </div>
+          ))}
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+function Talk({ api, hud }: { api: GameApi; hud: Hud }) {
+  const t = hud.talk!;
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    setShown(0);
+    const id = setInterval(() => setShown((n) => (n >= t.text.length ? n : n + 2)), 16);
+    return () => clearInterval(id);
+  }, [t.text]);
+  const done = shown >= t.text.length;
+  return (
+    <div className="vm-talk-wrap" onPointerDown={() => (done ? api.press("talk") : setShown(t.text.length))}>
+      <div className="vm-talk" onPointerDown={(e) => e.stopPropagation()} onClick={() => (done ? api.press("talk") : setShown(t.text.length))}>
+        {t.name && (
+          <div className="vm-talk-name">
+            {t.name}
+            {t.role && <small>{t.role}</small>}
+          </div>
+        )}
+        <p>{t.text.slice(0, shown)}</p>
+        {t.shop && done && !t.more && (
+          <div className="vm-trades" onClick={(e) => e.stopPropagation()}>
+            <button className="vm-mbtn small primary" onClick={() => api.openShop(t.shop!)}>
+              Trade
             </button>
           </div>
-        </>
-      )}
-    </main>
+        )}
+        {t.trades.length > 0 && done && (
+          <div className="vm-trades" onClick={(e) => e.stopPropagation()}>
+            {t.trades.map((tr) => (
+              <button key={tr.id} className="vm-mbtn small" disabled={!tr.ok} onClick={() => api.trade(tr.id)}>
+                {tr.label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="vm-talk-more">{done ? (t.more ? "Tap to continue" : "Tap to close") : ""}</div>
+      </div>
+    </div>
   );
 }
 
-function Action({
-  label,
-  icon,
-  onClick,
-  onPointerDown,
-  onPointerUp,
-}: {
-  label: string;
-  icon: ReactNode;
-  onClick?: () => void;
-  onPointerDown?: () => void;
-  onPointerUp?: () => void;
-}) {
+function Reward({ api, hud }: { api: GameApi; hud: Hud }) {
   return (
-    <button
-      type="button"
-      className="flex min-h-12 min-w-16 flex-col items-center justify-center rounded-panel bg-ink/80 px-2 text-xs text-parchment"
-      onClick={onClick}
-      onPointerDown={onPointerDown}
-      onPointerUp={onPointerUp}
-    >
-      {icon}
-      {label}
-    </button>
+    <div className="vm-reward">
+      <div className="vm-reward-title">{hud.rewardText?.title ?? "Victory"}</div>
+      <div className="vm-reward-sub">{hud.rewardText?.sub ?? ""}</div>
+      <div className="vm-reward-items">
+        {hud.reward!.map((r, i) => (
+          <div className="vm-reward-card" key={r.id} style={{ animationDelay: `${0.3 + i * 0.35}s` }}>
+            <ItemIcon id={r.id} size={64} />
+            <b>{r.name}</b>
+            <span>{r.desc}</span>
+          </div>
+        ))}
+      </div>
+      {hud.rewardText?.seal && <div className="vm-seal">{hud.rewardText.seal}</div>}
+      <button className="vm-mbtn primary" onClick={() => api.press("rewardClose")}>
+        Take them
+      </button>
+    </div>
   );
 }
 
-function formatHour(h: number) {
-  const hh = Math.floor(h) % 24;
-  const mm = Math.floor((h % 1) * 60);
-  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+function Ending({ api, hud }: { api: GameApi; hud: Hud }) {
+  return (
+    <div className="vm-panel-screen">
+      <div className="vm-panel ending">
+        <div className="vm-wordmark">TO BE CONTINUED</div>
+        <p>
+          Finlay kneels in the black rain and does not get up. The Keep is quiet for the first time since the March. Somewhere past the Mire a seal you have never seen
+          shifts, and the continent learns your name whether it likes it or not.
+        </p>
+        <div className="vm-endstats">
+          <div>
+            <b>{fmtTime(hud.stats.time)}</b>
+            <span>played</span>
+          </div>
+          <div>
+            <b>{hud.level}</b>
+            <span>level</span>
+          </div>
+          <div>
+            <b>{hud.stats.kills}</b>
+            <span>foes</span>
+          </div>
+          <div>
+            <b>{hud.stats.deaths}</b>
+            <span>falls</span>
+          </div>
+        </div>
+        <p className="vm-sub">The end of this chapter of VEYRMARCH. Your character, gear and world are saved; the Frostlands, the Wasteland and the Tear come next.</p>
+        <div className="vm-row">
+          <button className="vm-mbtn primary" onClick={() => api.press("endClose")}>
+            Keep exploring
+          </button>
+          <button className="vm-mbtn" onClick={() => api.toTitle()}>
+            Title
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }

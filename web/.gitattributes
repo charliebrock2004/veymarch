@@ -1,0 +1,2 @@
+# Small web assets are served as-is by Vercel, so keep them out of Git LFS.
+*.png -filter binary

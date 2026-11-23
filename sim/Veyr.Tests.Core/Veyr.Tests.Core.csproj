@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Runs the server-host and client-core edit-mode tests on .NET 8. Unity runs the same sources. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Veyr.Tests.Core</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\Packages\com.veyrmarch.server\Tests\**\*.cs" />
+    <Compile Include="..\..\Packages\com.veyrmarch.clientcore\Tests\**\*.cs" />
+    <ProjectReference Include="..\Veyr.Sim\Veyr.Sim.csproj" />
+    <ProjectReference Include="..\Veyr.Content\Veyr.Content.csproj" />
+    <ProjectReference Include="..\Veyr.Net\Veyr.Net.csproj" />
+    <ProjectReference Include="..\Veyr.Server\Veyr.Server.csproj" />
+    <ProjectReference Include="..\Veyr.Client.Core\Veyr.Client.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+</Project>

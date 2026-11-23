@@ -1,0 +1,813 @@
+import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { fbm, noise2, range, rng, type Rand } from "./noise";
+
+/**
+ * Geometry kit. Every generated geometry carries position, normal, uv and color so
+ * any of them can be merged into one draw call per material.
+ */
+
+export const shared = { time: { value: 0 }, wind: { value: 1 } };
+
+export function tint(geo: THREE.BufferGeometry, color: THREE.ColorRepresentation | ((x: number, y: number, z: number, nx: number, ny: number, nz: number) => THREE.Color)) {
+  const pos = geo.getAttribute("position");
+  const nor = geo.getAttribute("normal");
+  const col = new Float32Array(pos.count * 3);
+  const fixed = typeof color === "function" ? null : new THREE.Color(color);
+  for (let i = 0; i < pos.count; i++) {
+    const c = fixed ?? (color as (x: number, y: number, z: number, nx: number, ny: number, nz: number) => THREE.Color)(
+      pos.getX(i), pos.getY(i), pos.getZ(i), nor ? nor.getX(i) : 0, nor ? nor.getY(i) : 1, nor ? nor.getZ(i) : 0,
+    );
+    col[i * 3] = c.r;
+    col[i * 3 + 1] = c.g;
+    col[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  return geo;
+}
+
+/** Normalise a geometry so it can merge with others: indexed, with uv and color. */
+export function prep(geo: THREE.BufferGeometry, color: THREE.ColorRepresentation = 0xffffff) {
+  if (!geo.index) {
+    const n = geo.getAttribute("position").count;
+    const idx = new Array(n);
+    for (let i = 0; i < n; i++) idx[i] = i;
+    geo.setIndex(idx);
+  }
+  if (!geo.getAttribute("normal")) geo.computeVertexNormals();
+  if (!geo.getAttribute("uv")) geo.setAttribute("uv", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count * 2), 2));
+  if (!geo.getAttribute("color")) tint(geo, color);
+  for (const k of Object.keys(geo.attributes)) if (!["position", "normal", "uv", "color", "aSway"].includes(k)) geo.deleteAttribute(k);
+  geo.morphAttributes = {};
+  return geo;
+}
+
+export function merge(geos: THREE.BufferGeometry[]) {
+  const g = mergeGeometries(geos.map((x) => prep(x)), false);
+  if (!g) throw new Error("merge failed");
+  return g;
+}
+
+const m4 = new THREE.Matrix4();
+const q = new THREE.Quaternion();
+const e = new THREE.Euler();
+const v = new THREE.Vector3();
+const s = new THREE.Vector3();
+
+export function place(geo: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0, sx = 1, sy = sx, sz = sx) {
+  m4.compose(v.set(x, y, z), q.setFromEuler(e.set(rx, ry, rz)), s.set(sx, sy, sz));
+  geo.applyMatrix4(m4);
+  return geo;
+}
+
+/** A box whose UVs are in tiles of (tu × tv) metres, so textures keep a constant density. */
+export function boxUV(w: number, h: number, d: number, tu = 2, tv = 2) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const uv = g.getAttribute("uv") as THREE.BufferAttribute;
+  const dims: [number, number][] = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let f = 0; f < 6; f++)
+    for (let k = 0; k < 4; k++) {
+      const i = f * 4 + k;
+      uv.setXY(i, (uv.getX(i) * dims[f][0]) / tu, (uv.getY(i) * dims[f][1]) / tv);
+    }
+  return g;
+}
+
+/** Ambient-occlusion-ish vertical gradient: darker at the base. */
+export function aoTint(geo: THREE.BufferGeometry, base: THREE.ColorRepresentation, y0: number, y1: number, dark = 0.55) {
+  const c = new THREE.Color(base);
+  const out = new THREE.Color();
+  return tint(geo, (_x, y) => {
+    const t = Math.min(1, Math.max(0, (y - y0) / (y1 - y0 || 1)));
+    return out.copy(c).multiplyScalar(dark + (1 - dark) * t);
+  });
+}
+
+/** Inject a wind sway into a Lambert material. Vertices above `from` metres sway more with height. */
+export function windy<T extends THREE.Material>(mat: T, strength: number, from: number, scale = 10): T {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = shared.time;
+    shader.uniforms.uWind = shared.wind;
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nuniform float uTime; uniform float uWind;")
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+        {
+          vec3 wp = position;
+          #ifdef USE_INSTANCING
+            wp = (instanceMatrix * vec4(position, 1.0)).xyz;
+          #endif
+          float k = max(0.0, position.y - ${from.toFixed(2)}) / ${scale.toFixed(2)};
+          float ph = uTime * 1.4 + wp.x * 0.21 + wp.z * 0.17;
+          float sw = (sin(ph) * 0.7 + sin(ph * 2.3 + 1.7) * 0.3) * ${strength.toFixed(3)} * k * uWind;
+          transformed.x += sw;
+          transformed.z += sw * 0.6;
+        }`,
+      );
+  };
+  mat.customProgramCacheKey = () => `windy${strength}_${from}_${scale}`;
+  return mat;
+}
+
+/** Wind for baked (merged) geometry: the sway weight is a per-vertex attribute, not local height. */
+export function windyBaked<T extends THREE.Material>(mat: T, strength: number): T {
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = shared.time;
+    shader.uniforms.uWind = shared.wind;
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nuniform float uTime; uniform float uWind; attribute float aSway;")
+      .replace(
+        "#include <begin_vertex>",
+        `#include <begin_vertex>
+        {
+          float ph = uTime * 1.4 + position.x * 0.21 + position.z * 0.17;
+          float sw = (sin(ph) * 0.7 + sin(ph * 2.3 + 1.7) * 0.3) * ${strength.toFixed(3)} * aSway * uWind;
+          transformed.x += sw;
+          transformed.z += sw * 0.6;
+        }`,
+      );
+  };
+  mat.customProgramCacheKey = () => `windyBaked${strength}`;
+  return mat;
+}
+
+/**
+ * The painted look for world surfaces: brush-scale mottling in world space so no wall, roof or
+ * field is one flat tone, and a hemisphere tint (cool from the sky, warm bounce from the ground).
+ * Wraps whatever the material already injects (wind), so it can go on anything Lambert.
+ */
+export function painted<T extends THREE.Material>(mat: T, amount = 1): T {
+  const prev = mat.onBeforeCompile;
+  const prevKey = mat.customProgramCacheKey;
+  mat.onBeforeCompile = (shader, renderer) => {
+    prev?.call(mat, shader, renderer);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vPaintW;")
+      .replace(
+        "#include <project_vertex>",
+        `#include <project_vertex>
+        {
+          vec4 pw = vec4(transformed, 1.0);
+          #ifdef USE_INSTANCING
+            pw = instanceMatrix * pw;
+          #endif
+          vPaintW = (modelMatrix * pw).xyz;
+        }`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+        varying vec3 vPaintW;
+        float pHash(vec2 p) { p = mod(p, 289.0); return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+        float pNoise(vec2 p) {
+          vec2 i = floor(p), f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(pHash(i), pHash(i + vec2(1.0, 0.0)), f.x), mix(pHash(i + vec2(0.0, 1.0)), pHash(i + vec2(1.0, 1.0)), f.x), f.y);
+        }`,
+      )
+      .replace(
+        "#include <color_fragment>",
+        `#include <color_fragment>
+        vec3 pFn = normalize(cross(dFdx(vPaintW), dFdy(vPaintW)));
+        {
+          vec3 an = abs(pFn);
+          vec2 pu = an.y > 0.6 ? vPaintW.xz : (an.x > an.z ? vPaintW.zy : vPaintW.xy);
+          float n1 = pNoise(pu * 0.55);
+          float n2 = pNoise(pu * vec2(2.3, 0.9) + 17.0);
+          float n3 = pNoise(pu * 7.0 + 51.0);
+          float m = n1 * 0.55 + n2 * 0.3 + n3 * 0.15;
+          float k = ${amount.toFixed(2)};
+          diffuseColor.rgb *= 1.0 + (m - 0.5) * 0.3 * k;
+          diffuseColor.rgb += (n1 - 0.5) * vec3(0.018, 0.004, -0.022) * k;
+        }`,
+      )
+      .replace(
+        "#include <opaque_fragment>",
+        `{
+          float up = pFn.y * 0.5 + 0.5;
+          outgoingLight += diffuseColor.rgb * mix(vec3(0.075, 0.05, 0.03), vec3(0.03, 0.05, 0.085), up);
+        }
+        #include <opaque_fragment>`,
+      );
+  };
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ""}|paint${amount}`;
+  return mat;
+}
+
+export type Cullable = { cull: (x: number, z: number, d?: number) => void; maxDist: number };
+
+/**
+ * Static scatter baked into one mesh per chunk per material. All tree species share one
+ * atlas material, so a chunk of forest is a single draw call.
+ */
+export class ChunkBatch implements Cullable {
+  private buckets = new Map<string, { cx: number; cz: number; mat: THREE.Material; shadow: boolean; geos: THREE.BufferGeometry[] }>();
+  private meshes: { mesh: THREE.Mesh; cx: number; cz: number }[] = [];
+  constructor(private chunk = 64, public maxDist = 180) {}
+  add(key: string, mat: THREE.Material, geo: THREE.BufferGeometry, x: number, y: number, z: number, ry = 0, sc = 1, sy = sc, shadow = false, sway?: { from: number; scale: number }) {
+    const cx = Math.floor(x / this.chunk);
+    const cz = Math.floor(z / this.chunk);
+    const k = cx + "," + cz + "," + key;
+    let b = this.buckets.get(k);
+    if (!b) {
+      b = { cx: (cx + 0.5) * this.chunk, cz: (cz + 0.5) * this.chunk, mat, shadow, geos: [] };
+      this.buckets.set(k, b);
+    }
+    const g = geo.clone();
+    if (sway) {
+      const pos = g.getAttribute("position");
+      const a = new Float32Array(pos.count);
+      for (let i = 0; i < pos.count; i++) a[i] = Math.max(0, pos.getY(i) - sway.from) / sway.scale;
+      g.setAttribute("aSway", new THREE.BufferAttribute(a, 1));
+    }
+    m4.compose(v.set(x, y, z), q.setFromEuler(e.set(0, ry, 0)), s.set(sc, sy, sc));
+    g.applyMatrix4(m4);
+    b.geos.push(prep(g));
+  }
+  build(parent: THREE.Object3D) {
+    for (const b of this.buckets.values()) {
+      const g = mergeGeometries(b.geos, false);
+      if (!g) continue;
+      g.computeBoundingSphere();
+      const mesh = new THREE.Mesh(g, b.mat);
+      mesh.castShadow = b.shadow;
+      mesh.receiveShadow = true;
+      parent.add(mesh);
+      this.meshes.push({ mesh, cx: b.cx, cz: b.cz });
+    }
+    this.buckets.clear();
+  }
+  cull(px: number, pz: number, dist = this.maxDist) {
+    const lim = dist + this.chunk * 0.75;
+    for (const m of this.meshes) m.mesh.visible = Math.hypot(m.cx - px, m.cz - pz) < lim;
+  }
+}
+
+// ---------------------------------------------------------------- trees
+
+export type TreeKind = "oak" | "beech" | "pine" | "giant" | "young";
+export type TreeGeo = { trunk: THREE.BufferGeometry; leaves: THREE.BufferGeometry; whole: THREE.BufferGeometry; height: number; radius: number };
+
+function limb(r0: number, r1: number, len: number, segs = 6) {
+  const g = new THREE.CylinderGeometry(r1, r0, len, segs, 2, true);
+  g.translate(0, len / 2, 0);
+  return g;
+}
+
+/** Leaf cards around a set of cluster centres. Normals point out of the crown so it shades like a volume. */
+export const ATLAS: Record<string, [number, number]> = { oak: [0, 0], beech: [0.5, 0], pine: [0, 0.5], bush: [0.5, 0.5] };
+
+function crown(r: Rand, clusters: { x: number; y: number; z: number; rad: number }[], cards: number, size: number, centre: THREE.Vector3, hue: THREE.Color, quad: [number, number] = [0, 0], atlas = false) {
+  const pos: number[] = [];
+  const nor: number[] = [];
+  const uv: number[] = [];
+  const col: number[] = [];
+  const idx: number[] = [];
+  const c = new THREE.Color();
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  const corner = new THREE.Vector3();
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const cl of clusters) {
+    minY = Math.min(minY, cl.y - cl.rad);
+    maxY = Math.max(maxY, cl.y + cl.rad);
+  }
+  for (const cl of clusters) {
+    for (let k = 0; k < cards; k++) {
+      const u = r() * 2 - 1;
+      const th = r() * Math.PI * 2;
+      const rr = Math.cbrt(r()) * cl.rad * 0.8;
+      const px = cl.x + Math.sqrt(1 - u * u) * Math.cos(th) * rr;
+      const py = cl.y + u * rr * 0.8;
+      const pz = cl.z + Math.sqrt(1 - u * u) * Math.sin(th) * rr;
+      a.set(r() * 2 - 1, (r() * 2 - 1) * 0.6, r() * 2 - 1).normalize();
+      b.set(r() * 2 - 1, r() * 2 - 1, r() * 2 - 1).cross(a).normalize();
+      const sz = size * (0.75 + r() * 0.5);
+      const base = pos.length / 3;
+      const shade = 0.74 + 0.3 * ((py - minY) / (maxY - minY || 1));
+      c.copy(hue).multiplyScalar(shade * (0.88 + r() * 0.24));
+      for (let m = 0; m < 4; m++) {
+        const sx = m === 0 || m === 3 ? -1 : 1;
+        const sy = m < 2 ? -1 : 1;
+        corner.set(px, py, pz).addScaledVector(a, sx * sz * 0.5).addScaledVector(b, sy * sz * 0.5);
+        pos.push(corner.x, corner.y, corner.z);
+        n.copy(corner).sub(centre).normalize();
+        n.y += 0.35;
+        n.normalize();
+        nor.push(n.x, n.y, n.z);
+        if (atlas) uv.push(quad[0] + (sx < 0 ? 0.035 : 0.465), quad[1] + (sy < 0 ? 0.035 : 0.465));
+        else uv.push(sx < 0 ? 0 : 1, sy < 0 ? 0 : 1);
+        col.push(c.r, c.g, c.b);
+      }
+      idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  return g;
+}
+
+export function treeGeo(kind: TreeKind, seed: number): TreeGeo {
+  const r = rng(seed * 977 + kind.length * 13);
+  const bark = kind === "beech" ? new THREE.Color(0xd8d0c0) : new THREE.Color(0x8a7a66);
+  const parts: THREE.BufferGeometry[] = [];
+  const clusters: { x: number; y: number; z: number; rad: number }[] = [];
+  let H = 12;
+  let R = 0.5;
+  if (kind === "pine") {
+    H = range(14, 20);
+    R = range(0.3, 0.45);
+  } else if (kind === "giant") {
+    H = range(30, 36);
+    R = range(2.6, 3.4);
+  } else if (kind === "beech") {
+    H = range(10, 14);
+    R = range(0.22, 0.32);
+  } else if (kind === "young") {
+    H = range(6, 8);
+    R = range(0.14, 0.2);
+  } else {
+    H = range(13, 19);
+    R = range(0.55, 0.9);
+  }
+  function range(lo: number, hi: number) {
+    return lo + (hi - lo) * r();
+  }
+  const trunkTop = kind === "pine" ? H * 0.95 : H * (kind === "giant" ? 0.55 : 0.6);
+  const lean = (r() - 0.5) * 0.08;
+  const trunk = limb(R, R * (kind === "pine" ? 0.15 : 0.55), trunkTop, kind === "giant" ? 12 : 7);
+  place(trunk, 0, 0, 0, lean, 0, lean);
+  parts.push(aoTint(trunk, bark, 0, trunkTop, 0.5));
+  if (kind !== "young" && kind !== "pine") {
+    const roots = kind === "giant" ? 7 : 4;
+    for (let i = 0; i < roots; i++) {
+      const ang = (i / roots) * Math.PI * 2 + r();
+      const len = R * (kind === "giant" ? 3.4 : 2.4);
+      const g = new THREE.ConeGeometry(R * 0.55, len, 5, 1, true);
+      g.rotateZ(Math.PI / 2);
+      g.translate(-len / 2 + R * 0.3, R * 0.25, 0);
+      g.rotateZ(-0.35);
+      g.rotateY(ang);
+      parts.push(aoTint(g, bark, 0, R * 2, 0.45));
+    }
+  }
+  const top = new THREE.Vector3(0, trunkTop, 0);
+  if (kind === "pine") {
+    const tiers = 7;
+    for (let t = 0; t < tiers; t++) {
+      const f = t / (tiers - 1);
+      const y = H * 0.3 + f * H * 0.68;
+      const rad = (1 - f) * 3.2 + 0.6;
+      const around = 5;
+      for (let k = 0; k < around; k++) {
+        const ang = (k / around) * Math.PI * 2 + t * 0.6;
+        clusters.push({ x: Math.cos(ang) * rad * 0.55, y: y - rad * 0.25, z: Math.sin(ang) * rad * 0.55, rad: rad * 0.55 });
+      }
+    }
+  } else {
+    const n = kind === "giant" ? 12 : kind === "young" ? 3 : kind === "beech" ? 5 : 7;
+    const spread = kind === "giant" ? 10 : kind === "young" ? 1.6 : kind === "beech" ? 2.8 : 4.2;
+    for (let i = 0; i < n; i++) {
+      const ang = (i / n) * Math.PI * 2 + r() * 0.7;
+      const d = spread * (0.45 + r() * 0.6);
+      const cx = Math.cos(ang) * d;
+      const cz = Math.sin(ang) * d;
+      const cy = trunkTop + (H - trunkTop) * (0.25 + r() * 0.55);
+      const rad = spread * (0.5 + r() * 0.3) + (kind === "giant" ? 2 : 0.6);
+      clusters.push({ x: cx, y: cy, z: cz, rad });
+      if (kind !== "young") {
+        const len = Math.hypot(cx, cy - trunkTop * 0.8, cz);
+        const br = limb(R * 0.42, R * 0.12, len, 5);
+        const dir = new THREE.Vector3(cx, cy - trunkTop * 0.8, cz).normalize();
+        br.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir));
+        br.translate(0, trunkTop * 0.8, 0);
+        parts.push(aoTint(br, bark, trunkTop * 0.6, H, 0.7));
+      }
+    }
+    clusters.push({ x: 0, y: H * 0.86, z: 0, rad: spread * 0.8 + 0.5 });
+  }
+  const hue =
+    kind === "pine" ? new THREE.Color(0xa8b8a0) : kind === "beech" ? new THREE.Color(0xf0f0d0) : kind === "giant" ? new THREE.Color(0xe0e8c8) : new THREE.Color(0xffffff);
+  const cardSize = kind === "giant" ? 6.5 : kind === "pine" ? 3.0 : kind === "young" ? 2.0 : 3.6;
+  const cards = kind === "giant" ? 18 : kind === "pine" ? 4 : kind === "young" ? 7 : 11;
+  const quad = ATLAS[kind === "giant" || kind === "young" ? "oak" : kind];
+  const leaves = crown(r, clusters, cards, cardSize, top.setY((trunkTop + H) / 2), hue, quad, true);
+  const trunkGeo = merge(parts);
+  const tuv = trunkGeo.getAttribute("uv");
+  for (let i = 0; i < tuv.count; i++) tuv.setXY(i, 0.012, 0.012);
+  const whole = merge([trunkGeo, leaves]);
+  return { trunk: trunkGeo, leaves, whole, height: H, radius: R };
+}
+
+export function bushGeo(seed: number, size = 1, atlas = false) {
+  const r = rng(seed * 31 + 5);
+  const clusters = [];
+  const n = 2 + Math.floor(r() * 3);
+  for (let i = 0; i < n; i++) clusters.push({ x: (r() - 0.5) * 1.6 * size, y: (0.6 + r() * 0.5) * size, z: (r() - 0.5) * 1.6 * size, rad: (0.8 + r() * 0.4) * size });
+  return crown(r, clusters, 9, 1.4 * size, new THREE.Vector3(0, 0, 0), new THREE.Color(0xffffff), ATLAS.bush, atlas);
+}
+
+/** Six crossed fern fronds leaning out from the centre. */
+export function fernGeo() {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 6; i++) {
+    const g = new THREE.PlaneGeometry(0.55, 1.2, 1, 3);
+    const p = g.getAttribute("position");
+    for (let k = 0; k < p.count; k++) {
+      const y = p.getY(k) + 0.6;
+      p.setY(k, y * 0.55);
+      p.setZ(k, y * y * 0.32);
+    }
+    g.rotateX(-0.75);
+    g.rotateY((i / 6) * Math.PI * 2);
+    g.computeVertexNormals();
+    const n = g.getAttribute("normal");
+    for (let k = 0; k < n.count; k++) n.setXYZ(k, 0, 1, 0);
+    parts.push(aoTint(g, 0xffffff, 0, 0.8, 0.6));
+  }
+  return merge(parts);
+}
+
+/** A clump of grass blades: plain triangles, coloured base-to-tip, normals up so they light like the ground. */
+export function grassGeo(seed: number, blades = 7, height = 0.55, spread = 0.5) {
+  const r = rng(seed);
+  const pos: number[] = [];
+  const col: number[] = [];
+  // roots match the turf so tufts grow out of the ground instead of sitting on it
+  const base = new THREE.Color(0x5f7a3c);
+  const mid = new THREE.Color(0x86a04c);
+  const tip = new THREE.Color(0xb9c96a);
+  const tipB = new THREE.Color(0x93b055);
+  const tc = new THREE.Color();
+  const mc = new THREE.Color();
+  const n = Math.round(blades * 1.5);
+  for (let i = 0; i < n; i++) {
+    const a = r() * Math.PI * 2;
+    const d = Math.sqrt(r()) * spread;
+    const x = Math.cos(a) * d;
+    const z = Math.sin(a) * d;
+    const w = 0.028 + r() * 0.026;
+    const h = height * (0.5 + r() * 0.75);
+    const lean = (r() - 0.5) * 0.5 * h;
+    const fa = r() * Math.PI * 2;
+    const ox = Math.cos(fa) * w;
+    const oz = Math.sin(fa) * w;
+    const lx = Math.cos(a) * lean;
+    const lz = Math.sin(a) * lean;
+    // a bent blade: wide foot, narrower waist, drooping tip
+    const P0 = [x - ox, 0, z - oz], P1 = [x + ox, 0, z + oz];
+    const P2 = [x - ox * 0.6 + lx * 0.35, h * 0.55, z - oz * 0.6 + lz * 0.35], P3 = [x + ox * 0.6 + lx * 0.35, h * 0.55, z + oz * 0.6 + lz * 0.35];
+    const P4 = [x + lx, h, z + lz];
+    tc.copy(tip).lerp(tipB, r());
+    mc.copy(mid).lerp(tc, 0.25);
+    const B = [base.r, base.g, base.b], Mi = [mc.r, mc.g, mc.b], T = [tc.r, tc.g, tc.b];
+    const tri = (a1: number[], c1: number[], a2: number[], c2: number[], a3: number[], c3: number[]) => {
+      // both windings, so neither face is ever shaded as a back face
+      pos.push(...a1, ...a2, ...a3, ...a1, ...a3, ...a2);
+      col.push(...c1, ...c2, ...c3, ...c1, ...c3, ...c2);
+    };
+    tri(P0, B, P1, B, P3, Mi);
+    tri(P0, B, P3, Mi, P2, Mi);
+    tri(P2, Mi, P3, Mi, P4, T);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  const nor = new Float32Array(pos.length);
+  for (let i = 0; i < nor.length; i += 3) nor[i + 1] = 1;
+  g.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+  return prep(g);
+}
+
+export function wheatGeo() {
+  const parts: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 3; i++) {
+    const g = new THREE.PlaneGeometry(1.4, 1.25);
+    g.translate(0, 0.62, 0);
+    g.rotateY((i / 3) * Math.PI);
+    const n = g.getAttribute("normal");
+    for (let k = 0; k < n.count; k++) n.setXYZ(k, 0, 1, 0);
+    parts.push(aoTint(g, 0xffffff, 0, 1.2, 0.55));
+  }
+  return merge(parts);
+}
+
+/** A lumpy rock: displaced icosphere, mossy on top. */
+export function rockGeo(seed: number, mossy = true, tone = 0x8a847a) {
+  const g = new THREE.IcosahedronGeometry(1, 2);
+  const p = g.getAttribute("position");
+  const ox = seed * 3.7;
+  for (let i = 0; i < p.count; i++) {
+    v.set(p.getX(i), p.getY(i), p.getZ(i));
+    const n = fbm(v.x * 1.3 + ox, v.z * 1.3 + v.y * 0.9, 3);
+    const k = 0.72 + n * 0.55 + noise2(v.x * 4 + ox, v.y * 4) * 0.08;
+    v.multiplyScalar(k);
+    if (v.y < -0.2) v.y = -0.2 - (v.y + 0.2) * 0.25;
+    p.setXYZ(i, v.x, v.y * 0.72, v.z);
+  }
+  g.computeVertexNormals();
+  const stone = new THREE.Color(tone);
+  const moss = new THREE.Color(0x5e6b45);
+  const out = new THREE.Color();
+  tint(g, (x, y, z, _nx, ny) => {
+    out.copy(stone).multiplyScalar(0.75 + noise2(x * 3 + ox, z * 3) * 0.35);
+    if (mossy) out.lerp(moss, Math.max(0, ny - 0.45) * 1.5 * (0.6 + noise2(x * 2, z * 2 + ox) * 0.6));
+    out.multiplyScalar(0.7 + 0.3 * Math.min(1, (y + 0.3) * 1.6));
+    return out;
+  });
+  return prep(g);
+}
+
+export function logGeo(len: number, rad: number) {
+  const g = new THREE.CylinderGeometry(rad, rad * 1.1, len, 9, 1, false);
+  g.rotateZ(Math.PI / 2);
+  const bark = new THREE.Color(0x5b4a38);
+  const moss = new THREE.Color(0x58663e);
+  const out = new THREE.Color();
+  tint(g, (x, _y, z, _nx, ny) => out.copy(bark).lerp(moss, Math.max(0, ny) * (0.5 + noise2(x, z) * 0.6)));
+  return prep(g);
+}
+
+export function stumpGeo(rad: number, h: number) {
+  const g = new THREE.CylinderGeometry(rad * 0.85, rad * 1.2, h, 9, 2);
+  const pp = g.getAttribute("position");
+  for (let i = 0; i < pp.count; i++) if (pp.getY(i) > h * 0.49) pp.setY(i, pp.getY(i) + Math.sin(pp.getX(i) * 9 + pp.getZ(i) * 7) * 0.06);
+  g.computeVertexNormals();
+  g.translate(0, h / 2, 0);
+  const bark = new THREE.Color(0x5b4a38);
+  const ring = new THREE.Color(0xa88c66);
+  const out = new THREE.Color();
+  tint(g, (_x, y, _z, _nx, ny) => (ny > 0.9 && y > h * 0.9 ? out.copy(ring) : out.copy(bark).multiplyScalar(0.7 + (y / h) * 0.3)));
+  return prep(g);
+}
+
+/** An arching root from a tree base, as a tube along a curve. */
+export function rootGeo(points: THREE.Vector3[], rad: number) {
+  const curve = new THREE.CatmullRomCurve3(points);
+  const g = new THREE.TubeGeometry(curve, 18, rad, 7, false);
+  const p = g.getAttribute("position");
+  for (let i = 0; i < p.count; i++) {
+    const t = Math.floor(i / 8) / 18;
+    const k = 1 - t * 0.55;
+    const c = curve.getPoint(Math.min(1, t));
+    p.setXYZ(i, c.x + (p.getX(i) - c.x) * k, c.y + (p.getY(i) - c.y) * k, c.z + (p.getZ(i) - c.z) * k);
+  }
+  g.computeVertexNormals();
+  const bark = new THREE.Color(0x9a8468);
+  const moss = new THREE.Color(0x7a8c52);
+  const out = new THREE.Color();
+  tint(g, (x, _y, z, _nx, ny) => out.copy(bark).lerp(moss, Math.max(0, ny - 0.3) * (0.4 + noise2(x * 0.5, z * 0.5) * 0.6)));
+  return prep(g);
+}
+
+export function mushroomGeo(seed: number) {
+  const r = rng(seed);
+  const parts: THREE.BufferGeometry[] = [];
+  const n = 2 + Math.floor(r() * 3);
+  for (let i = 0; i < n; i++) {
+    const x = (r() - 0.5) * 0.5;
+    const z = (r() - 0.5) * 0.5;
+    const h = 0.1 + r() * 0.18;
+    const stalk = new THREE.CylinderGeometry(0.025, 0.035, h, 5);
+    stalk.translate(x, h / 2, z);
+    parts.push(tint(stalk, 0xd8ccb4));
+    const cap = new THREE.SphereGeometry(0.07 + r() * 0.06, 7, 4, 0, Math.PI * 2, 0, Math.PI / 2);
+    cap.scale(1, 0.6, 1);
+    cap.translate(x, h, z);
+    parts.push(tint(cap, r() < 0.5 ? 0xa57a44 : 0xc8a678));
+  }
+  return merge(parts);
+}
+
+export function flowerGeo(seed: number) {
+  const r = rng(seed);
+  const parts: THREE.BufferGeometry[] = [];
+  const cols = [0xe7dcc8, 0xd7a441, 0x9a9ac8, 0xcdbba6];
+  const color = cols[Math.floor(r() * cols.length)];
+  for (let i = 0; i < 5; i++) {
+    const x = (r() - 0.5) * 0.6;
+    const z = (r() - 0.5) * 0.6;
+    const h = 0.18 + r() * 0.2;
+    const stem = new THREE.CylinderGeometry(0.008, 0.008, h, 3);
+    stem.translate(x, h / 2, z);
+    parts.push(tint(stem, 0x4e5e34));
+    const head = new THREE.IcosahedronGeometry(0.045, 0);
+    head.translate(x, h, z);
+    parts.push(tint(head, color));
+  }
+  return merge(parts);
+}
+
+// ---------------------------------------------------------------- instancing
+
+export type Part = { geo: THREE.BufferGeometry; mat: THREE.Material; shadow?: boolean; receive?: boolean };
+
+/**
+ * Instances grouped into square chunks, one InstancedMesh per part per chunk, so the
+ * renderer can cull chunks outside the view and we can drop distant chunks entirely.
+ */
+export class Scatter {
+  private items = new Map<string, THREE.Matrix4[]>();
+  private meshes: { mesh: THREE.InstancedMesh; cx: number; cz: number }[] = [];
+  constructor(private parts: Part[], private chunk = 48, public maxDist = 160) {}
+
+  add(x: number, y: number, z: number, ry = 0, sc = 1, sy = sc, tiltX = 0, tiltZ = 0) {
+    const key = Math.floor(x / this.chunk) + "," + Math.floor(z / this.chunk);
+    let list = this.items.get(key);
+    if (!list) {
+      list = [];
+      this.items.set(key, list);
+    }
+    const m = new THREE.Matrix4();
+    m.compose(v.set(x, y, z), q.setFromEuler(e.set(tiltX, ry, tiltZ)), s.set(sc, sy, sc));
+    list.push(m);
+  }
+
+  get count() {
+    let n = 0;
+    for (const l of this.items.values()) n += l.length;
+    return n;
+  }
+
+  build(parent: THREE.Object3D) {
+    for (const [key, list] of this.items) {
+      const [cx, cz] = key.split(",").map(Number);
+      for (const part of this.parts) {
+        const mesh = new THREE.InstancedMesh(part.geo, part.mat, list.length);
+        list.forEach((m, i) => mesh.setMatrixAt(i, m));
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.castShadow = !!part.shadow;
+        mesh.receiveShadow = part.receive !== false;
+        mesh.computeBoundingSphere();
+        mesh.computeBoundingBox();
+        parent.add(mesh);
+        this.meshes.push({ mesh, cx: (cx + 0.5) * this.chunk, cz: (cz + 0.5) * this.chunk });
+      }
+    }
+    this.items.clear();
+  }
+
+  /** Hide chunks beyond the draw distance. */
+  cull(px: number, pz: number, dist = this.maxDist) {
+    const lim = dist + this.chunk * 0.75;
+    for (const m of this.meshes) m.mesh.visible = Math.hypot(m.cx - px, m.cz - pz) < lim;
+  }
+}
+
+/** Merge many placed geometries into one mesh per material key. */
+export class Batch {
+  private groups = new Map<string, { mat: THREE.Material; geos: THREE.BufferGeometry[]; shadow: boolean }>();
+  add(key: string, mat: THREE.Material, geo: THREE.BufferGeometry, shadow = true) {
+    let g = this.groups.get(key);
+    if (!g) {
+      g = { mat, geos: [], shadow };
+      this.groups.set(key, g);
+    }
+    g.geos.push(prep(geo));
+  }
+  build(parent: THREE.Object3D) {
+    const out: THREE.Mesh[] = [];
+    for (const [key, g] of this.groups) {
+      if (!g.geos.length) continue;
+      const mesh = new THREE.Mesh(merge(g.geos), g.mat);
+      mesh.castShadow = g.shadow;
+      mesh.receiveShadow = true;
+      mesh.name = key;
+      parent.add(mesh);
+      out.push(mesh);
+    }
+    this.groups.clear();
+    return out;
+  }
+}
+
+/** Bake a group of meshes into one mesh with vertex colours: one draw call instead of hundreds. */
+export function flatten(group: THREE.Object3D, mat: THREE.Material) {
+  group.updateMatrixWorld(true);
+  const geos: THREE.BufferGeometry[] = [];
+  group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    const g = m.geometry.clone();
+    g.applyMatrix4(m.matrixWorld);
+    if (!g.getAttribute("color")) {
+      const c = (m.material as THREE.MeshLambertMaterial).color ?? new THREE.Color(0xffffff);
+      tint(g, c);
+    }
+    geos.push(prep(g));
+  });
+  return new THREE.Mesh(merge(geos), mat);
+}
+
+export const rand = { range, rng };
+
+/**
+ * Height fog for every fogged material: air thickens below eye level and thins above it,
+ * so mist pools in hollows while hilltops, towers and treetops stand clear of it.
+ */
+export function installHeightFog() {
+  THREE.ShaderChunk.fog_pars_vertex = `#ifdef USE_FOG
+	varying float vFogDepth;
+	varying float vFogRise;
+#endif`;
+  THREE.ShaderChunk.fog_vertex = `#ifdef USE_FOG
+	vFogDepth = - mvPosition.z;
+	vFogRise = dot(mvPosition.xyz, vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]));
+#endif`;
+  THREE.ShaderChunk.fog_pars_fragment = THREE.ShaderChunk.fog_pars_fragment.replace("varying float vFogDepth;", "varying float vFogDepth;\n\tvarying float vFogRise;");
+  THREE.ShaderChunk.fog_fragment = `#ifdef USE_FOG
+	#ifdef FOG_EXP2
+		float fogH = mix(0.62, 1.45, exp(-max(0.0, vFogRise * 0.5 + 4.0) * 0.16));
+		float fogD = vFogDepth * fogH;
+		float fogFactor = 1.0 - exp( - fogDensity * fogDensity * fogD * fogD );
+	#else
+		float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+	#endif
+	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
+#endif`;
+}
+
+/** Shared by every water surface; the game sets these once a frame. */
+export const WATER = {
+  uWTime: { value: 0 },
+  uWSun: { value: new THREE.Vector3(0.4, 0.8, 0.3) },
+  uWSunCol: { value: new THREE.Color(0xfff0d0) },
+  uWZenith: { value: new THREE.Color(0x6f9fd0) },
+};
+
+/**
+ * Water: two layers of ripples drifting across each other in world space, a fresnel mirror of
+ * the sky (horizon colour low, zenith overhead), a sun glitter path, and a clear look straight
+ * down. `flow` is the drift in metres a second; `bank` fades a ribbon out at its edges (uv.x).
+ */
+export function watery<T extends THREE.Material>(mat: T, o: { flow?: [number, number]; scale?: number; bank?: boolean; murk?: number } = {}): T {
+  const prev = mat.onBeforeCompile;
+  const prevKey = mat.customProgramCacheKey;
+  const flow = o.flow ?? [0.05, 0.35];
+  const sc = (o.scale ?? 1).toFixed(3);
+  const murk = (o.murk ?? 0).toFixed(3);
+  mat.onBeforeCompile = (shader, renderer) => {
+    prev?.call(mat, shader, renderer);
+    Object.assign(shader.uniforms, WATER);
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying vec3 vWPos;\nvarying vec2 vWUv;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvWUv = uv;");
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+        varying vec3 vWPos;
+        varying vec2 vWUv;
+        uniform float uWTime;
+        uniform vec3 uWSun;
+        uniform vec3 uWSunCol;
+        uniform vec3 uWZenith;`,
+      )
+      .replace(
+        "#include <opaque_fragment>",
+        `{
+        vec2 wp = vWPos.xz * ${sc};
+        vec2 fl = vec2(${flow[0].toFixed(3)}, ${flow[1].toFixed(3)}) * uWTime;
+        #ifdef USE_NORMALMAP
+          vec3 n1 = texture2D(normalMap, wp * 0.11 + fl * 0.11).xyz * 2.0 - 1.0;
+          vec3 n2 = texture2D(normalMap, wp.yx * 0.047 - fl.yx * 0.03 + 0.37).xyz * 2.0 - 1.0;
+          vec3 n3 = texture2D(normalMap, wp * 0.31 + fl * 0.4 + 0.11).xyz * 2.0 - 1.0;
+          vec2 rip = n1.xy * 0.5 + n2.xy * 0.7 + n3.xy * 0.22;
+        #else
+          vec2 rip = vec2(sin(wp.x * 1.7 + fl.x * 4.0) + sin(wp.y * 2.3 + fl.y * 4.0), cos(wp.x * 2.1 - fl.y * 3.0)) * 0.2;
+        #endif
+        vec3 wN = normalize(vec3(rip.x * 0.32, 1.0, rip.y * 0.32));
+        vec3 wV = normalize(cameraPosition - vWPos);
+        float cosV = clamp(dot(wN, wV), 0.0, 1.0);
+        float wf = 0.03 + 0.97 * pow(1.0 - cosV, 4.0);
+        vec3 wR = reflect(-wV, wN);
+        #ifdef USE_FOG
+          vec3 hor = fogColor;
+        #else
+          vec3 hor = uWZenith;
+        #endif
+        vec3 skyC = mix(hor * 0.92, uWZenith, pow(clamp(wR.y, 0.0, 1.0), 0.55));
+        float sunUp = smoothstep(-0.05, 0.15, uWSun.y);
+        float sd = max(dot(wR, normalize(uWSun)), 0.0);
+        vec3 glit = uWSunCol * (pow(sd, 420.0) * 3.0 + pow(sd, 36.0) * 0.22) * sunUp;
+        // looking down: the lit body colour, a little greener where the ripples face you
+        vec3 body = outgoingLight * (0.75 + 0.5 * cosV) + diffuseColor.rgb * hor * 0.18;
+        outgoingLight = mix(body, skyC, wf * (1.0 - ${murk})) + glit;
+        float al = mix(diffuseColor.a, 1.0, clamp(wf * 1.4 + dot(glit, vec3(0.3)), 0.0, 1.0));
+        ${o.bank ? "float bk = smoothstep(0.0, 0.16, vWUv.x) * smoothstep(1.0, 0.84, vWUv.x); float foam = (1.0 - smoothstep(0.0, 0.3, bk)) * smoothstep(0.1, 0.6, rip.x + rip.y + 0.5); outgoingLight = mix(outgoingLight, hor * 1.1 + 0.08, foam * 0.35); al *= smoothstep(0.0, 0.5, bk);" : ""}
+        diffuseColor.a = al;
+      }
+      #include <opaque_fragment>`,
+      );
+  };
+  mat.customProgramCacheKey = () => `${prevKey ? prevKey.call(mat) : ""}|water2|${flow}|${sc}|${murk}|${o.bank ? 1 : 0}`;
+  return mat;
+}

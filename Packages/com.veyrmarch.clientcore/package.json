@@ -1,0 +1,11 @@
+{
+  "name": "com.veyrmarch.clientcore",
+  "version": "0.1.0",
+  "displayName": "Veyrmarch Client Core",
+  "description": "The pure half of the client: touch stick, look drag, dodge flick, intent building, orbit camera maths, prediction motor, frame stats, quality tiers, safe area. No UnityEngine, so it is tested outside the editor.",
+  "unity": "6000.3",
+  "dependencies": {
+    "com.veyrmarch.sim": "0.1.0",
+    "com.veyrmarch.net": "0.1.0"
+  }
+}
