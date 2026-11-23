@@ -28,7 +28,7 @@ try {
   await page.goto(url);
   await page.waitForSelector(".vm-title", { timeout: 240000 });
   await page.screenshot({ path: join(out, `${tag}-title.png`), timeout: 180000 });
-  await page.getByRole("button", { name: /^Single Player/ }).click();
+  await page.getByRole("button", { name: /^Single Player/ }).click({ timeout: 240000 });
   await page.getByRole("button", { name: "New Character" }).click();
   await page.waitForSelector(".vm-creator");
   await page.locator(".vm-creator input").fill("Shots");
@@ -53,6 +53,7 @@ try {
     await settle(10);
     await page.screenshot({ path: join(out, `${tag}-${name}.png`), timeout: 180000 });
     stats[name] = { ...(await V("perf")), ...(await V("lights")) };
+    if (process.argv.includes("--heavy")) stats[name].heavy = await V("heavy", 10);
   }
 } catch (e) { errors.push("harness: " + e.message); }
 writeFileSync(join(out, `${tag}-stats.json`), JSON.stringify({ stats, errors }, null, 1));

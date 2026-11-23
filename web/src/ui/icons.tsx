@@ -577,7 +577,7 @@ function generic(id: string) {
   );
 }
 
-export function Glyph({ name, size = 26 }: { name: "sword" | "dodge" | "shield" | "flame" | "hand" | "bag" | "menu" | "heal" | "close" | "speak" | "gather" | "door" | "book"; size?: number }) {
+export function Glyph({ name, size = 26 }: { name: "sword" | "dodge" | "shield" | "flame" | "hand" | "bag" | "menu" | "heal" | "close" | "speak" | "gather" | "door" | "book" | "target"; size?: number }) {
   const p = { fill: "none", stroke: "currentColor", strokeWidth: 2.4, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   return (
     <svg viewBox="0 0 32 32" width={size} height={size} aria-hidden>
@@ -593,6 +593,12 @@ export function Glyph({ name, size = 26 }: { name: "sword" | "dodge" | "shield" 
           <path d="M22 8 L26 12 L21 15" />
           <circle cx="9" cy="25" r="2" />
         </g>
+      )}
+      {name === "target" && (
+        <>
+          <circle {...p} cx="16" cy="16" r="8" />
+          <path {...p} d="M16 3 V9 M16 23 V29 M3 16 H9 M23 16 H29" />
+        </>
       )}
       {name === "shield" && <path {...p} d="M16 4 L26 8 C26 18 22 25 16 28 C10 25 6 18 6 8 Z" />}
       {name === "flame" && <path {...p} d="M16 4 C20 10 24 12 24 19 A8 8 0 0 1 8 19 C8 14 12 13 12 8 C14 10 15 11 16 13 C17 10 17 7 16 4 Z" />}

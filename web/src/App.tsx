@@ -242,10 +242,10 @@ function SettingsBody({ hud, api, extra }: { hud: Hud; api: GameApi; extra?: Rea
       <div className="vm-field">
         <label>Controls</label>
         <p>
-          Touch: left thumb moves (push to the edge to run), right thumb drags the view. Tap the sword for quick strikes, hold it for a heavy blow. Roll with the arrow. Hold the shield to block; block just as a blow lands to parry.
+          Touch: left thumb moves (push to the edge to run), right thumb drags the view. Tap the sword for quick strikes, hold it for a heavy blow. Roll with the arrow. Hold the shield to block; block just as a blow lands to parry. The ring button holds the view on one foe; tap it again to let go.
         </p>
-        <p>Keyboard: WASD move, Shift run, mouse drag look, J or click attack (hold for heavy), Space roll, F block, Q Ember, E interact, H bandage, I bag, Esc pause.</p>
-        <p>Gamepad{hud.pad ? " (connected)" : ""}: left stick move, right stick look, X or RB attack (hold for heavy), A roll, LB block, Y interact, LT Ember, D-pad up bandage, Back bag, Start pause.</p>
+        <p>Keyboard: WASD move, Shift run, mouse drag look, J or click attack (hold for heavy), Space roll, F block, Q Ember, E interact, H bandage, T hold a foe in view, I bag, Esc pause.</p>
+        <p>Gamepad{hud.pad ? " (connected)" : ""}: left stick move, right stick look, X or RB attack (hold for heavy), A roll, LB block, Y interact, LT Ember, D-pad up bandage, press the right stick to hold a foe in view, Back bag, Start pause.</p>
       </div>
     </div>
   );

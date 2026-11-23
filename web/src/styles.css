@@ -858,6 +858,16 @@ input {
   width: 46px;
   height: 46px;
 }
+.vm-lock {
+  right: 186px;
+  bottom: 126px;
+  width: 46px;
+  height: 46px;
+}
+.vm-lock.is-on {
+  color: #ffb070;
+  box-shadow: 0 0 0 2px rgba(255, 130, 70, 0.85), 0 0 14px rgba(255, 120, 60, 0.55);
+}
 .vm-heal b {
   position: absolute;
   right: -2px;

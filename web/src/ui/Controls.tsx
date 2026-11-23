@@ -139,6 +139,9 @@ export function Controls({ api, hud }: { api: GameApi; hud: Hud }) {
             <Glyph name="flame" size={28} />
           </button>
         )}
+        <button className={`vm-btn vm-lock ${hud.locked ? "is-on" : ""}`} {...btn("lock")} aria-label="Hold a foe in view" aria-pressed={hud.locked}>
+          <Glyph name="target" size={22} />
+        </button>
         <button className={`vm-btn vm-heal ${bandages ? "" : "is-dim"}`} {...btn("heal")} aria-label="Bandage">
           <Glyph name="heal" size={22} />
           {bandages > 0 && <b>{bandages}</b>}

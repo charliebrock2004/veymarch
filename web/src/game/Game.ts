@@ -88,6 +88,8 @@ export type Hud = {
   maxMana: number;
   ember: boolean;
   emberReady: boolean;
+  /** the view is held on one foe */
+  locked: boolean;
   weapon: string;
   weaponId: string;
   shield: boolean;
@@ -151,7 +153,7 @@ export type Hud = {
 };
 
 export type Press =
-  | "attackDown" | "attackUp" | "dodge" | "interact" | "blockDown" | "blockUp" | "ember" | "bag" | "close" | "talk" | "wake" | "pause" | "resume" | "endClose" | "rewardClose" | "title" | "heal";
+  | "attackDown" | "attackUp" | "dodge" | "interact" | "blockDown" | "blockUp" | "ember" | "bag" | "close" | "talk" | "wake" | "pause" | "resume" | "endClose" | "rewardClose" | "title" | "heal" | "lock";
 
 export type GameApi = {
   dispose: () => void;
@@ -1168,7 +1170,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     return {
       mode, loading, name,
       hp: Math.ceil(P.hp), maxHp: P.maxHp, stam: P.stam, maxStam: P.maxStam, mana: P.mana, maxMana: P.maxMana,
-      ember: flags.ember, emberReady: P.mana >= 8 && P.emberCd <= 0,
+      ember: flags.ember, emberReady: P.mana >= 8 && P.emberCd <= 0, locked: !!lockOn,
       weapon: w.name, weaponId: w.id, shield: P.shield,
       prompt, objective: obj.text, objectiveSub: obj.sub, bearing, dist, camYaw,
       place: placeName, placeSub, placeAt, toast, toastId, talk,
@@ -2110,6 +2112,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   /** Shows one zone, hides the rest, and tells the room (each zone has its own runner). */
   function setZone(z: ZoneId) {
     P.zone = z;
+    lockOn = null;
     for (const [id, b] of zones) b.root.visible = id === z;
     if (playerRig) zoneRoot(z).add(playerRig.group);
     for (const p of bolts) p.life = 0;
@@ -2264,19 +2267,95 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
 
   function softLock(range = 4.8) {
-    const t = findTarget(range);
+    const t = lockPos() ?? findTarget(range);
     if (t) P.yaw = Math.atan2(t.x - P.x, t.z - P.z);
+  }
+
+  // ---- target lock: hold the view on one foe until it falls, you let go, or you leave it behind
+  const LOCK_RANGE = 16;
+  let lockOn: { mob: Mob } | { boss: Boss } | null = null;
+  function lockPos(): { x: number; z: number; r: number; y: number } | null {
+    if (!lockOn) return null;
+    if ("mob" in lockOn) {
+      const m = lockOn.mob;
+      return m.alive && m.zone === P.zone ? { x: m.x, z: m.z, r: m.cfg.radius, y: m.y } : null;
+    }
+    const b = lockOn.boss;
+    return b.fighting && b.def.zone === P.zone ? { x: b.x, z: b.z, r: 1.1, y: b.y } : null;
+  }
+  /** Foes the view can be held on, nearest to the middle of the view first. */
+  function lockCandidates() {
+    const out: { ref: NonNullable<typeof lockOn>; sc: number }[] = [];
+    const consider = (ref: NonNullable<typeof lockOn>, x: number, z: number) => {
+      const d = Math.hypot(x - P.x, z - P.z);
+      if (d > LOCK_RANGE) return;
+      const a = Math.atan2(x - P.x, z - P.z) - camYaw;
+      const ang = Math.abs(Math.atan2(Math.sin(a), Math.cos(a)));
+      if (ang > 1.3 && d > 4) return;
+      out.push({ ref, sc: d + ang * 6 });
+    };
+    for (const m of mobs) if (m.alive && m.zone === P.zone && m.kind !== "deer") consider({ mob: m }, m.x, m.z);
+    const zb = zoneBoss();
+    if (zb && zb.fighting) {
+      consider({ boss: zb }, zb.x, zb.z);
+      for (const m of zb.adds) if (m.alive) consider({ mob: m }, m.x, m.z);
+    }
+    return out.sort((a, b) => a.sc - b.sc).map((o) => o.ref);
+  }
+  const sameLock = (a: typeof lockOn, b: typeof lockOn) => !!a && !!b && ("mob" in a ? "mob" in b && a.mob === b.mob : "boss" in b && a.boss === b.boss);
+  /** One press takes the foe in view; another lets go. With `next`, moves to the next foe instead. */
+  function toggleLock(next = false) {
+    if (mode !== "play" || P.dead) return;
+    const c = lockCandidates();
+    if (lockOn && !next) {
+      lockOn = null;
+      audio.ui();
+      push();
+      return;
+    }
+    const i = c.findIndex((r) => sameLock(r, lockOn));
+    const pick = c.length ? c[(i + 1) % c.length] : null;
+    if (!pick) {
+      if (!lockOn) say("Nothing to hold in view");
+      return;
+    }
+    lockOn = pick;
+    audio.ui();
+    push();
+  }
+  function updateLock(rdt: number) {
+    if (!lockOn) return;
+    const t = lockPos();
+    if (!t || mode !== "play" || P.dead || Math.hypot(t.x - P.x, t.z - P.z) > LOCK_RANGE + 4) {
+      // the foe fell or was left behind: take the next one close by, or let go
+      const was = lockOn;
+      lockOn = null;
+      if (!t && mode === "play" && !P.dead) {
+        const c = lockCandidates().filter((r) => !sameLock(r, was));
+        const near = c.find((r) => { const q = "mob" in r ? r.mob : r.boss; return Math.hypot(q.x - P.x, q.z - P.z) < 9; });
+        if (near) lockOn = near;
+      }
+      push();
+      return;
+    }
+    const by = Math.atan2(t.x - P.x, t.z - P.z);
+    const diff = Math.atan2(Math.sin(by - camYaw), Math.cos(by - camYaw));
+    camYaw += diff * Math.min(1, rdt * 5);
+    camPitch += (0.3 - camPitch) * Math.min(1, rdt * 2);
+    lookT = 0;
   }
 
   let lockDecal: ReturnType<DecalPool["get"]> | null = null;
   function updateLockRing() {
     if (!lockDecal) lockDecal = decals.get();
-    const t = mode === "play" && combatT > 0 ? findTarget(4.8) : null;
+    const held = mode === "play" ? lockPos() : null;
+    const t = held ?? (mode === "play" && combatT > 0 ? findTarget(4.8) : null);
     if (!t) {
       lockDecal.hide();
       return;
     }
-    lockDecal.show(0, t.x, t.y, t.z, 0, t.r + 0.45, 0, { color: 0xffd27a, alpha: 0.55 });
+    if (held) lockDecal.show(0, t.x, t.y, t.z, 0, t.r + 0.55 + Math.sin(performance.now() / 180) * 0.05, 0, { color: 0xff6a3a, alpha: 0.9 });
+    else lockDecal.show(0, t.x, t.y, t.z, 0, t.r + 0.45, 0, { color: 0xffd27a, alpha: 0.55 });
   }
 
   function attack(heavy: boolean) {
@@ -2889,7 +2968,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       camPitch += (-0.12 - camPitch) * Math.min(1, rdt * 2.5);
       if (revealT <= 0) lookT = 0;
     } else if (lookT > 2.5 && camPitch < 0.22) camPitch += (0.3 - camPitch) * Math.min(1, rdt * 1.2);
-    if (bossOn && lookT > 1.2) {
+    updateLock(rdt);
+    if (bossOn && !lockOn && lookT > 1.2) {
       const by = Math.atan2(camBoss!.x - P.x, camBoss!.z - P.z);
       const diff = Math.atan2(Math.sin(by - camYaw), Math.cos(by - camYaw));
       if (Math.abs(diff) > 0.45) camYaw += diff * Math.min(1, rdt * 1.6);
@@ -3210,7 +3290,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       }
     }
     // movement
-    const sprintWant = mag > 0.92 || keys.has("ShiftLeft") || keys.has("ShiftRight");
+    // with the view held on a foe you circle it at a walk; Shift still breaks into a run
+    const sprintWant = (mag > 0.92 && !lockOn) || keys.has("ShiftLeft") || keys.has("ShiftRight");
     P.sprint = sprintWant && (!inCombat || P.stam > 5) && P.action === "none" && !P.blocking;
     let target = 0;
     if (playing && canMove && mag > 0.08) {
@@ -3262,8 +3343,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     P.y = groundAt(P.x, P.z);
     const sp = Math.hypot(P.vx, P.vz);
     P.speed = sp;
-    if (sp > 0.3 && (P.action === "none" || P.action === "charge" || P.action === "cast")) {
-      const want = Math.atan2(P.vx, P.vz);
+    const lk = lockPos();
+    const strafe = !!lk && !P.sprint && (P.action === "none" || P.action === "charge" || P.action === "cast");
+    if (strafe || (sp > 0.3 && (P.action === "none" || P.action === "charge" || P.action === "cast"))) {
+      const want = strafe ? Math.atan2(lk!.x - P.x, lk!.z - P.z) : Math.atan2(P.vx, P.vz);
       const diff = Math.atan2(Math.sin(want - P.yaw), Math.cos(want - P.yaw));
       P.yaw += Math.sign(diff) * Math.min(Math.abs(diff), dt * 12);
     }
@@ -3777,6 +3860,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       press("bag");
     }
     if (e.code === "KeyH") press("heal");
+    if (e.code === "KeyT" || e.code === "KeyR") press("lock");
     if (e.code === "Escape") press(mode === "play" ? "pause" : "close");
   };
   const onKeyUp = (e: KeyboardEvent) => {
@@ -3878,6 +3962,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         return;
       case "ember":
         return castEmber();
+      case "lock":
+        toggleLock();
+        break;
       case "heal":
         if (mode === "play" || mode === "bag") quickHeal();
         return;
@@ -4570,7 +4657,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   }
 
   // ------------------------------------------------------------ gamepad
-  const PAD_DOWN: Record<number, Press> = { 0: "dodge", 2: "attackDown", 5: "attackDown", 7: "attackDown", 4: "blockDown", 3: "interact", 6: "ember", 12: "heal", 8: "bag" };
+  const PAD_DOWN: Record<number, Press> = { 0: "dodge", 2: "attackDown", 5: "attackDown", 7: "attackDown", 4: "blockDown", 3: "interact", 6: "ember", 12: "heal", 8: "bag", 11: "lock" };
   const PAD_UP: Record<number, Press> = { 2: "attackUp", 5: "attackUp", 7: "attackUp", 4: "blockUp" };
   function pollPad(rdt: number) {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -5127,6 +5214,24 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     graves: () => GRAVES.map((g) => ({ id: g.id, name: g.name, laid: laid(codex.nd, g.id), carried: carried === g.id, at: findMeshes.get(g.id) ? { x: findMeshes.get(g.id)!.x, z: findMeshes.get(g.id)!.z } : null })),
     finds: () => FINDS.map((f) => ({ id: f.id, zone: f.zone, kind: f.kind, got: found(f.id), at: findMeshes.get(f.id) ? { x: findMeshes.get(f.id)!.x, z: findMeshes.get(f.id)!.z } : null })),
     setLevel: (n: number) => applyProgress({ xp: LEVEL_XP[n - 1] ?? 0, level: n }),
+    lock: () => ({ at: lockPos(), camYaw, yaw: P.yaw }),
+    press: (p: Press) => press(p),
+    lockList: () => lockCandidates().length,
+    /** the heaviest visible meshes, for finding what a view spends its triangles on */
+    heavy: (n = 12) => {
+      const out: { name: string; tris: number; inst: number; shadow: boolean }[] = [];
+      scene.traverseVisible((o) => {
+        const m = o as THREE.InstancedMesh;
+        if (!m.isMesh || !m.geometry) return;
+        const g = m.geometry;
+        const per = (g.index ? g.index.count : g.attributes.position?.count ?? 0) / 3;
+        const inst = m.isInstancedMesh ? m.count : 1;
+        let name = o.name;
+        for (let q = o.parent; !name && q; q = q.parent) name = q.name && q.name + ">";
+        out.push({ name: name || g.type, tris: Math.round(per * inst), inst, shadow: m.castShadow });
+      });
+      return out.sort((x, y) => y.tris - x.tris).slice(0, n);
+    },
     /** single player only: tell the device's own world where a debug teleport put us, so position-checked actions (boss blows) work */
     soloPlace: async () => {
       const be = online?.realm.backend as { exec?: (sql: string, params?: unknown[]) => Promise<unknown[]> } | undefined;
