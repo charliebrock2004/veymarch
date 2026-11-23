@@ -8,13 +8,16 @@ import { ARMOUR_STYLES, type ArmourLook, type ArmourStyle } from "../engine/rig"
  */
 const ORDER = ["head", "chest", "hands", "legs", "feet"] as const;
 const LETTERS = "lishb";
+const STYLE_OF: Record<string, ArmourStyle> = { leather: "leather", iron: "iron", steel: "steel", gi: "bk" };
 
 export function armourLook(worn: ItemDef[]): ArmourLook {
   const out: ArmourLook = {};
   for (const it of worn) {
-    if (it.kind !== "armour" || !it.set) continue;
+    if (it.kind !== "armour") continue;
+    // plain sets carry no set bonus, so their style is read from the id: arm_<style>_<slot>
+    const style = it.set || STYLE_OF[it.id.split("_")[1]];
     const slot = ORDER.find((s) => s === it.slot);
-    if (slot && (ARMOUR_STYLES as string[]).includes(it.set)) out[slot] = it.set as ArmourStyle;
+    if (slot && style && (ARMOUR_STYLES as string[]).includes(style)) out[slot] = style as ArmourStyle;
   }
   return out;
 }

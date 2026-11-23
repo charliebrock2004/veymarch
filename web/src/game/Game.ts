@@ -12,7 +12,7 @@ import { Audio } from "./engine/audio";
 import type { ThemeId } from "./engine/music";
 import { armourCode, armourLook } from "./play/gear";
 import { Beam, DecalPool, Flashes, Trail } from "./engine/fx";
-import { ADV, ADV_HEAD, ADV_HEIGHT, ModelActor, loadAdventurer, poseAdventurer } from "./engine/models";
+import { ADV, ADV_HEAD, ADV_HEIGHT, ModelActor, type ModelTemplate, loadAdventurer, loadModel, poseAdventurer } from "./engine/models";
 import { WATER, installHeightFog, shared } from "./engine/kit";
 import { makeMaterials } from "./engine/materials";
 import { Particles, buildGlows } from "./engine/particles";
@@ -874,12 +874,28 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     syncGear();
     // the modelled body replaces the code-built one once it has loaded
     const rig = playerRig;
-    const chest = armourLook(equippedDefs()).chest;
+    const worn = armourLook(equippedDefs());
+    const chest = worn.chest;
+    const kit = (st: string | undefined) => (st === "leather" ? ADV.hooded : st === "hound" ? ADV.barbarian : st ? ADV.knight : "");
+    const limbs: [string, RegExp, string | undefined][] = [
+      [kit(worn.head), /_(Helmet|Hat|Head_Hooded)$/, worn.head],
+      [kit(worn.hands), /_Arm(Left|Right)$/, worn.hands],
+      [kit(worn.legs ?? worn.feet), /_Leg(Left|Right)$/, worn.legs ?? worn.feet],
+    ];
     const url = chest === "leather" ? ADV.hooded : chest === "hound" ? ADV.barbarian : chest ? ADV.knight : [ADV.rogue, ADV.hooded, ADV.barbarian][look.body];
-    loadAdventurer(url).then(([body, anim]) => {
+    Promise.all([loadAdventurer(url), ...limbs.map(([u]) => (u && u !== url ? loadModel(u) : Promise.resolve<ModelTemplate | null>(null)))] as const).then(([[body, anim], ...donors]) => {
       if (playerRig !== rig) return;
       for (const c of rig.group.children) c.visible = false;
       playerActor = new ModelActor(body, 1.78 / ADV_HEIGHT, ADV_HEAD, chest === "bk" ? 0x6a6470 : 0xd8d0c4, anim).emptyHands();
+      playerActor.root.traverse((o) => {
+        if (/_(Helmet|Hat)$/.test(o.name)) o.visible = !!worn.head && kit(worn.head) === url;
+      });
+      limbs.forEach(([u, part, st], i) => {
+        const d = donors[i];
+        if (!d) return;
+        // a hood replaces the whole head; a hat or helmet sits on it
+        playerActor!.graft(d, u === ADV.hooded && i === 0 ? /_Head(_Hooded)?$/ : part, st === "bk" ? 0x6a6470 : 0xd8d0c4);
+      });
       const hl = lookToHuman(look);
       playerActor.recolour({ skin: hl.skin, hair: hl.hair, coat: chest ? undefined : hl.coat });
       rig.group.add(playerActor.root);
@@ -5048,8 +5064,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     hazards: () => hazards.map((h) => ({ x: h.h.x, z: h.h.z, r: h.h.r, left: h.left })),
     theme: () => audio.theme,
     zoneMobs: (z: ZoneId) => mobs.filter((m) => m.zone === z).map((m) => ({ key: mobKey.get(m) ?? m.key, k: m.kind, x: m.x, z: m.z, hp: m.hp, alive: m.alive, st: m.state })),
-    face: (yaw: number, pitch?: number) => {
-      P.yaw = yaw;
+    face: (yaw: number, pitch?: number, body?: number) => {
+      P.yaw = body ?? yaw;
       camYaw = yaw;
       if (pitch !== undefined) camPitch = pitch;
     },

@@ -43,6 +43,8 @@ export class ModelActor {
   private current = "";
   private mats: THREE.MeshStandardMaterial[] = [];
   private allMats: THREE.MeshStandardMaterial[] = [];
+  /** Materials of grafted armour, which keep their own cloth colours. */
+  private worn = new Set<THREE.MeshStandardMaterial>();
 
   private head: THREE.Object3D | undefined;
   handR: THREE.Object3D | undefined;
@@ -100,6 +102,7 @@ export class ModelActor {
           g.drawImage(img, 0, 0);
           const w = Math.floor(cv.width / 8), h = Math.floor(cv.height / 4);
           for (const [col, row, hex] of jobs) {
+            if (row === 1 && this.worn.has(m)) continue;
             const d = g.getImageData(col * w, row * h, w, h);
             const px = d.data;
             let sum = 0, sat = 0;
@@ -140,6 +143,55 @@ export class ModelActor {
   }
 
   /** Hide the stock weapons and shields parented to the hands, so the game's own can go there. */
+  /**
+   * Wear parts of another adventurer: this body's meshes matching `part` are hidden and the donor's take their place,
+   * bound to this skeleton (the adventurers share one). Hats and helmets ride the head bone.
+   */
+  graft(donor: ModelTemplate, part: RegExp, tint = 0xffffff) {
+    const bones = new Map<string, THREE.Bone>();
+    let host: THREE.Object3D | undefined;
+    this.root.traverse((o) => {
+      if ((o as THREE.Bone).isBone) bones.set(o.name, o as THREE.Bone);
+      const m = o as THREE.SkinnedMesh;
+      if (m.isSkinnedMesh) host ??= m.parent ?? undefined;
+      if (m.isMesh && part.test(o.name)) o.visible = false;
+    });
+    const src = cloneSkinned(donor.scene);
+    src.updateMatrixWorld(true);
+    const take: THREE.Mesh[] = [];
+    src.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh && part.test(o.name)) take.push(o as THREE.Mesh);
+    });
+    const own = new Map<THREE.Material, THREE.MeshStandardMaterial>();
+    for (const m of take) {
+      const sm = m as THREE.SkinnedMesh;
+      if (sm.isSkinnedMesh) {
+        const mine = sm.skeleton.bones.map((b) => bones.get(b.name));
+        if (mine.some((b) => !b) || !host) continue;
+        host.add(sm);
+        sm.bind(new THREE.Skeleton(mine as THREE.Bone[], sm.skeleton.boneInverses), sm.bindMatrix);
+      } else {
+        const to = m.parent && bones.get(m.parent.name);
+        if (!to) continue;
+        to.add(m);
+      }
+      const from = m.material as THREE.MeshStandardMaterial;
+      let mat = own.get(from);
+      if (!mat) {
+        mat = from.clone();
+        mat.color.multiply(new THREE.Color(tint));
+        mat.roughness = Math.max(mat.roughness, 0.85);
+        own.set(from, mat);
+        this.allMats.push(mat);
+        this.mats.push(mat);
+        this.worn.add(mat);
+      }
+      m.material = mat;
+      m.visible = true;
+    }
+    return this;
+  }
+
   emptyHands() {
     for (const h of [this.handR, this.handL]) for (const c of h?.children ?? []) c.visible = false;
     return this;
