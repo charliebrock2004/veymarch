@@ -70,6 +70,8 @@ export type Codex = {
   b?: { day: string; ids: string[]; n: number[]; paid: boolean[] };
   /** graves whose name has been given back to one of the dead */
   nd?: string[];
+  /** ore walls broken open */
+  mg?: string[];
   /** bounty boards posted so far */
   bn?: number;
 };

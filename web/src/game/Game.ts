@@ -39,6 +39,7 @@ import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Real
 import { Room, type Bundle, type Ev } from "../net/room";
 import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
 import { BOUNTIES, FINDS, pickBounties, type Find } from "./data/explore";
+import { VEINS, broken, veinRefusal, type Vein } from "./data/mining";
 import { GRAVES, NAME_ALL, NAME_CROWNS, canName, graveLabel, laid, namesLeft } from "./data/naming";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
 import { REMATCH, RUMOURS, rematchCrowns, cardView, charmKey, charms, trophies, trophyLines, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
@@ -1448,6 +1449,30 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       lid = pivot;
       glow = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffd98a, transparent: true, opacity: 0.9, depthWrite: false }));
       glow.position.y = 1.0;
+    } else if (f.kind === "vein") {
+      // a rockfall shot through with ore; the boulders go when it is broken
+      const ore = new THREE.MeshStandardMaterial({ color: 0xc8843a, roughness: 0.4, metalness: 0.7, emissive: 0x5a2c08, emissiveIntensity: 0.5 });
+      const wall = new THREE.Group();
+      wall.name = "wall";
+      for (let i = 0; i < 9; i++) {
+        const a = (i * 2.4) % 6.28;
+        const rr = i < 3 ? 0.35 : 1.0;
+        const s2 = 0.75 - (i % 3) * 0.12;
+        const rock = new THREE.Mesh(new THREE.DodecahedronGeometry(s2, 0), findMat.stone);
+        rock.position.set(Math.cos(a) * rr, i < 3 ? 1.1 + i * 0.25 : 0.45, Math.sin(a) * rr);
+        rock.rotation.set(i, i * 2, i * 3);
+        wall.add(rock);
+        const nug = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), ore);
+        nug.position.copy(rock.position).multiplyScalar(1.25);
+        nug.position.y = rock.position.y + 0.15;
+        wall.add(nug);
+      }
+      const rubble = new THREE.Mesh(new THREE.DodecahedronGeometry(0.5, 0), findMat.stone);
+      rubble.scale.set(2.4, 0.3, 2.4);
+      rubble.position.y = 0.08;
+      root.add(wall, rubble);
+      glow = new THREE.Mesh(new THREE.OctahedronGeometry(0.14, 0), new THREE.MeshBasicMaterial({ color: 0xffb060, transparent: true, opacity: 0.9, depthWrite: false }));
+      glow.position.y = 2.1;
     } else {
       const slab = new THREE.Mesh(new THREE.DodecahedronGeometry(0.75, 0), findMat.stone);
       slab.scale.set(0.75, 1.9, 0.42);
@@ -1466,7 +1491,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     zb.root.add(root);
     const rec = { root, glow, lid, x, z };
     findMeshes.set(f.id, rec);
-    if (f.kind !== "cache") env.col.circle?.(x, z, 0.5);
+    if (f.kind !== "cache") env.col.circle?.(x, z, f.kind === "vein" ? 1.3 : 0.5);
     return rec;
   }
   function takeFind(f: Find) {
@@ -1484,6 +1509,27 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     }
     say(f.text);
     checkDeeds();
+    push();
+  }
+  /** Breaks an ore wall open if a pick in the bag is good enough. */
+  function breakVein(v: Vein) {
+    if (broken(codex.mg, v.id) || sharedNow()) return;
+    const why = veinRefusal(v, toolTier());
+    if (why) {
+      audio.block();
+      say(why);
+      return;
+    }
+    (codex.mg ??= []).push(v.id);
+    saveCodex(codexId, codex);
+    const m = findMeshes.get(v.id);
+    if (m) sparks.burst(40, m.x, P.y + 1, m.z, 5, 0xffb060, 1.0, 0.25, { up: 4, grav: 6 });
+    audio.thud();
+    audio.reward();
+    shake = Math.max(shake, 0.35);
+    showBanner("WALL BROKEN", `${VEINS.filter((x) => broken(codex.mg, x.id)).length} of ${VEINS.length}`);
+    say(v.text);
+    grant(v.loot);
     push();
   }
   /** the grave whose name you are carrying, until you say it to one of the dead */
@@ -1515,14 +1561,16 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   let findT = 0;
   function updateFinds(dt: number) {
     findT += dt;
-    for (const f of [...FINDS, ...GRAVES]) {
+    for (const f of [...FINDS, ...GRAVES, ...VEINS]) {
       const m = findMeshes.get(f.id);
       if (!m || f.zone !== P.zone) continue;
-      const got = f.kind === "grave" ? laid(codex.nd, f.id) || carried === f.id : found(f.id);
+      const got = f.kind === "vein" ? broken(codex.mg, f.id) : f.kind === "grave" ? laid(codex.nd, f.id) || carried === f.id : found(f.id);
+      const wall = f.kind === "vein" ? m.root.getObjectByName("wall") : null;
+      if (wall) wall.visible = !got;
       m.root.visible = !sharedNow();
       m.glow.visible = !got;
       if (!got) {
-        m.glow.position.y = (f.kind === "cache" ? 1.0 : 1.35) + Math.sin(findT * 2 + m.x) * 0.06;
+        m.glow.position.y = (f.kind === "cache" ? 1.0 : f.kind === "vein" ? 2.1 : 1.35) + Math.sin(findT * 2 + m.x) * 0.06;
         (m.glow.material as THREE.MeshBasicMaterial).opacity = 0.55 + Math.sin(findT * 3 + m.z) * 0.35;
         if (f.kind !== "cache") m.glow.rotation.z = findT * 0.6;
         // a glint to catch the eye from a little way off
@@ -1579,6 +1627,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         const m = buildFind(f);
         if (!m) continue;
         interacts.push({ x: m.x, z: m.z, r: 2.2, zone: f.zone, label: () => (found(f.id) ? null : f.kind === "cache" ? "Open the cache" : "Read the rune stone"), act: () => takeFind(f) });
+      }
+    if (!sharedNow())
+      for (const v of VEINS) {
+        const m = buildFind(v);
+        if (!m) continue;
+        interacts.push({ x: m.x, z: m.z, r: 3.2, zone: v.zone, label: () => (broken(codex.mg, v.id) ? null : "Break the ore wall"), act: () => breakVein(v) });
       }
     if (!sharedNow())
       for (const g of GRAVES) {
@@ -5068,6 +5122,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const m = mobs.filter((x) => x.alive && x.zone === P.zone && x.kind === kind).sort((p, q) => Math.hypot(p.x - P.x, p.z - P.z) - Math.hypot(q.x - P.x, q.z - P.z))[0];
       return m ? { dealt: onMobHit(m, dmg, false), alive: m.alive, kind: m.kind } : null;
     },
+    ground: (x: number, z: number) => ({ y: groundAt(x, z), blocked: blockedAt(x, z) }),
+    veins: () => VEINS.map((v) => ({ id: v.id, zone: v.zone, tier: v.tier, broken: broken(codex.mg, v.id), at: findMeshes.get(v.id) ? { x: findMeshes.get(v.id)!.x, z: findMeshes.get(v.id)!.z } : null })),
     graves: () => GRAVES.map((g) => ({ id: g.id, name: g.name, laid: laid(codex.nd, g.id), carried: carried === g.id, at: findMeshes.get(g.id) ? { x: findMeshes.get(g.id)!.x, z: findMeshes.get(g.id)!.z } : null })),
     finds: () => FINDS.map((f) => ({ id: f.id, zone: f.zone, kind: f.kind, got: found(f.id), at: findMeshes.get(f.id) ? { x: findMeshes.get(f.id)!.x, z: findMeshes.get(f.id)!.z } : null })),
     setLevel: (n: number) => applyProgress({ xp: LEVEL_XP[n - 1] ?? 0, level: n }),
