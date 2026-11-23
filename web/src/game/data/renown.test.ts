@@ -91,5 +91,9 @@ test("the trophy rack has a peg for every boss and fills as they fall", async ()
   assert.deepEqual(t.map((x) => x.won), [true, false, false, false]);
   assert.match(trophyLines(t)[0], /^Cookie: /);
   assert.equal(trophyLines(t)[1], "3 pegs still empty.");
+  assert.equal(t[0].gilded, false);
+  const twice = trophies({ boss_cookie: 2 });
+  assert.equal(twice[0].gilded, true);
+  assert.match(trophyLines(twice)[0], /Gilded/);
   assert.match(trophyLines(trophies({ boss_cookie: 1, boss_boe: 1, boss_finlay: 2, boss_grave_king: 1 })).at(-1)!, /Every peg is full/);
 });

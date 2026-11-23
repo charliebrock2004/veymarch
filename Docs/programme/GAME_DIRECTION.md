@@ -65,7 +65,7 @@ Scores are 1 to 5. For difficulty, time and performance cost, 1 is easiest, shor
 
 | # | Idea | Experience | Visual | Difficulty | Time | Perf cost | Priority |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | **Marks**: ten evidence-earned traits with three ranks each | 5 | 2 | 2 | 1 | 1 | **Done** |
+| 1 | **Marks**: ten evidence-earned traits with three ranks each | 5 | Boss rematches (built); naming the dead, mining gates | Part built |
 | 2 | Marks visible on the body: scars, grave-dust, a wolf-pelt collar | 4 | 5 | 3 | 3 | 1 | P1 |
 | 3 | Villagers greet you by your marks and deaths | 4 | 1 | 2 | 2 | 1 | P0 |
 | 4 | Cold open: start in a fight you lose, wake Unmarked in Hearthfen | 5 | 4 | 3 | 2 | 1 | P0 |

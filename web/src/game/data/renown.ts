@@ -148,7 +148,7 @@ export function charms(marks: MarkView[]): Charm[] {
 export const charmKey = (c: Charm[]) => c.map((x) => x.id + x.rank).join(",");
 
 /** The trophy rack by your door in Hearthfen: one peg for each of the great ones. */
-export type Trophy = { id: string; name: string; what: string; color: number; won: boolean };
+export type Trophy = { id: string; name: string; what: string; color: number; won: boolean; gilded: boolean };
 const TROPHIES: [string, string, string, number][] = [
   ["cookie", "Cookie", "A cracked music box. It still tries to play.", 0x8fb7d8],
   ["boe", "Boe", "A red collar, far too big for any dog you would want to meet.", 0xb02a22],
@@ -157,12 +157,16 @@ const TROPHIES: [string, string, string, number][] = [
 ];
 export const TROPHY_IDS = TROPHIES.map((t) => t[0]);
 export function trophies(k: Record<string, number>): Trophy[] {
-  return TROPHIES.map(([id, name, what, color]) => ({ id, name, what, color, won: (k["boss_" + id] ?? 0) > 0 }));
+  return TROPHIES.map(([id, name, what, color]) => ({ id, name, what, color, won: (k["boss_" + id] ?? 0) > 0, gilded: (k["boss_" + id] ?? 0) > 1 }));
 }
 /** What you read when you look the rack over. */
 export function trophyLines(t: Trophy[]): string[] {
   const won = t.filter((x) => x.won);
   if (!won.length) return ["Four empty pegs. Somebody expected you to fill them."];
   const left = t.length - won.length;
-  return [...won.map((x) => `${x.name}: ${x.what}`), left ? `${left} peg${left > 1 ? "s" : ""} still empty.` : "Every peg is full. The March has run out of great ones, for now."];
+  return [...won.map((x) => `${x.name}: ${x.what}${x.gilded ? " Gilded: you beat it twice." : ""}`), left ? `${left} peg${left > 1 ? "s" : ""} still empty.` : "Every peg is full. The March has run out of great ones, for now."];
 }
+
+/** A boss called back for a second round has more health, hits harder and pays half its crowns. */
+export const REMATCH = { hp: 1.5, dmg: 1.3 };
+export const rematchCrowns = (crowns: number) => Math.round(crowns / 2);

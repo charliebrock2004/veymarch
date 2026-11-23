@@ -40,7 +40,7 @@ import { Room, type Bundle, type Ev } from "../net/room";
 import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
 import { BOUNTIES, FINDS, pickBounties, type Find } from "./data/explore";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
-import { RUMOURS, cardView, charmKey, charms, trophies, trophyLines, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
+import { REMATCH, RUMOURS, rematchCrowns, cardView, charmKey, charms, trophies, trophyLines, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
 import type { Card, Charm, PlaceView } from "./data/renown.ts";
 import { MARKS, RANK_NAMES, markBonuses, markBoon, markRank, markVs, marksView, type MarkView } from "./data/marks.ts";
 
@@ -385,6 +385,32 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       /* no voice on this device: the subtitle carries it */
     }
     push();
+  }
+
+  /** A boss called back for another round: fought on this client only, harder, for crowns and a gilded trophy. */
+  let rematch = "";
+  let rematchBase = 0;
+  function startRematch(b: Boss) {
+    rematch = b.def.id;
+    rematchBase = b.max;
+    b.setPuppet(false);
+    b.reset();
+    b.setMax(Math.round(rematchBase * REMATCH.hp));
+    say(`${b.def.name} gets up. It remembers you.`);
+  }
+  function endRematch(won: boolean) {
+    const b = bosses.get(rematch);
+    const def = BOSSES[rematch];
+    rematch = "";
+    if (!b || !def) return;
+    if (!won) b.setDead();
+    b.setMax(rematchBase);
+    if (!won) return;
+    noteKill("boss_" + def.id);
+    syncRack();
+    grant([["coin_crown", rematchCrowns(def.crowns)]]);
+    audio.reward();
+    say(`${def.name} falls again. Its trophy on your rack is gilded.`);
   }
 
   function zoneBoss(): Boss | null {
@@ -874,7 +900,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   function syncRack() {
     if (!world) return;
     const ts = trophies(codex.k);
-    const key = ts.map((t) => (t.won ? 1 : 0)).join("");
+    const key = ts.map((t) => (t.gilded ? 2 : t.won ? 1 : 0)).join("");
     if (rack && key === rackKey) return;
     rackKey = key;
     rack?.parent?.remove(rack);
@@ -894,7 +920,9 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const x = -1.05 + i * 0.7;
       add(new THREE.CylinderGeometry(0.025, 0.025, 0.22, 6).rotateX(Math.PI / 2), wood, x, 1.72, 0.1);
       if (!t.won) return;
-      const mat = new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.55, metalness: t.id === "finlay" ? 0.6 : 0.1 });
+      const mat = t.gilded
+        ? new THREE.MeshStandardMaterial({ color: 0xe0b040, roughness: 0.3, metalness: 0.9, emissive: 0x6a4a10, emissiveIntensity: 0.5 })
+        : new THREE.MeshStandardMaterial({ color: t.color, roughness: 0.55, metalness: t.id === "finlay" ? 0.6 : 0.1 });
       if (t.id === "cookie") {
         add(new THREE.BoxGeometry(0.34, 0.26, 0.26), mat, x, 1.42, 0.14);
         add(new THREE.CylinderGeometry(0.02, 0.02, 0.2, 6).rotateZ(Math.PI / 2), wood, x + 0.24, 1.44, 0.14);
@@ -1594,6 +1622,20 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     if (!rackCol) {
       rackCol = true;
       world.col.circle(RACK.x, RACK.z, 0.5);
+    }
+    for (const d of Object.values(BOSSES)) {
+      const A = arenaOf(d);
+      interacts.push({
+        x: A.x, z: A.z, r: d.r - 2, zone: d.zone,
+        label: () => {
+          const b = bosses.get(d.id);
+          return b && b.st === "dead" && !rematch && bossFinished.has(d.id) && bossDoneT < 0 && env.players().length <= 1 ? `Call ${d.name.split(",")[0]} back (harder)` : null;
+        },
+        act: () => {
+          const b = bosses.get(d.id);
+          if (b) startRematch(b);
+        },
+      });
     }
     interacts.push({
       x: RACK.x, z: RACK.z, r: 2.6, zone: "over", label: () => "Look over your trophies",
@@ -2393,6 +2435,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     // a shared world does not stop for menus
     const exposed = mode === "play" || (online && (mode === "bag" || mode === "talk" || mode === "pause"));
     if (P.dead || !exposed) return false;
+    if (rematch && bosses.get(rematch)?.fighting) dmg = Math.round(dmg * REMATCH.dmg);
     if (P.iframe > 0) {
       if (P.action === "dodge") {
         floater("Dodged", P.x, P.y + 2.0, P.z, "info");
@@ -3267,6 +3310,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         }
       }
     }
+    if (rematch && (P.dead || P.zone !== BOSSES[rematch].zone)) endRematch(false);
     // arena
     // the boss of this zone: whoever stands in its arena wakes it; only the zone's runner decides
     const zb = zoneBoss();
@@ -3275,10 +3319,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const arena = (q: PlayerState) => q.zone === zb.def.zone && !q.dead && Math.hypot(q.x - A.x, q.z - A.z) < A.r - 1.5;
       const inArena = online ? env.players().some(arena) : arena(P);
       const runs = !online || online.room.isRunner;
-      if (runs && inArena && !worldFlags[zb.def.flag] && zb.st === "dormant") {
+      if (rematch === zb.def.id && zb.st === "dead") endRematch(true);
+      // some bosses set their own health as they wake
+      else if (rematch === zb.def.id && zb.fighting && zb.max !== Math.round(rematchBase * REMATCH.hp)) zb.setMax(Math.round(rematchBase * REMATCH.hp));
+      if (runs && inArena && (!worldFlags[zb.def.flag] || rematch === zb.def.id) && zb.st === "dormant") {
         zb.startIntro();
         // a new fight, sized for whoever is in the arena: the server picks the health
-        if (online)
+        if (online && !rematch)
           rpc<Record<string, BossJson>>("vm_boss_reset", { p_boss: zb.def.id })
             .then((all) => {
               const st = all?.[zb.def.id];
@@ -3925,6 +3972,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     const x = P.x;
     const z = P.z;
     const id = c.def.id;
+    if (rematch === id) {
+      c.netHit(Math.max(0, c.hp - est), x, z, heavy, fire);
+      return est;
+    }
     rpc<{ hp: number; max: number; dead: boolean; dealt: number }>("vm_boss_hit", { p_boss: id, p_heavy: heavy, p_fire: fire, p_behind: heavy && f.behind, p_perched: f.perched, p_dizzy: f.dizzy })
       .then((r) => {
         if (!r.dealt && !r.dead) return;
@@ -4976,6 +5027,20 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     noteKill: (k: string) => noteKill(k),
     /** a world flag as this client sees it; `set` asks the server like a lever would */
     setWorldFlag: (f: string) => worldFlag(f).then(() => !!worldFlags[f]).catch((e: Error) => "refused: " + (e?.message ?? e)),
+    /** test hook: treats a boss as already beaten here and calls it back */
+    rematch: (id: string) => {
+      const b = bosses.get(id);
+      if (!b) return false;
+      worldFlags[b.def.flag] = true;
+      bossFinished.add(id);
+      b.setDead();
+      startRematch(b);
+      return true;
+    },
+    strike: (id: string, dmg: number) => {
+      const b = bosses.get(id);
+      return b ? bossHit(b, dmg, true, false) : 0;
+    },
     bossState: (id: string) => {
       const b = bosses.get(id);
       return b ? { x: b.x, y: b.y, z: b.z, yaw: b.yaw, hp: b.hp, max: b.max, st: b.st, phase: b.phaseN, puppet: b.puppet } : null;
