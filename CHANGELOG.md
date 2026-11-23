@@ -9,6 +9,7 @@
 - A roll that passes through a blow slows the world for under half a second.
 - Bestiary ranks: Known at one kill, Studied at 10 (health, fire weakness, spoils), Mastered at 50 (every blow and its warning time). A beaten boss is fully known.
 - Fixed: the spot where an ore wall stood no longer stays solid once the wall is broken, and in a boss rematch only the boss's own blows hit 30% harder, not its helpers'.
+- Finlay now fights in a modelled suit of black plate with clip animation, and the modelled helmet comes off with the code-built one in phase two.
 - Save to file / Load from file on the single-player character list: the whole save (characters, worlds, marks, journal) as one file, to back up or move to another device. Loading replaces the save on that device after a confirmation.
 - A character's codex (marks, bestiary, deeds, places, names, ore walls) is now kept inside the single-player save as well as in browser storage; whichever was written last is used, so older characters keep everything.
 - Offline play: the game now keeps the files it has loaded on the device, so a single-player world opens with no connection after one visit online. Lands not yet visited online may be missing their models until you are back on a connection. Shared worlds still need the network.

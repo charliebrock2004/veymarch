@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { ModelActor, loadModel } from "../../engine/models";
+import { ADV, ADV_ANIMS, ModelActor, loadModel } from "../../engine/models";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Decal } from "../../engine/fx";
 import { Poser, buildHuman, characterMaterial, rimmed, poseHuman, type HumanAction, type HumanLook, type Rig } from "../../engine/rig";
@@ -509,6 +509,8 @@ export class Finlay implements Boss {
 
   private poseModel(a: ModelActor, dt: number, action: HumanAction, at: number, over: Over) {
     const k = Math.min(1, Math.max(0, at));
+    const helmet = a.node("Knight_Helmet");
+    if (helmet) helmet.visible = this.helmOn;
     const pick = (...n: string[]) => n.find((x) => a.has(x)) ?? "Idle";
     if (over === "rite" || over === "helm" || over === "throw") return a.pose(pick("Spellcast_Raise", "Spellcast_Shoot"), dt, over === "rite" ? 0.5 + Math.sin(this.env.time * 3) * 0.2 : over === "helm" ? 0.3 : 0.8, 1, 10);
     if (over === "guard") return a.pose(pick("Blocking"), dt, undefined, 1, 12);
@@ -1254,6 +1256,11 @@ type Over = null | "low" | "guard" | "helm" | "throw" | "rite";
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const ease = (x: number) => x * x * (3 - 2 * x);
 
+const FINLAY_TALL = 1.95;
+
 export function createFinlay(env: BossEnv, parent: THREE.Object3D): Boss {
-  return new Finlay(env, parent);
+  const b = new Finlay(env, parent);
+  // the captain in black plate; his helmet comes off with the code-built one in phase two
+  b.wear(ADV.knight, ADV_ANIMS, FINLAY_TALL, 0x5c5c68);
+  return b;
 }
