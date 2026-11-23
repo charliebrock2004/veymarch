@@ -365,10 +365,11 @@ export function loadAdventurer(url: string): Promise<[ModelTemplate, ModelTempla
   return Promise.all([loadModel(url), loadModel(ADV_ANIMS)]);
 }
 
+const HEADS: Record<string, string> = { tied: ADV.rogue, short: ADV.knight, long: ADV.barbarian, bald: ADV.mage };
 type Worn = Partial<Record<"head" | "chest" | "hands" | "legs" | "feet", string>>;
 
 /** A player's modelled body: the chest piece picks the body, other armour is grafted on, then the creator's colours go over it. */
-export function dressAdventurer(body: number, col: { skin: number; hair: number; coat: number }, worn: Worn): Promise<ModelActor> {
+export function dressAdventurer(body: number, col: { skin: number; hair: number; coat: number; hairStyle?: string }, worn: Worn): Promise<ModelActor> {
   const chest = worn.chest;
   const kit = (st: string | undefined) => (st === "leather" ? ADV.hooded : st === "hound" ? ADV.barbarian : st ? ADV.knight : "");
   const limbs: [string, RegExp, string | undefined][] = [
@@ -377,6 +378,10 @@ export function dressAdventurer(body: number, col: { skin: number; hair: number;
     [kit(worn.legs ?? worn.feet), /_Leg(Left|Right)$/, worn.legs ?? worn.feet],
   ];
   const url = kit(chest) || [ADV.rogue, ADV.hooded, ADV.barbarian][body] || ADV.hooded;
+  // the hair style picks the bare head; a hood (worn, or the hooded body's own) keeps its head
+  const hooded = worn.head === "leather" || (!worn.head && url === ADV.hooded);
+  const head = (!hooded && col.hairStyle && HEADS[col.hairStyle]) || "";
+  limbs.push([head, /_Head(_Hooded)?$/, undefined]);
   return Promise.all([loadAdventurer(url), ...limbs.map(([u]) => (u && u !== url ? loadModel(u) : Promise.resolve<ModelTemplate | null>(null)))] as const).then(([[tpl, anim], ...donors]) => {
     const a = new ModelActor(tpl, 1.78 / ADV_HEIGHT, ADV_HEAD, chest === "bk" ? 0x6a6470 : 0xd8d0c4, anim).emptyHands();
     a.root.traverse((o) => {
@@ -387,7 +392,7 @@ export function dressAdventurer(body: number, col: { skin: number; hair: number;
       // a hood replaces the whole head; a hat or helmet sits on it
       if (d) a.graft(d, u === ADV.hooded && i === 0 ? /_Head(_Hooded)?$/ : part, st === "bk" ? 0x6a6470 : 0xd8d0c4);
     });
-    return a.recolour({ skin: col.skin, hair: col.hair, coat: chest ? undefined : col.coat });
+    return a.recolour({ skin: col.skin, hair: col.hairStyle === "bald" && !hooded ? col.skin : col.hair, coat: chest ? undefined : col.coat });
   });
 }
 
