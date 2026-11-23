@@ -363,7 +363,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       const inside = Math.hypot(P.x - hz.h.x, P.z - hz.h.z) < hz.h.r && !P.dead;
       if (inside) {
         // the rite takes you: no block, no parry, a long stagger
-        hurtPlayer(hz.h.dmg, hz.h.x, hz.h.z, { unblockable: true, knock: 2.4 });
+        hurtPlayer(hz.h.dmg, hz.h.x, hz.h.z, { unblockable: true, knock: 2.4, src: "rite" });
         if (!P.dead) startAction("hurt", 1.2, 2);
         sparks.burst(30, P.x, P.y + 1.2, P.z, 3, 0x7a9a3a, 1.0, 0.2, { up: 2 });
         say("The rite takes you.");
@@ -391,6 +391,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
 
   /** A boss called back for another round: fought on this client only, harder, for crowns and a gilded trophy. */
   let rematch = "";
+  /** the `src` a boss stamps on its own blows (the Grave King fights as Finlay); helpers stamp their own key */
+  const BOSS_SRC = new Set(["cookie", "boe", "finlay", "rite"]);
   let rematchBase = 0;
   function startRematch(b: Boss) {
     rematch = b.def.id;
@@ -1491,7 +1493,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     zb.root.add(root);
     const rec = { root, glow, lid, x, z };
     findMeshes.set(f.id, rec);
-    if (f.kind !== "cache") env.col.circle?.(x, z, f.kind === "vein" ? 1.3 : 0.5);
+    if (f.kind === "vein") env.col.circle?.(x, z, 1.3, () => !broken(codex.mg, f.id));
+    else if (f.kind !== "cache") env.col.circle?.(x, z, 0.5);
     return rec;
   }
   function takeFind(f: Find) {
@@ -2540,7 +2543,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     // a shared world does not stop for menus
     const exposed = mode === "play" || (online && (mode === "bag" || mode === "talk" || mode === "pause"));
     if (P.dead || !exposed) return false;
-    if (rematch && bosses.get(rematch)?.fighting) dmg = Math.round(dmg * REMATCH.dmg);
+    // only the boss's own blows are harder in a rematch, not its helpers'
+    if (rematch && o.src && BOSS_SRC.has(o.src) && bosses.get(rematch)?.fighting) dmg = Math.round(dmg * REMATCH.dmg);
     if (P.iframe > 0) {
       if (P.action === "dodge") {
         floater("Dodged", P.x, P.y + 2.0, P.z, "info");
@@ -5237,6 +5241,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       if (online) void online.realm.character(online.charId).then((c) => setItems(c.items));
     },
     beat: () => heartbeat(),
+    /** test hook: the local player takes a blow, stamped as coming from `src` */
+    takeBlow: (dmg: number, src?: string) => {
+      const before = P.hp;
+      hurtPlayer(dmg, P.x, P.z + 1, { unblockable: true, src });
+      return { lost: before - P.hp, dead: P.dead };
+    },
+    rack: () => trophies(codex.k),
     interact: () => {
       if (mode === "play") nearestInteract();
       press("interact");
