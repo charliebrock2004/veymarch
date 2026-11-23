@@ -1,4 +1,4 @@
-import { PGlite } from "@electric-sql/pglite";
+import { IdbFs, PGlite } from "@electric-sql/pglite";
 import schemaSql from "../../server/schema.sql?raw";
 import seedSql from "../../server/seed.sql?raw";
 import { newerCodex, primeCodex } from "../game/data/codex";
@@ -81,6 +81,24 @@ function staged(op: "get" | "put" | "clear", v?: Staged): Promise<Staged | null>
   });
 }
 
+/**
+ * Saving runs behind the game (relaxedDurability), so Postgres can delete a temporary file
+ * between a save listing it and copying it. That save fails with "no such file" and nobody
+ * is waiting on it, so it used to surface as an uncaught error. Run the save again instead.
+ */
+class CalmIdbFs extends IdbFs {
+  override async syncToFs(relaxed?: boolean): Promise<void> {
+    for (let i = 0; ; i++) {
+      try {
+        return await super.syncToFs(relaxed);
+      } catch (e) {
+        if (i >= 2) return console.warn("Saving to this device failed; it will be tried again on the next change.", e);
+      }
+    }
+  }
+}
+const soloFs = () => new CalmIdbFs("veyrmarch-solo");
+
 let opened: Promise<SoloBackend> | null = null;
 
 export function soloBackend(): Promise<SoloBackend> {
@@ -96,7 +114,7 @@ export function soloBackend(): Promise<SoloBackend> {
           req.onsuccess = () => resolve();
           req.onerror = () => reject(req.error);
         });
-        pg = new PGlite("idb://veyrmarch-solo", { relaxedDurability: true, loadDataDir: swap.dump });
+        pg = new PGlite({ fs: soloFs(), relaxedDurability: true, loadDataDir: swap.dump });
         await pg.waitReady;
         await pg.query("select 1");
         try {
@@ -112,7 +130,7 @@ export function soloBackend(): Promise<SoloBackend> {
         }
         await staged("clear");
       } else {
-        pg = new PGlite("idb://veyrmarch-solo", { relaxedDurability: true });
+        pg = new PGlite({ fs: soloFs(), relaxedDurability: true });
         await pg.waitReady;
       }
     } catch {
