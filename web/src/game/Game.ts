@@ -12,7 +12,7 @@ import { Audio } from "./engine/audio";
 import type { ThemeId } from "./engine/music";
 import { armourCode, armourLook } from "./play/gear";
 import { Beam, DecalPool, Flashes, Trail } from "./engine/fx";
-import { ADV, ADV_HEAD, ADV_HEIGHT, ModelActor, type ModelTemplate, loadAdventurer, loadModel, poseAdventurer } from "./engine/models";
+import { ModelActor, dressAdventurer, poseAdventurer } from "./engine/models";
 import { WATER, installHeightFog, shared } from "./engine/kit";
 import { makeMaterials } from "./engine/materials";
 import { Particles, buildGlows } from "./engine/particles";
@@ -878,30 +878,10 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     syncGear();
     // the modelled body replaces the code-built one once it has loaded
     const rig = playerRig;
-    const worn = armourLook(equippedDefs());
-    const chest = worn.chest;
-    const kit = (st: string | undefined) => (st === "leather" ? ADV.hooded : st === "hound" ? ADV.barbarian : st ? ADV.knight : "");
-    const limbs: [string, RegExp, string | undefined][] = [
-      [kit(worn.head), /_(Helmet|Hat|Head_Hooded)$/, worn.head],
-      [kit(worn.hands), /_Arm(Left|Right)$/, worn.hands],
-      [kit(worn.legs ?? worn.feet), /_Leg(Left|Right)$/, worn.legs ?? worn.feet],
-    ];
-    const url = chest === "leather" ? ADV.hooded : chest === "hound" ? ADV.barbarian : chest ? ADV.knight : [ADV.rogue, ADV.hooded, ADV.barbarian][look.body];
-    Promise.all([loadAdventurer(url), ...limbs.map(([u]) => (u && u !== url ? loadModel(u) : Promise.resolve<ModelTemplate | null>(null)))] as const).then(([[body, anim], ...donors]) => {
+    dressAdventurer(look.body, lookToHuman(look), armourLook(equippedDefs())).then((actor) => {
       if (playerRig !== rig) return;
       for (const c of rig.group.children) c.visible = false;
-      playerActor = new ModelActor(body, 1.78 / ADV_HEIGHT, ADV_HEAD, chest === "bk" ? 0x6a6470 : 0xd8d0c4, anim).emptyHands();
-      playerActor.root.traverse((o) => {
-        if (/_(Helmet|Hat)$/.test(o.name)) o.visible = !!worn.head && kit(worn.head) === url;
-      });
-      limbs.forEach(([u, part, st], i) => {
-        const d = donors[i];
-        if (!d) return;
-        // a hood replaces the whole head; a hat or helmet sits on it
-        playerActor!.graft(d, u === ADV.hooded && i === 0 ? /_Head(_Hooded)?$/ : part, st === "bk" ? 0x6a6470 : 0xd8d0c4);
-      });
-      const hl = lookToHuman(look);
-      playerActor.recolour({ skin: hl.skin, hair: hl.hair, coat: chest ? undefined : hl.coat });
+      playerActor = actor;
       rig.group.add(playerActor.root);
       heldMain?.parent?.remove(heldMain);
       heldOff?.parent?.remove(heldOff);
@@ -4293,7 +4273,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
           r.remove();
           o.remotes.delete(old);
         }
-      o.remotes.set(cid, new RemotePlayer(cid, meta.ch, meta.name, lookToHuman(meta.look as Look), (z) => zones.get(z)?.root ?? null, overlay));
+      o.remotes.set(cid, new RemotePlayer(cid, meta.ch, meta.name, lookToHuman(meta.look as Look), (meta.look as Look).body, (z) => zones.get(z)?.root ?? null, overlay));
       if (!o.names.has(meta.ch)) say(meta.name + " joined the world.");
       o.names.add(meta.ch);
     }
@@ -5107,6 +5087,22 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       P.y = groundAt(x, z);
       snapCam();
       nearestInteract();
+    },
+    /** Stands another player's avatar beside this one, to look at without a second client. */
+    ghost: (lk: Look, ar: string, w: string, a: HumanAction = "none") => {
+      const r = new RemotePlayer("ghost", "ghost", "Ghost", lookToHuman(lk), lk.body, (z) => zones.get(z)?.root ?? null, overlay);
+      const x = P.x + Math.sin(P.yaw) * 2;
+      const z = P.z + Math.cos(P.yaw) * 2;
+      let last = performance.now();
+      const tick = () => {
+        if (!playerRig) return r.remove();
+        const now = performance.now();
+        r.apply({ x, z, y: groundAt(x, z), yw: P.yaw + Math.PI, a, at: 0.5, du: 1e6, ac: 1, mv: 0, sp: 0, b: 0, d: 0, zn: P.zone, hp: 100, mh: 100, w, sh: 1, ar }, now);
+        r.update((now - last) / 1000, now + 500, env.time, P.zone);
+        last = now;
+        requestAnimationFrame(tick);
+      };
+      tick();
     },
     give: (id: string, n: number) => {
       items = addItem(items, id, n, uid);
