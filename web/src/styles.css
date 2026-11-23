@@ -2286,3 +2286,4 @@ input {
     bottom: calc(300px + var(--sab));
   }
 }
+.vm-savefile { margin-top: 10px; opacity: 0.9; }

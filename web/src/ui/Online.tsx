@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GameApi } from "../game/Game";
 import { importLegacySolo, importLocalSaves } from "../net/migrate";
 import { Realm, normalizeCode, type CharacterJson, type EnterJson, type Profile, type WorldCard } from "../net/realm";
@@ -75,6 +75,71 @@ export const hasJoinLink = () => joinLink.length === 6;
 
 function hourText(h: number) {
   return h >= 20.5 || h < 5.5 ? "night" : h < 7.5 ? "dawn" : h < 17.5 ? "day" : "dusk";
+}
+
+/** Single player only: write the whole save to a file, or replace it from one (to move to another device). */
+function SaveFile({ realm, setErr }: { realm: Realm; setErr: (s: string) => void }) {
+  const [sure, setSure] = useState<File | null>(null);
+  const [busy, setBusy] = useState("");
+  const pickRef = useRef<HTMLInputElement>(null);
+  const solo = realm.backend as unknown as { backup?: () => Promise<Blob>; restore?: (f: Blob) => Promise<void> };
+  if (!solo.backup || !solo.restore) return null;
+  const save = async () => {
+    setErr("");
+    setBusy("Writing your save…");
+    try {
+      const blob = await solo.backup!();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `veyrmarch-${new Date().toISOString().slice(0, 10)}.veyrsave`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    } catch (e) {
+      setErr(errText(e));
+    }
+    setBusy("");
+  };
+  const load = async (f: File) => {
+    setErr("");
+    setBusy("Loading that save…");
+    try {
+      await solo.restore!(f);
+      location.reload();
+    } catch (e) {
+      setErr(errText(e));
+      setBusy("");
+      setSure(null);
+    }
+  };
+  return (
+    <div className="vm-savefile">
+      <input ref={pickRef} type="file" accept=".veyrsave" hidden onChange={(e) => { setSure(e.target.files?.[0] ?? null); e.target.value = ""; }} />
+      {busy ? (
+        <p className="vm-sub">{busy}</p>
+      ) : sure ? (
+        <>
+          <p className="vm-sub">Loading {sure.name} replaces every single player character and world on this device.</p>
+          <div className="vm-row">
+            <button className="vm-mbtn small" onClick={() => setSure(null)}>
+              Cancel
+            </button>
+            <button className="vm-mbtn small danger" onClick={() => void load(sure)}>
+              Replace my save
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="vm-row">
+          <button className="vm-mbtn small" onClick={() => void save()}>
+            Save to file
+          </button>
+          <button className="vm-mbtn small" onClick={() => pickRef.current?.click()}>
+            Load from file
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function Online({ api, back, newCharacter, solo = false }: { api: GameApi; back: () => void; newCharacter: () => void; solo?: boolean }) {
@@ -291,6 +356,7 @@ export function Online({ api, back, newCharacter, solo = false }: { api: GameApi
             New Character
           </button>
         </div>
+        {solo && realm && <SaveFile realm={realm} setErr={setErr} />}
       </>
     );
   else if (phase === "worlds" && char)

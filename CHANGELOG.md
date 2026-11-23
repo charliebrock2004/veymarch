@@ -8,6 +8,8 @@
 - Villagers remark on your strongest mark the first time they see it (30 lines, one per mark and rank), ahead of their usual line. Quest talk is left alone.
 - A roll that passes through a blow slows the world for under half a second.
 - Bestiary ranks: Known at one kill, Studied at 10 (health, fire weakness, spoils), Mastered at 50 (every blow and its warning time). A beaten boss is fully known.
+- Save to file / Load from file on the single-player character list: the whole save (characters, worlds, marks, journal) as one file, to back up or move to another device. Loading replaces the save on that device after a confirmation.
+- A character's codex (marks, bestiary, deeds, places, names, ore walls) is now kept inside the single-player save as well as in browser storage; whichever was written last is used, so older characters keep everything.
 - Offline play: the game now keeps the files it has loaded on the device, so a single-player world opens with no connection after one visit online. Lands not yet visited online may be missing their models until you are back on a connection. Shared worlds still need the network.
 - Mining gates: five ore walls, one in each outdoor land from Hearthfen to the Wasteland. Each wants a better pick than the last (Stone, Copper, Iron, Fangbreaker, Soulbreaker) and pays out the hoard sealed behind it. Single-player worlds only.
 - Naming the dead: six graves in the Undead Wasteland still carry a name. Take one up and the next skeleton, zombie, drowned, crypt dead or undead knight you strike hears it and lies down in one blow. Each name pays 40 crowns; the sixth pays 300 and two Last Rites. Single-player worlds only.

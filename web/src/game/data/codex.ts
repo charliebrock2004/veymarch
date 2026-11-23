@@ -72,6 +72,8 @@ export type Codex = {
   nd?: string[];
   /** ore walls broken open */
   mg?: string[];
+  /** when this record was last saved (ms), to choose between the device copy and the save copy */
+  at?: number;
   /** bounty boards posted so far */
   bn?: number;
 };
@@ -129,20 +131,62 @@ export const TIPS: Record<string, string> = {
   radar: "The minimap shows foes in red, people in gold, shrines in blue and your goal as a diamond.",
 };
 
-export function loadCodex(id: string): Codex {
+const KEY = "veyrmarch.codex.";
+
+/**
+ * Single player keeps each character's codex in the world database as well as in local storage,
+ * so a backup of the save carries it. The database copies are read once when the save opens
+ * (`primeCodex`) and written through `sink`; whichever copy was written last is the one used.
+ */
+const primed = new Map<string, string>();
+let sink: ((id: string, json: string) => void) | null = null;
+
+export function primeCodex(rows: Iterable<[string, string]>, write: ((id: string, json: string) => void) | null) {
+  primed.clear();
+  for (const [id, json] of rows) primed.set(id, json);
+  sink = write;
+}
+
+function parse(raw: string | null | undefined): Partial<Codex> | null {
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem("veyrmarch.codex." + id);
-    if (raw) return { ...freshCodex(), ...(JSON.parse(raw) as Partial<Codex>) };
+    const v = JSON.parse(raw) as Partial<Codex>;
+    return v && typeof v === "object" ? v : null;
   } catch {
-    /* private mode or a bad record: start a new one */
+    return null;
   }
-  return freshCodex();
+}
+
+/** Of two copies of a codex, the one saved last; a copy with no stamp predates stamps and loses to one that has it. */
+export function newerCodex(a: string | null | undefined, b: string | null | undefined): string | null {
+  const pa = parse(a);
+  const pb = parse(b);
+  if (!pa) return pb ? b! : null;
+  if (!pb) return a!;
+  return (pb.at ?? 0) > (pa.at ?? 0) ? b! : a!;
+}
+
+export function loadCodex(id: string): Codex {
+  let local: string | null = null;
+  try {
+    local = localStorage.getItem(KEY + id);
+  } catch {
+    /* private mode: only the save's copy, if any */
+  }
+  const got = parse(newerCodex(local, primed.get(id)));
+  return got ? { ...freshCodex(), ...got } : freshCodex();
 }
 
 export function saveCodex(id: string, c: Codex) {
+  c.at = Date.now();
+  const json = JSON.stringify(c);
   try {
-    localStorage.setItem("veyrmarch.codex." + id, JSON.stringify(c));
+    localStorage.setItem(KEY + id, json);
   } catch {
     /* private mode */
+  }
+  if (sink) {
+    primed.set(id, json);
+    sink(id, json);
   }
 }
