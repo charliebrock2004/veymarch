@@ -35,12 +35,16 @@ All new state is optional fields on the existing local codex (`tal`, `fd`, `b`, 
 - `web/scripts/play.mjs` (headless Chromium): character creation, all 22 finds placed, a cache and a stone collected, talents spent in the Journal, bounty board shown. Run at 1024x576 and 390x844.
 - `web/scripts/qa.mjs`: a wolf fought to death with real swings, dodge, a bounty filled and claimed in the Journal, then a page reload confirming talents, bounty board and position come back.
 - `web/scripts/boss.mjs`: reveal sequence for Boe, Finlay and the Grave King.
+- `web/scripts/bossfight.mjs`: fights Boe to the kill through all three phases.
+- `web/scripts/lock.mjs`: target lock on a wolf: acquire, strafe, release on death.
 
 ## Not checked
 
 - Sound by ear, a physical gamepad, real phones and tablets, frame rate on real graphics hardware (the test browser renders in software and is very slow outdoors).
-- Full boss fights to the kill, crafting, fast travel and the quest chain were not replayed end to end after these changes.
-- A recurring `ErrnoError` appears in the headless browser console. It predates this work and play continues; cause not found.
+- Boe has been fought to the kill by script (single player). Finlay, Cookie and the Grave King, crafting, fast travel and the quest chain were not replayed end to end after these changes.
+- The `ErrnoError` at single-player startup was the browser database's file sync racing a temporary file; the sync now retries and the error no longer appears.
+- Target lock (T, the ring button on touch, right stick click): holds the view on a foe, you circle it at a walk, releases when it dies or you leave. Checked by script on keyboard only; the gamepad binding and the touch button were not pressed on real hardware.
+- Outdoors at low quality Hearthfen draws about 740,000 triangles in 250 draw calls (`__veyr.heavy()` lists the heaviest meshes). Fine for a desktop GPU; not yet reduced for phones.
 
 ## Honest standing
 
