@@ -263,7 +263,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = quality !== "low";
-  renderer.shadowMap.type = quality === "high" ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0xc8bea8, 0.007);
   scene.background = new THREE.Color(0x1c1916);
@@ -4950,7 +4950,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       post.setSize(canvas.clientWidth || 1, canvas.clientHeight || 1, renderer.getPixelRatio());
       renderer.shadowMap.enabled = q !== "low";
       sun.castShadow = q !== "low";
-      renderer.shadowMap.type = q === "high" ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
       const size = q === "high" ? 4096 : 1024;
       shadowSpan();
       if (sun.shadow.mapSize.x !== size) {
@@ -5131,6 +5131,13 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     graves: () => GRAVES.map((g) => ({ id: g.id, name: g.name, laid: laid(codex.nd, g.id), carried: carried === g.id, at: findMeshes.get(g.id) ? { x: findMeshes.get(g.id)!.x, z: findMeshes.get(g.id)!.z } : null })),
     finds: () => FINDS.map((f) => ({ id: f.id, zone: f.zone, kind: f.kind, got: found(f.id), at: findMeshes.get(f.id) ? { x: findMeshes.get(f.id)!.x, z: findMeshes.get(f.id)!.z } : null })),
     setLevel: (n: number) => applyProgress({ xp: LEVEL_XP[n - 1] ?? 0, level: n }),
+    /** single player only: tell the device's own world where a debug teleport put us, so position-checked actions (boss blows) work */
+    soloPlace: async () => {
+      const be = online?.realm.backend as { exec?: (sql: string, params?: unknown[]) => Promise<unknown[]> } | undefined;
+      if (!online?.realm.solo || !be?.exec) return false;
+      await be.exec("update vm_members set x = $2, z = $3, zone = $4, pos_at = now(), last_seen = now() where character_id = $1::uuid and left_at is null", [online.charId, P.x, P.z, P.zone]);
+      return true;
+    },
     /** single player only: write experience into the device's own world, so it survives a reload */
     soloXp: async (n: number) => {
       const be = online?.realm.backend as { exec?: (sql: string, params?: unknown[]) => Promise<unknown[]> } | undefined;
