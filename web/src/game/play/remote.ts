@@ -4,6 +4,7 @@ import type { PlayerState } from "./env";
 import type { ZoneId } from "../data/zones";
 import { weaponModel } from "./weapons";
 import { armourFromCode } from "./gear";
+import { type ModelActor, dressAdventurer, poseAdventurer } from "../engine/models";
 
 /** What a client sends about its own player every tick. */
 export type NetPlayer = {
@@ -59,8 +60,9 @@ export class RemotePlayer {
   private held: THREE.Object3D | null = null;
   private off: THREE.Object3D | null = null;
   private armour = "";
+  private actor: ModelActor | null = null;
 
-  constructor(public cid: string, public charId: string, public name: string, private look: HumanLook, private parent: (zone: ZoneId) => THREE.Object3D | null, overlay: HTMLElement) {
+  constructor(public cid: string, public charId: string, public name: string, private look: HumanLook, private body: number, private parent: (zone: ZoneId) => THREE.Object3D | null, overlay: HTMLElement) {
     this.rig = buildHuman(look);
     this.poser = new Poser(this.rig);
     this.state = { x: 0, y: 0, z: 0, yaw: 0, hp: 100, maxHp: 100, iframe: 0, blocking: false, blockT: 0, shield: false, dead: false, zone: "over", cid };
@@ -72,6 +74,55 @@ export class RemotePlayer {
     (this.plate.firstChild as HTMLElement).textContent = name;
     this.plate.style.display = "none";
     overlay.appendChild(this.plate);
+    this.dress();
+  }
+
+  /** The modelled body takes over from the code-built one once it has loaded. */
+  private dress() {
+    const rig = this.rig;
+    this.actor = null;
+    dressAdventurer(this.body, this.look, armourFromCode(this.armour || undefined)).then((a) => {
+      if (this.rig !== rig) return;
+      for (const c of rig.group.children) c.visible = false;
+      rig.group.add(a.root);
+      this.actor = a;
+      this.held?.parent?.remove(this.held);
+      this.off?.parent?.remove(this.off);
+      this.held = this.off = null;
+      this.weapon = "";
+      this.shield = false;
+      if (this.net) this.gear(this.net);
+    }, () => {});
+  }
+
+  private gear(n: NetPlayer) {
+    const k = this.actor ? 1 / this.actor.root.scale.x : 1;
+    if (n.w !== this.weapon) {
+      this.weapon = n.w;
+      if (this.held) this.held.parent?.remove(this.held);
+      this.held = null;
+      if (n.w && n.w !== "wpn_fists") {
+        this.held = weaponModel(n.w);
+        this.held.scale.multiplyScalar(k);
+        (this.actor?.handR ?? this.rig.sockets.gripR).add(this.held);
+      }
+    }
+    if (!!n.sh !== this.shield) {
+      this.shield = !!n.sh;
+      if (this.off) this.off.parent?.remove(this.off);
+      this.off = null;
+      if (this.shield) {
+        this.off = weaponModel("shield");
+        this.off.rotation.set(0, Math.PI / 2, 0);
+        if (this.actor?.handL) {
+          this.off.scale.multiplyScalar(k);
+          this.actor.handL.add(this.off);
+        } else {
+          this.off.position.set(0.06, 0.05, -0.1);
+          this.rig.bones.foreL.add(this.off);
+        }
+      }
+    }
   }
 
   /** True while this player is sending (a locked phone stops sending). */
@@ -113,27 +164,9 @@ export class RemotePlayer {
       this.held = this.off = null;
       this.weapon = "";
       this.shield = false;
+      this.dress();
     }
-    if (n.w !== this.weapon) {
-      this.weapon = n.w;
-      if (this.held) this.held.parent?.remove(this.held);
-      this.held = null;
-      if (n.w && n.w !== "wpn_fists") {
-        this.held = weaponModel(n.w);
-        this.rig.sockets.gripR.add(this.held);
-      }
-    }
-    if (!!n.sh !== this.shield) {
-      this.shield = !!n.sh;
-      if (this.off) this.off.parent?.remove(this.off);
-      this.off = null;
-      if (this.shield) {
-        this.off = weaponModel("shield");
-        this.off.rotation.set(0, Math.PI / 2, 0);
-        this.off.position.set(0.06, 0.05, -0.1);
-        this.rig.bones.foreL.add(this.off);
-      }
-    }
+    this.gear(n);
     const s = this.state;
     s.hp = n.hp;
     s.maxHp = n.mh;
@@ -193,10 +226,12 @@ export class RemotePlayer {
       this.at = Math.min(1, this.at + dt / this.dur);
       if (this.at >= 1 && this.action !== "charge") this.action = "none";
     }
-    poseHuman(this.poser, {
+    const hp = {
       t: time, move: (speed / 4.2) * (n.sp ? 1.45 : 1), phase: this.phase, action: this.action, at: this.at,
       block: !!n.b && this.action === "none", armed: !!n.w && n.w !== "wpn_fists",
-    }, dt);
+    };
+    if (this.actor) poseAdventurer(this.actor, hp, dt);
+    else poseHuman(this.poser, hp, dt);
   }
 
   remove() {

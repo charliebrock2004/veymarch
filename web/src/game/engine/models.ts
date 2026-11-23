@@ -365,6 +365,32 @@ export function loadAdventurer(url: string): Promise<[ModelTemplate, ModelTempla
   return Promise.all([loadModel(url), loadModel(ADV_ANIMS)]);
 }
 
+type Worn = Partial<Record<"head" | "chest" | "hands" | "legs" | "feet", string>>;
+
+/** A player's modelled body: the chest piece picks the body, other armour is grafted on, then the creator's colours go over it. */
+export function dressAdventurer(body: number, col: { skin: number; hair: number; coat: number }, worn: Worn): Promise<ModelActor> {
+  const chest = worn.chest;
+  const kit = (st: string | undefined) => (st === "leather" ? ADV.hooded : st === "hound" ? ADV.barbarian : st ? ADV.knight : "");
+  const limbs: [string, RegExp, string | undefined][] = [
+    [kit(worn.head), /_(Helmet|Hat|Head_Hooded)$/, worn.head],
+    [kit(worn.hands), /_Arm(Left|Right)$/, worn.hands],
+    [kit(worn.legs ?? worn.feet), /_Leg(Left|Right)$/, worn.legs ?? worn.feet],
+  ];
+  const url = kit(chest) || [ADV.rogue, ADV.hooded, ADV.barbarian][body] || ADV.hooded;
+  return Promise.all([loadAdventurer(url), ...limbs.map(([u]) => (u && u !== url ? loadModel(u) : Promise.resolve<ModelTemplate | null>(null)))] as const).then(([[tpl, anim], ...donors]) => {
+    const a = new ModelActor(tpl, 1.78 / ADV_HEIGHT, ADV_HEAD, chest === "bk" ? 0x6a6470 : 0xd8d0c4, anim).emptyHands();
+    a.root.traverse((o) => {
+      if (/_(Helmet|Hat)$/.test(o.name)) o.visible = !!worn.head && kit(worn.head) === url;
+    });
+    limbs.forEach(([u, part, st], i) => {
+      const d = donors[i];
+      // a hood replaces the whole head; a hat or helmet sits on it
+      if (d) a.graft(d, u === ADV.hooded && i === 0 ? /_Head(_Hooded)?$/ : part, st === "bk" ? 0x6a6470 : 0xd8d0c4);
+    });
+    return a.recolour({ skin: col.skin, hair: col.hair, coat: chest ? undefined : col.coat });
+  });
+}
+
 type HumanLike = { move: number; action: string; at: number; block: boolean; armed: boolean };
 
 /** Drives a modelled adventurer from the same pose inputs the code-built human takes. */
