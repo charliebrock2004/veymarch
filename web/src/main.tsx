@@ -18,6 +18,15 @@ window.addEventListener("vite:preloadError", (e) => {
   location.reload();
 });
 
+// Keep the game's files on the device so it opens offline. Built versions only: the dev server changes too often.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      /* offline play is a nicety; the game runs without it */
+    });
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <App />

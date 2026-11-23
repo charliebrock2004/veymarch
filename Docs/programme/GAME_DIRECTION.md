@@ -160,7 +160,7 @@ Scores are 1 to 5. For difficulty, time and performance cost, 1 is easiest, shor
 | 3 | Rumours and a Places journal for the 11 hidden caches; cold open on the Kingsroad | Built |
 | 4 | Character card with earned title, charms on the body for each mark, trophy rack in Hearthfen | Built |
 | 5 | Boss rematches, naming the dead, mining gates (ore walls that pay out a hoard, not walk-in side areas) | Built |
-| 6 | Offline install, codex moved into the save, online Chapter II | Needs the realm database migration |
+| 6 | Offline install (built); codex moved into the save, online Chapter II | Part built; the rest needs the realm database migration |
 
 ## 10. Stage 1 as built
 
