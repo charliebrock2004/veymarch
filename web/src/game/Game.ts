@@ -39,6 +39,7 @@ import type { BossJson, CharacterJson, EnterJson, HeartbeatJson, QuestJson, Real
 import { Room, type Bundle, type Ev } from "../net/room";
 import { CRIT_MUL, TALENTS, TREES, cleanTalents, learnTalent, talentFree, talentMods, type TalentBook } from "./data/talents";
 import { BOUNTIES, FINDS, pickBounties, type Find } from "./data/explore";
+import { GRAVES, NAME_ALL, NAME_CROWNS, canName, graveLabel, laid, namesLeft } from "./data/naming";
 import { BEASTS, DEEDS, TIPS, freshCodex, loadCodex, saveCodex, type Codex } from "./data/codex";
 import { REMATCH, RUMOURS, rematchCrowns, cardView, charmKey, charms, trophies, trophyLines, nextRumour, placesView, remark, studyNext, studyNotes, studyRank } from "./data/renown.ts";
 import type { Card, Charm, PlaceView } from "./data/renown.ts";
@@ -1455,7 +1456,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       foot.scale.set(1.2, 0.4, 0.9);
       foot.position.y = 0.12;
       root.add(slab, foot);
-      glow = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.035, 6, 14), new THREE.MeshBasicMaterial({ color: 0x8fd8ff, transparent: true, opacity: 0.9, depthWrite: false }));
+      glow = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.035, 6, 14), new THREE.MeshBasicMaterial({ color: f.kind === "grave" ? 0xd8ffb0 : 0x8fd8ff, transparent: true, opacity: 0.9, depthWrite: false }));
       glow.position.set(0, 1.35, 0.3);
     }
     root.add(glow);
@@ -1465,7 +1466,7 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     zb.root.add(root);
     const rec = { root, glow, lid, x, z };
     findMeshes.set(f.id, rec);
-    if (f.kind === "stone") env.col.circle?.(x, z, 0.5);
+    if (f.kind !== "cache") env.col.circle?.(x, z, 0.5);
     return rec;
   }
   function takeFind(f: Find) {
@@ -1485,19 +1486,45 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     checkDeeds();
     push();
   }
+  /** the grave whose name you are carrying, until you say it to one of the dead */
+  let carried = "";
+  function takeName(id: string) {
+    const g = GRAVES.find((x) => x.id === id);
+    if (!g || laid(codex.nd, id)) return;
+    carried = id;
+    audio.quest();
+    say(g.text);
+    say(`You carry the name ${g.name}. Strike one of the walking dead and it will hear it.`);
+  }
+  /** Says the carried name to a foe about to be struck. True if it was one of the dead and it has lain down. */
+  function sayName(m: Mob) {
+    const g = GRAVES.find((x) => x.id === carried);
+    if (!g || sharedNow() || !m.alive || !canName(m.kind)) return false;
+    carried = "";
+    (codex.nd ??= []).push(g.id);
+    saveCodex(codexId, codex);
+    sparks.burst(30, m.x, m.y + 1, m.z, 2.5, 0xd8ffb0, 1.2, 0.2, { up: 3, grav: -0.5 });
+    audio.reward();
+    const left = namesLeft(codex.nd);
+    showBanner("NAMED", `${g.name} · ${GRAVES.length - left} of ${GRAVES.length}`);
+    say(`"${g.name}." ${g.said}`);
+    grant(left ? [["coin_crown", NAME_CROWNS]] : NAME_ALL);
+    if (!left) say("Every name on the stones has been given back. The Wasteland is six quieter.");
+    return true;
+  }
   let findT = 0;
   function updateFinds(dt: number) {
     findT += dt;
-    for (const f of FINDS) {
+    for (const f of [...FINDS, ...GRAVES]) {
       const m = findMeshes.get(f.id);
       if (!m || f.zone !== P.zone) continue;
-      const got = found(f.id);
+      const got = f.kind === "grave" ? laid(codex.nd, f.id) || carried === f.id : found(f.id);
       m.root.visible = !sharedNow();
       m.glow.visible = !got;
       if (!got) {
         m.glow.position.y = (f.kind === "cache" ? 1.0 : 1.35) + Math.sin(findT * 2 + m.x) * 0.06;
         (m.glow.material as THREE.MeshBasicMaterial).opacity = 0.55 + Math.sin(findT * 3 + m.z) * 0.35;
-        if (f.kind === "stone") m.glow.rotation.z = findT * 0.6;
+        if (f.kind !== "cache") m.glow.rotation.z = findT * 0.6;
         // a glint to catch the eye from a little way off
         if (Math.random() < dt * 2.5 && Math.hypot(m.x - P.x, m.z - P.z) < 30)
           sparks.emit({ x: m.x + (Math.random() - 0.5) * 0.6, y: m.root.position.y + 0.6 + Math.random() * 0.8, z: m.z + (Math.random() - 0.5) * 0.6, vx: 0, vy: 0.6, vz: 0, life: 0.9, size: 0.14, color: f.kind === "cache" ? 0xffe2a0 : 0x9fdcff, grav: -0.3 });
@@ -1552,6 +1579,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
         const m = buildFind(f);
         if (!m) continue;
         interacts.push({ x: m.x, z: m.z, r: 2.2, zone: f.zone, label: () => (found(f.id) ? null : f.kind === "cache" ? "Open the cache" : "Read the rune stone"), act: () => takeFind(f) });
+      }
+    if (!sharedNow())
+      for (const g of GRAVES) {
+        const m = buildFind(g);
+        if (!m) continue;
+        interacts.push({ x: m.x, z: m.z, r: 2.4, zone: g.zone, label: () => graveLabel(g, codex.nd, carried), act: () => takeName(g.id) });
       }
     const a = world.anchors;
     const d = dun.anchors;
@@ -2320,6 +2353,8 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
       combatT = 3;
       return d;
     }
+    // a carried name ends it in one blow
+    if (carried && sayName(m)) dmg = Math.max(dmg, m.hp * 20);
     const dealt = m.takeHit(dmg, P.x, P.z, heavy, fire, P);
     // Smacko's charged hits and a mace's heavy blows keep foes reeling
     const w = mainWeapon();
@@ -5028,6 +5063,12 @@ export function mountGame(canvas: HTMLCanvasElement, overlay: HTMLDivElement): G
     },
     /** build a zone now (as walking toward it would) */
     loadZone: (z: ZoneId) => ensureZone(z),
+    /** test hook: lands a blow on the nearest living foe of a kind in this zone */
+    hitMob: (kind: string, dmg = 1) => {
+      const m = mobs.filter((x) => x.alive && x.zone === P.zone && x.kind === kind).sort((p, q) => Math.hypot(p.x - P.x, p.z - P.z) - Math.hypot(q.x - P.x, q.z - P.z))[0];
+      return m ? { dealt: onMobHit(m, dmg, false), alive: m.alive, kind: m.kind } : null;
+    },
+    graves: () => GRAVES.map((g) => ({ id: g.id, name: g.name, laid: laid(codex.nd, g.id), carried: carried === g.id, at: findMeshes.get(g.id) ? { x: findMeshes.get(g.id)!.x, z: findMeshes.get(g.id)!.z } : null })),
     finds: () => FINDS.map((f) => ({ id: f.id, zone: f.zone, kind: f.kind, got: found(f.id), at: findMeshes.get(f.id) ? { x: findMeshes.get(f.id)!.x, z: findMeshes.get(f.id)!.z } : null })),
     setLevel: (n: number) => applyProgress({ xp: LEVEL_XP[n - 1] ?? 0, level: n }),
     /** single player only: write experience into the device's own world, so it survives a reload */

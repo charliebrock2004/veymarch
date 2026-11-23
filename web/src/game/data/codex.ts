@@ -68,6 +68,8 @@ export type Codex = {
   fd?: string[];
   /** bounties: board stamp, the three picked, progress and which are paid */
   b?: { day: string; ids: string[]; n: number[]; paid: boolean[] };
+  /** graves whose name has been given back to one of the dead */
+  nd?: string[];
   /** bounty boards posted so far */
   bn?: number;
 };

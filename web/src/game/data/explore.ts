@@ -5,7 +5,7 @@
  */
 import type { ZoneId } from "./zones.ts";
 
-export type Find = { id: string; zone: ZoneId; x: number; z: number; kind: "cache" | "stone"; loot?: [string, number][]; text: string };
+export type Find = { id: string; zone: ZoneId; x: number; z: number; kind: "cache" | "stone" | "grave"; loot?: [string, number][]; text: string };
 
 export const FINDS: Find[] = [
   // Hearthfen and the Giant Forest

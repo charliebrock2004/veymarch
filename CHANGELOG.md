@@ -8,6 +8,7 @@
 - Villagers remark on your strongest mark the first time they see it (30 lines, one per mark and rank), ahead of their usual line. Quest talk is left alone.
 - A roll that passes through a blow slows the world for under half a second.
 - Bestiary ranks: Known at one kill, Studied at 10 (health, fire weakness, spoils), Mastered at 50 (every blow and its warning time). A beaten boss is fully known.
+- Naming the dead: six graves in the Undead Wasteland still carry a name. Take one up and the next skeleton, zombie, drowned, crypt dead or undead knight you strike hears it and lies down in one blow. Each name pays 40 crowns; the sixth pays 300 and two Last Rites. Single-player worlds only.
 - Boss rematches: stand where a beaten boss fell and call it back. It returns with half again its health and hits 30% harder; beating it pays half its crowns and gilds its trophy on your rack. Only offered when you are alone in the world.
 - Trophy rack by your door in Hearthfen: four pegs, one for each boss. Beating one hangs its trophy there (music box, collar, helm, half a crown), and looking the rack over tells you what each is.
 - Marks show on the body: each earned mark strings a charm round your shoulders (a fang for beasts, a bone for the dead, a coin for men, and so on). Charms grow with rank and glow at rank III.
